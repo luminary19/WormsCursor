@@ -18,7 +18,7 @@ class RotatingCursor
     const double AIM_DIST   = 8.0;  // px of travel before recomputing direction (less = snappier, more = steadier)
     const double AIM_SMOOTH = 0.50; // direction smoothing between re-aims 0..1 (lower = smoother/lazier)
     const double HYST_DEG   = 3.0;  // dead zone: don't move the TARGET for changes below this many degrees
-    const int    IDLE_RESET = 5;    // frames without movement before clearing the accumulator (anti-jitter at rest)
+    const int    IDLE_RESET = 60;   // frames of FULL stillness before we forget unfinished travel (~0.4s @144Hz)
     const double TURN_DPS   = 720;  // rotation animation speed in degrees/s (0 = instant, no animation)
     const bool   DEBUG      = false; // true = print the current angle to the console
 
