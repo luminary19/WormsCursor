@@ -17,8 +17,9 @@ class RotatingCursor
     const int    HZ         = 144;  // position polling rate (Hz)
     const double AIM_DIST   = 8.0;  // px of travel before recomputing direction (less = snappier, more = steadier)
     const double AIM_SMOOTH = 0.50; // direction smoothing between re-aims 0..1 (lower = smoother/lazier)
-    const double HYST_DEG   = 3.0;  // dead zone: don't move the cursor for changes below this many degrees
+    const double HYST_DEG   = 3.0;  // dead zone: don't move the TARGET for changes below this many degrees
     const int    IDLE_RESET = 5;    // frames without movement before clearing the accumulator (anti-jitter at rest)
+    const double TURN_DPS   = 720;  // rotation animation speed in degrees/s (0 = instant, no animation)
     const bool   DEBUG      = false; // true = print the current angle to the console
 
     const int    CANVAS     = 64;
@@ -66,11 +67,13 @@ class RotatingCursor
         Console.WriteLine("Active: " + STEPS + " angles, " + HZ + " Hz. Move the mouse. Ctrl+C = restore.");
 
         int sleepMs = Math.Max(1, 1000 / HZ);
+        double maxStep = TURN_DPS <= 0 ? double.PositiveInfinity : TURN_DPS / HZ; // max rotation per frame
         POINT prev; GetCursorPos(out prev);
 
         double accDx = 0, accDy = 0;     // travel accumulated since the last recompute
         double sx = 1, sy = 0;           // smoothed direction vector (start: pointing right)
-        double appliedDeg = double.NaN;  // last applied angle
+        double targetDeg = double.NaN;   // where the cursor should point
+        double dispDeg = double.NaN;     // what we currently show (animated toward target)
         int idle = 0, curIdx = -1;
 
         while (running)
@@ -80,33 +83,47 @@ class RotatingCursor
             int dx = p.x - prev.x, dy = p.y - prev.y;
             prev = p;
 
+            // --- 1) update the TARGET from movement ---
             if (dx == 0 && dy == 0)
             {
-                if (++idle >= IDLE_RESET) { accDx = 0; accDy = 0; } // at rest -> don't rotate from noise
-                continue;
+                if (++idle >= IDLE_RESET) { accDx = 0; accDy = 0; } // at rest -> don't accumulate noise
             }
-            idle = 0;
-            accDx += dx; accDy += dy;
+            else
+            {
+                idle = 0;
+                accDx += dx; accDy += dy;
+                double dist = Math.Sqrt(accDx * accDx + accDy * accDy);
+                if (dist >= AIM_DIST) // enough travel to determine direction reliably
+                {
+                    double nx = accDx / dist, ny = accDy / dist;
+                    sx = sx * (1 - AIM_SMOOTH) + nx * AIM_SMOOTH;
+                    sy = sy * (1 - AIM_SMOOTH) + ny * AIM_SMOOTH;
+                    accDx = 0; accDy = 0;
 
-            double dist = Math.Sqrt(accDx * accDx + accDy * accDy);
-            if (dist < AIM_DIST) continue;          // too little travel to determine direction reliably
+                    double deg = Math.Atan2(sy, sx) * 180.0 / Math.PI; // screen: Y points down => clockwise positive
+                    if (double.IsNaN(targetDeg) || CircDiff(deg, targetDeg) > HYST_DEG)
+                    {
+                        targetDeg = deg;
+                        if (double.IsNaN(dispDeg)) dispDeg = deg; // first time: no spin from an arbitrary angle
+                    }
+                }
+            }
 
-            double nx = accDx / dist, ny = accDy / dist;
-            sx = sx * (1 - AIM_SMOOTH) + nx * AIM_SMOOTH;
-            sy = sy * (1 - AIM_SMOOTH) + ny * AIM_SMOOTH;
-            accDx = 0; accDy = 0;
+            // --- 2) ANIMATE: move dispDeg toward targetDeg the short way ---
+            if (double.IsNaN(targetDeg)) continue;
+            double diff = targetDeg - dispDeg;
+            diff -= 360.0 * Math.Floor((diff + 180.0) / 360.0); // wrap to [-180, 180)
+            if (Math.Abs(diff) <= maxStep) dispDeg = targetDeg;
+            else dispDeg += Math.Sign(diff) * maxStep;
+            dispDeg -= 360.0 * Math.Floor(dispDeg / 360.0);     // keep within [0, 360)
 
-            double deg = Math.Atan2(sy, sx) * 180.0 / Math.PI; // screen: Y points down => clockwise positive
-            if (!double.IsNaN(appliedDeg) && CircDiff(deg, appliedDeg) < HYST_DEG) continue;
-            appliedDeg = deg;
-
-            int idx = ((int)Math.Round(deg / (360.0 / STEPS))) % STEPS;
+            int idx = ((int)Math.Round(dispDeg / (360.0 / STEPS))) % STEPS;
             if (idx < 0) idx += STEPS;
             if (idx != curIdx)
             {
                 curIdx = idx;
                 SetSystemCursor(CopyIcon(cursors[idx]), OCR_NORMAL);
-                if (DEBUG) Console.WriteLine("angle=" + ((int)Math.Round(deg)) + " idx=" + idx);
+                if (DEBUG) Console.WriteLine("disp=" + idx + " target=" + ((int)Math.Round(targetDeg)));
             }
         }
         Cleanup();
