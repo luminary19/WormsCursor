@@ -20,7 +20,7 @@ class RotatingCursor
     const double HYST_DEG   = 3.0;  // dead zone: don't move the TARGET for changes below this many degrees
     const int    IDLE_RESET = 60;   // frames of FULL stillness before we forget unfinished travel (~0.4s @144Hz)
     const double TURN_DPS   = 720;  // rotation animation speed in degrees/s (0 = instant, no animation)
-    const bool   DEBUG      = false; // true = print the current angle to the console
+    static readonly bool DEBUG = false; // true = print the current angle to the console
 
     const int    CANVAS     = 64;
     const int    PIVOT      = CANVAS / 2; // rotation pivot = arrow tip = hotspot
