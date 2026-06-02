@@ -1,3 +1,4 @@
+using WormsCursor.App.Services;
 using WormsCursor.Core;
 
 namespace WormsCursor.App;
@@ -13,8 +14,10 @@ public sealed class TrayApplicationContext : ApplicationContext
     readonly NotifyIcon _tray;
     readonly Icon _appIcon;
     readonly IAutostart _autostart = new RegistryAutostart();
+    readonly UpdateService _updates = new();
     readonly ToolStripMenuItem _enabledItem;
     readonly ToolStripMenuItem _startupItem;
+    readonly ToolStripMenuItem _updatesItem;
 
     public TrayApplicationContext()
     {
@@ -32,11 +35,14 @@ public sealed class TrayApplicationContext : ApplicationContext
             Checked = _autostart.IsEnabled,
         };
 
+        _updatesItem = new ToolStripMenuItem("Check for updates…", null, OnCheckForUpdates);
+
         var menu = new ContextMenuStrip();
         menu.Items.Add(_enabledItem);
         menu.Items.Add(_startupItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Preferences…", null, OnPreferences);
+        menu.Items.Add(_updatesItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, OnExit);
 
@@ -100,6 +106,62 @@ public sealed class TrayApplicationContext : ApplicationContext
         _engine.Stop();
         if (wasRunning) _engine.Start();
         _enabledItem.Checked = _engine.IsRunning;
+    }
+
+    // Tray-driven update check. Velopack has no UI of its own, so we surface
+    // progress/results through balloon tips. await-ing keeps the continuations on
+    // the UI thread (WinForms SynchronizationContext) so the NotifyIcon calls and
+    // ApplyUpdatesAndRestart (which tears down this process) are thread-safe.
+    async void OnCheckForUpdates(object? sender, EventArgs e)
+    {
+        _updatesItem.Enabled = false;
+        try
+        {
+            var result = await _updates.CheckAsync();
+            switch (result.Availability)
+            {
+                case UpdateAvailability.NotInstalled:
+                    // Dev build (run from bin\) — can't self-update. Offer the
+                    // Releases page so the user can grab a real Setup.exe.
+                    _tray.ShowBalloonTip(4000, "WormsCursor",
+                        "Dev build — auto-update disabled. Opening the Releases page.",
+                        ToolTipIcon.Info);
+                    _updates.OpenReleasesPage();
+                    break;
+
+                case UpdateAvailability.UpToDate:
+                    _tray.ShowBalloonTip(3000, "WormsCursor",
+                        $"You're up to date (v{_updates.CurrentVersionText}).",
+                        ToolTipIcon.Info);
+                    break;
+
+                case UpdateAvailability.Available:
+                    _tray.ShowBalloonTip(3000, "WormsCursor",
+                        $"Downloading update v{result.AvailableVersion}… the app will restart.",
+                        ToolTipIcon.Info);
+                    // VelopackInfo is non-null when Availability == Available.
+                    await _updates.ApplyAsync(result.VelopackInfo!);
+                    // If we get here the restart didn't happen.
+                    _tray.ShowBalloonTip(4000, "WormsCursor",
+                        "Update downloaded but restart didn't happen — try again later.",
+                        ToolTipIcon.Warning);
+                    break;
+
+                case UpdateAvailability.Failed:
+                    _tray.ShowBalloonTip(4000, "WormsCursor",
+                        "Update check failed: " + result.ErrorMessage, ToolTipIcon.Warning);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _tray.ShowBalloonTip(4000, "WormsCursor",
+                "Update failed: " + ex.Message, ToolTipIcon.Warning);
+        }
+        finally
+        {
+            _updatesItem.Enabled = true;
+        }
     }
 
     void OnExit(object? sender, EventArgs e)
