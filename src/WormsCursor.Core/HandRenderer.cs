@@ -8,12 +8,14 @@ namespace WormsCursor.Core;
 /// the same way the arrow is drawn (a real <see cref="GraphicsPath"/>, not a flattened
 /// polyline). It fills the outer silhouette with the fill colour for an opaque body,
 /// then fills the full line drawing (all contours, even-odd) with the outline colour —
-/// outline + finger-separation lines + knuckle marks. Exact curves keep the thin
-/// outline ring precise, so the border fills cleanly with no light speckles.
+/// outline + finger-separation lines + knuckle marks. Finally it strokes the silhouette
+/// with an outline-colour pen, exactly like <see cref="ArrowRenderer"/>: the outline
+/// (not the white body fill) owns the outer edge, so the antialiased body can't bleed a
+/// light halo just past the baked ribbon.
 ///
-/// Fill/outline colour and size are shared with the arrow; corner radius does not apply
-/// and the line weight comes from the source art. The index fingertip (the hotspot) is
-/// placed at the canvas centre so the engine rotates the hand around it like the tip.
+/// Fill/outline colour, size and outline thickness are shared with the arrow; corner
+/// radius does not apply. The index fingertip (the hotspot) is placed at the canvas
+/// centre so the engine rotates the hand around it like the tip.
 /// </summary>
 public static class HandRenderer
 {
@@ -41,14 +43,19 @@ public static class HandRenderer
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-        using (var body = new GraphicsPath())
-        {
-            body.AddBeziers(Map(sil));
-            body.CloseFigure();
-            using var fill = new SolidBrush(Parse(s.FillColor, Color.White));
-            g.FillPath(fill, body);
-        }
+        var fillColor = Parse(s.FillColor, Color.White);
+        var outlineColor = Parse(s.OutlineColor, Color.Black);
 
+        using var body = new GraphicsPath();
+        body.AddBeziers(Map(sil));
+        body.CloseFigure();
+
+        // 1) opaque body
+        using (var fill = new SolidBrush(fillColor))
+            g.FillPath(fill, body);
+
+        // 2) baked line art (outline ribbon + finger-separation lines + knuckle marks),
+        //    even-odd so the thin ribbon fills as a clean solid border.
         using (var art = new GraphicsPath { FillMode = FillMode.Alternate })
         {
             foreach (var contour in HandShape.Contours)
@@ -57,9 +64,18 @@ public static class HandRenderer
                 art.AddBeziers(Map(contour));
                 art.CloseFigure();
             }
-            using var line = new SolidBrush(Parse(s.OutlineColor, Color.Black));
+            using var line = new SolidBrush(outlineColor);
             g.FillPath(line, art);
         }
+
+        // 3) Stroke the silhouette like the arrow does, so the OUTLINE owns the outer
+        //    edge. The pen is centred on the contour and so extends outward past the
+        //    body fill, covering the antialiased fringe that otherwise reads as a faint
+        //    light halo just outside the baked ribbon. Same technique as ArrowRenderer.
+        float pen = (float)(s.OutlineThickness * (size / 64f));
+        if (pen > 0.01f)
+            using (var p = new Pen(outlineColor, pen) { LineJoin = LineJoin.Round })
+                g.DrawPath(p, body);
 
         return bmp;
     }
