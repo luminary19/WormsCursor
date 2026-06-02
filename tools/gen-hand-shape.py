@@ -1,92 +1,92 @@
 """
 Bake the hand-cursor shape from tools/mouse-hand-cursor-icon.svg into a C# data file
-(src/WormsCursor.Core/HandShape.cs) and render a preview.
+(src/WormsCursor.Core/HandShape.cs).
 
-The SVG is line-art (double-contour strokes + knuckle marks). For a SOLID, opaque
-cursor we render it as:
-  1. fill the outer silhouette with the FILL colour (opaque body), then
-  2. fill the FULL line-art (all contours, even-odd) with the OUTLINE colour on top.
-That reproduces the original drawing — outline + finger-separation lines + knuckle
-marks — but with a filled interior instead of a see-through one. Filling (rather than
-stroking a dense polyline) keeps the rounded parts artifact-free.
+The SVG is line-art (double-contour strokes + knuckle marks). We bake the EXACT path
+as cubic Béziers (not a flattened polyline) so C# can rebuild it with GraphicsPath
+.AddBeziers — exactly how the arrow is drawn. Rendering then fills the outer silhouette
+with the fill colour and fills the full drawing (all contours, even-odd) with the
+outline colour. Exact Béziers keep the thin outline ring geometrically precise, so it
+fills as a clean solid border with no light speckles (the polyline version misaligned
+the inner/outer edges and left AA seams).
 
-Coordinates are emitted translated so the index fingertip (the cursor hotspot) sits at
-the origin; the engine scales to Size and rotates around it. BaseAngleDeg is the
-direction the fingertip points in this geometry (up).
+Each contour is emitted as a point list usable by AddBeziers: [start, c1,c2,end,
+c1,c2,end, ...] (length 1 + 3k). Coordinates are translated so the index fingertip (the
+hotspot) is at the origin; the engine scales to Size and rotates around it.
 
-Run:  python tools/gen-hand-shape.py
+Run (needs: pip install svgpathtools):  python tools/gen-hand-shape.py
 """
 
 from pathlib import Path
 
-import numpy as np
-from svgpathtools import svg2paths
-from PIL import Image, ImageDraw
+from svgpathtools import svg2paths, Line, CubicBezier, QuadraticBezier, Arc
 
 ROOT = Path(__file__).resolve().parent.parent
 SVG = ROOT / "tools" / "mouse-hand-cursor-icon.svg"
 CS_OUT = ROOT / "src" / "WormsCursor.Core" / "HandShape.cs"
-PREVIEW = ROOT / "tools" / "_hand-final.png"
 
 
-def flatten():
-    paths, _ = svg2paths(str(SVG))
-    subs = []
-    for p in paths:
-        for sp in p.continuous_subpaths():
-            L = sp.length() or 1
-            n = max(48, int(L / 0.6))
-            subs.append([(sp.point(i / n).real, sp.point(i / n).imag) for i in range(n + 1)])
-    return subs
+def seg_to_cubics(seg):
+    """Return [(c1, c2, end), ...] complex control points; start is implicit."""
+    if isinstance(seg, CubicBezier):
+        return [(seg.control1, seg.control2, seg.end)]
+    if isinstance(seg, QuadraticBezier):
+        s, c, e = seg.start, seg.control, seg.end
+        return [(s + 2 / 3 * (c - s), e + 2 / 3 * (c - e), e)]
+    if isinstance(seg, Line):
+        s, e = seg.start, seg.end
+        return [(s + (e - s) / 3, s + 2 * (e - s) / 3, e)]
+    if isinstance(seg, Arc):
+        # Small circular arcs (rounded finger ends) — split into short cubic pieces.
+        k = max(3, int((seg.length() or 1) / 0.5))
+        out, prev = [], seg.start
+        for i in range(1, k + 1):
+            p = seg.point(i / k)
+            out.append((prev + (p - prev) / 3, prev + 2 * (p - prev) / 3, p))
+            prev = p
+        return out
+    raise TypeError(f"unhandled segment {type(seg).__name__}")
 
 
-def area(pts):
-    a = 0.0
-    for i in range(len(pts) - 1):
-        a += pts[i][0] * pts[i + 1][1] - pts[i + 1][0] * pts[i][1]
-    return abs(a) / 2
+def contour_points(subpath):
+    """[start, c1,c2,end, ...] as (x, y) floats for GraphicsPath.AddBeziers."""
+    pts = [subpath.start]
+    for seg in subpath:
+        for c1, c2, e in seg_to_cubics(seg):
+            pts += [c1, c2, e]
+    return [(p.real, p.imag) for p in pts]
+
+
+def signed_area(pts):
+    # anchors are pts[0], pts[3], pts[6], ... (start + each segment end)
+    a = pts[0::3]
+    s = 0.0
+    for i in range(len(a)):
+        x0, y0 = a[i]; x1, y1 = a[(i + 1) % len(a)]
+        s += x0 * y1 - x1 * y0
+    return abs(s) / 2
 
 
 def main():
-    subs = flatten()
-    subs.sort(key=area, reverse=True)
-    silhouette = subs[0]        # biggest contour = outer edge of the hand = fill body
-    lineart = subs              # ALL contours, drawn even-odd = the full line drawing
+    paths, _ = svg2paths(str(SVG))
+    contours = []
+    for p in paths:
+        for sp in p.continuous_subpaths():
+            contours.append(contour_points(sp))
 
-    fx, fy = min(silhouette, key=lambda p: p[1])   # hotspot = index fingertip (topmost)
+    contours.sort(key=signed_area, reverse=True)
+    silhouette = contours[0]
+
+    # Hotspot = index fingertip = topmost ANCHOR point of the silhouette.
+    anchors = silhouette[0::3]
+    fx, fy = min(anchors, key=lambda p: p[1])
 
     def shift(pts):
         return [(x - fx, y - fy) for x, y in pts]
 
     sil = shift(silhouette)
-    art = [shift(c) for c in lineart]
+    art = [shift(c) for c in contours]
 
-    # ---- preview: fill silhouette, then even-odd line-art on top ----
-    allpts = [p for c in art for p in c]
-    minx = min(x for x, _ in allpts); maxx = max(x for x, _ in allpts)
-    miny = min(y for _, y in allpts); maxy = max(y for _, y in allpts)
-    w, h = maxx - minx, maxy - miny
-
-    def render(size, fill=(255, 255, 255, 255), line=(0, 0, 0, 255)):
-        SS = 4; H = size * SS; W = int(round(H * w / h)); pad = int(H * 0.08); s = (H - 2 * pad) / h
-        def tf(p): return ((p[0] - minx) * s + (W - w * s) / 2, (p[1] - miny) * s + pad)
-        img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        ImageDraw.Draw(img).polygon([tf(p) for p in sil], fill=fill)         # solid body
-        parity = np.zeros((H, W), bool)                                       # even-odd line-art
-        for c in art:
-            m = Image.new("1", (W, H), 0); ImageDraw.Draw(m).polygon([tf(p) for p in c], fill=1)
-            parity ^= np.array(m, bool)
-        a = np.array(img); a[parity] = line; img = Image.fromarray(a, "RGBA")
-        return img.resize((max(1, int(W / SS)), int(H / SS)), Image.LANCZOS)
-
-    big = render(220); BW, BH = big.size
-    sheet = Image.new("RGBA", (BW + 40 + 4 * 64, BH + 40), (31, 31, 31, 255))
-    sheet.alpha_composite(big, (20, 20)); x = BW + 40
-    for sz in [16, 24, 32, 48]:
-        sheet.alpha_composite(render(sz), (x, 50)); x += 64
-    sheet.convert("RGB").save(PREVIEW)
-
-    # ---- emit C# ----
     def fmt(pts):
         return ", ".join(f"{x:.2f}f, {y:.2f}f" for x, y in pts)
 
@@ -94,31 +94,31 @@ def main():
     cs = f"""namespace WormsCursor.Core;
 
 // Generated by tools/gen-hand-shape.py from tools/mouse-hand-cursor-icon.svg — do not edit by hand.
-// Polylines in reference units, translated so the index fingertip (the hotspot) is at
-// the origin. The engine scales to Size and rotates the shape around this point.
+// Each array is a cubic-Bezier point list for GraphicsPath.AddBeziers: [start, c1,c2,end, ...]
+// (length 1 + 3k), translated so the index fingertip (the hotspot) is at the origin.
 internal static class HandShape
 {{
     // Direction the fingertip points in this geometry (screen: up = -Y).
     public const double BaseAngleDeg = -90.0;
 
-    // Outer silhouette, filled with FillColor for an opaque body. x,y pairs.
+    // Outer silhouette, filled with FillColor for an opaque body.
     public static readonly float[] Silhouette =
     {{
         {fmt(sil)}
     }};
 
-    // The full line drawing (outline + finger lines + knuckle marks). Filled even-odd
-    // (FillMode.Alternate) in OutlineColor on top of the body.
-    public static readonly float[][] LineArt =
+    // The full line drawing (outline + finger lines + knuckle marks). Built as one
+    // GraphicsPath (all contours) and filled even-odd (FillMode.Alternate) in OutlineColor.
+    public static readonly float[][] Contours =
     {{
         {art_arrays}
     }};
 }}
 """
     CS_OUT.write_text(cs, encoding="utf-8")
-    print(f"silhouette pts: {len(sil)}  lineart contours: {len(art)} ({[len(c) for c in art]})")
+    print(f"contours: {len(art)}  sizes(pts): {[len(c) for c in art]}")
     print(f"fingertip (hotspot) at svg ({fx:.1f},{fy:.1f})")
-    print(f"wrote {CS_OUT} ({CS_OUT.stat().st_size} bytes); wrote {PREVIEW}")
+    print(f"wrote {CS_OUT} ({CS_OUT.stat().st_size} bytes)")
 
 
 if __name__ == "__main__":
