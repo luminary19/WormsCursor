@@ -275,6 +275,97 @@ public static class ProgressRenderer
         return bmp;
     }
 
+    /// <summary>Builds the closed "taffy" double-arrow silhouette along <paramref name="angleDeg"/>,
+    /// centred at (cx,cy): two pointed arrowheads joined by a liquid bar. <paramref name="stretch"/>
+    /// (0 at rest, ~1 at full speed) pulls the heads apart, thins the waist and bulges the heads,
+    /// so it reads like stretched taffy. Returned in world coords (already rotated).</summary>
+    static GraphicsPath BuildTaffy(float cx, float cy, float angleDeg, float sz, float stretch, float baseFrac = 0.05f)
+    {
+        float st = MathF.Max(0f, stretch);
+        float clamped = MathF.Min(st, 1f);
+        float shaftHalf = sz * 0.044f;                         // shaft half-thickness at rest
+        float waistHalf = shaftHalf * (1f - 0.62f * clamped);  // pinches thinner in the middle (taffy)
+        float headHalfW = sz * 0.115f;                         // arrowhead half-base (narrow -> sharp, arrow-like)
+        float headLen = sz * 0.175f;                           // arrowhead length (long -> sharp)
+        float bs = sz * (baseFrac + 0.13f * st);               // half shaft length — the heads slide apart with stretch
+        float tip = bs + headLen;
+        float k = bs * 0.5f;                                   // shaft-neck bezier control offset
+
+        // Points in a local frame (x = along the axis), rotated by angleDeg about (cx,cy).
+        float ca = MathF.Cos(angleDeg * MathF.PI / 180f), sa = MathF.Sin(angleDeg * MathF.PI / 180f);
+        PointF P(float x, float y) => new(cx + x * ca - y * sa, cy + x * sa + y * ca);
+
+        // A barbed double-arrow: thin shaft (bowed inward when stretched) between two clear
+        // triangular arrowheads. Walked clockwise from the left tip.
+        var p = new GraphicsPath();
+        p.AddLine(P(-tip, 0), P(-bs, -headHalfW));                                            // left head, top slope
+        p.AddLine(P(-bs, -headHalfW), P(-bs, -shaftHalf));                                    // left barb notch (in)
+        p.AddBezier(P(-bs, -shaftHalf), P(-k, -shaftHalf), P(-k, -waistHalf), P(0, -waistHalf)); // shaft top, neck in
+        p.AddBezier(P(0, -waistHalf), P(k, -waistHalf), P(k, -shaftHalf), P(bs, -shaftHalf));     // shaft top, neck out
+        p.AddLine(P(bs, -shaftHalf), P(bs, -headHalfW));                                      // right barb notch (out)
+        p.AddLine(P(bs, -headHalfW), P(tip, 0));                                              // right head, top slope
+        p.AddLine(P(tip, 0), P(bs, headHalfW));                                               // right head, bottom slope
+        p.AddLine(P(bs, headHalfW), P(bs, shaftHalf));                                        // right barb notch (in)
+        p.AddBezier(P(bs, shaftHalf), P(k, shaftHalf), P(k, waistHalf), P(0, waistHalf));         // shaft bottom, neck in
+        p.AddBezier(P(0, waistHalf), P(-k, waistHalf), P(-k, shaftHalf), P(-bs, shaftHalf));       // shaft bottom, neck out
+        p.AddLine(P(-bs, shaftHalf), P(-bs, headHalfW));                                      // left barb notch (out)
+        p.AddLine(P(-bs, headHalfW), P(-tip, 0));                                             // left head, bottom slope
+        p.CloseFigure();
+        return p;
+    }
+
+    // Filled-with-outline look for one or more closed bodies: stroke every path with a wide
+    // outline-coloured pen (straddling the edge) FIRST, then fill them all on top. Doing all
+    // strokes before all fills keeps the union outline clean where two bodies overlap (the
+    // move cursor) — the fills cover any outline segment that fell inside the union.
+    static void FillOutline(Graphics g, CursorSettings s, float ob, params GraphicsPath[] paths)
+    {
+        var fill = Parse(s.FillColor, Color.White);
+        var outline = Parse(s.OutlineColor, Color.Black);
+        if (ob > 0.01f)
+            using (var po = new Pen(outline, 2f * ob) { LineJoin = LineJoin.Round })
+                foreach (var path in paths) g.DrawPath(po, path);
+        using (var bf = new SolidBrush(fill))
+            foreach (var path in paths) g.FillPath(bf, path);
+    }
+
+    /// <summary>Composites a bi-directional resize cursor as stretched taffy along
+    /// <paramref name="angleDeg"/> (0 = ↔, 90 = ↕, 45 = ↘↖, -45 = ↗↙). Hotspot is the centre;
+    /// <paramref name="stretch"/> is the engine's spring value (0 at rest).</summary>
+    public static Bitmap ComposeResize(CursorSettings s, float angleDeg, float stretch)
+    {
+        var l = Layout(s);
+        int sz = Math.Max(8, s.Size);
+        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        float ob = (float)(s.OutlineThickness * (sz / 64f));
+        using var path = BuildTaffy(l.HotX, l.HotY, angleDeg, sz, stretch);
+        FillOutline(g, s, ob, path);
+        return bmp;
+    }
+
+    /// <summary>Composites the move cursor (OCR_SIZEALL): a horizontal and a vertical taffy arrow
+    /// crossed into a 4-way glyph. <paramref name="stretchX"/>/<paramref name="stretchY"/> stretch
+    /// the horizontal / vertical arms with motion along that axis. Hotspot is the centre.</summary>
+    public static Bitmap ComposeMove(CursorSettings s, float stretchX, float stretchY)
+    {
+        var l = Layout(s);
+        int sz = Math.Max(8, s.Size);
+        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        float ob = (float)(s.OutlineThickness * (sz / 64f));
+        // Spread the four arms (a longer rest shaft) so they read as a 4-way cross with a clear
+        // centre instead of merging into a diamond when crossed.
+        using var h = BuildTaffy(l.HotX, l.HotY, 0f, sz, stretchX, 0.15f);
+        using var v = BuildTaffy(l.HotX, l.HotY, 90f, sz, stretchY, 0.15f);
+        FillOutline(g, s, ob, h, v);
+        return bmp;
+    }
+
     /// <summary>Renders a static "at rest" frame of a composited cursor, for the Preferences
     /// preview (arrow pointing right; ring/glyph hanging straight down off the tail; reticle
     /// at its rest gap). Arrow/Hand are drawn by their own renderers, not here.</summary>
@@ -289,6 +380,11 @@ public static class ProgressRenderer
             TestCursor.Help => ComposeHelp(s, arrowBase, 0, rx, ry, 180f),
             TestCursor.Cross => ComposeCross(s, sz * CrossBaseGap, 0f),
             TestCursor.Ibeam => ComposeIbeam(s, 0f, 0f),
+            TestCursor.SizeWE => ComposeResize(s, 0f, 0f),
+            TestCursor.SizeNS => ComposeResize(s, 90f, 0f),
+            TestCursor.SizeNWSE => ComposeResize(s, 45f, 0f),
+            TestCursor.SizeNESW => ComposeResize(s, -45f, 0f),
+            TestCursor.SizeAll => ComposeMove(s, 0f, 0f),
             _ => Compose(s, arrowBase, 0, rx, ry, 0f, true), // AppStarting
         };
     }

@@ -30,6 +30,11 @@ var items = new (TestCursor kind, string label)[]
     (TestCursor.Help, "help"),
     (TestCursor.Cross, "crosshair"),
     (TestCursor.Ibeam, "text"),
+    (TestCursor.SizeWE, "resize ↔"),
+    (TestCursor.SizeNS, "resize ↕"),
+    (TestCursor.SizeNWSE, "resize ↘↖"),
+    (TestCursor.SizeNESW, "resize ↗↙"),
+    (TestCursor.SizeAll, "move"),
 };
 
 using var arrowBase = ArrowRenderer.DrawArrow(s);

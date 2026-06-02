@@ -7,7 +7,7 @@ namespace WormsCursor.Core;
 
 /// <summary>Which cursor the engine should force on screen for visual testing
 /// (Preferences "Test cursor"), or <see cref="Off"/> to resume normal behaviour.</summary>
-public enum TestCursor { Off, Arrow, Hand, Wait, AppStarting, Help, Cross, Ibeam }
+public enum TestCursor { Off, Arrow, Hand, Wait, AppStarting, Help, Cross, Ibeam, SizeWE, SizeNS, SizeNWSE, SizeNESW, SizeAll }
 
 /// <summary>
 /// Rotates the system arrow and hand cursors (OCR_NORMAL + OCR_HAND) to follow
@@ -138,6 +138,12 @@ public sealed class CursorEngine : IDisposable
             //     soft underdamped spring (wobbles like jelly), the bottom stays rigid ---
             float ibOffX = 0, ibOffY = 0, vibX = 0, vibY = 0; // top-of-beam offset + velocity
             const float ibK = 70f, ibC = 3.5f, ibSwayRef = 1600f; // low damping -> wobble
+
+            // --- taffy resize state: one spring per axis (WE / NS / the two diagonals). Each
+            //     stretches the double-arrow's waist with motion ALONG that axis, underdamped
+            //     so the heads fly out, the waist necks, and it blobs back when you stop ---
+            float rsWE = 0, vWE = 0, rsNS = 0, vNS = 0, rsD1 = 0, vD1 = 0, rsD2 = 0, vD2 = 0;
+            const float rsK = 90f, rsC = 4.5f, rsRef = 1300f; // px/s of axis speed for full stretch
             int fgEvery = Math.Max(1, _settings.Hz / 60);           // ~60 fps for the animated cursor
             bool busyInit = false;
             var lastTest = TestCursor.Off;
@@ -179,6 +185,15 @@ public sealed class CursorEngine : IDisposable
                 using var bmp = ProgressRenderer.ComposeIbeam(_settings, ibOffX, ibOffY);
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
+
+            // Resize cursors: a taffy double-arrow that necks/stretches along its axis (WE = ↔,
+            // NS = ↕, D1 = ↘↖ / SIZENWSE, D2 = ↗↙ / SIZENESW). Move crosses a horizontal +
+            // vertical taffy. Hotspot dead centre (the precision point Windows expects).
+            IntPtr ResizeWE() { using var b = ProgressRenderer.ComposeResize(_settings, 0f, rsWE); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeNS() { using var b = ProgressRenderer.ComposeResize(_settings, 90f, rsNS); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeD1() { using var b = ProgressRenderer.ComposeResize(_settings, 45f, rsD1); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeD2() { using var b = ProgressRenderer.ComposeResize(_settings, -45f, rsD2); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr Move() { using var b = ProgressRenderer.ComposeMove(_settings, rsWE, rsNS); return MakeCursor(b, l.HotX, l.HotY); }
 
             while (_running)
             {
@@ -280,6 +295,18 @@ public sealed class CursorEngine : IDisposable
                 vibY += ((ibTgtY - ibOffY) * ibK - vibY * ibC) * dt;
                 ibOffX += vibX * dt; ibOffY += vibY * dt;
 
+                // taffy resize: stretch each axis by the |velocity component| along it (px/s),
+                // through an underdamped spring so the waist necks out and blobs back.
+                float vxs = dx * _settings.Hz, vys = dy * _settings.Hz; // signed px/s
+                float tWE = MathF.Min(MathF.Abs(vxs) / rsRef, 1f);
+                float tNS = MathF.Min(MathF.Abs(vys) / rsRef, 1f);
+                float tD1 = MathF.Min(MathF.Abs(vxs + vys) * 0.70711f / rsRef, 1f); // along (1, 1)
+                float tD2 = MathF.Min(MathF.Abs(vxs - vys) * 0.70711f / rsRef, 1f); // along (1,-1)
+                vWE += ((tWE - rsWE) * rsK - vWE * rsC) * dt; rsWE += vWE * dt; if (rsWE < 0) rsWE = 0;
+                vNS += ((tNS - rsNS) * rsK - vNS * rsC) * dt; rsNS += vNS * dt; if (rsNS < 0) rsNS = 0;
+                vD1 += ((tD1 - rsD1) * rsK - vD1 * rsC) * dt; rsD1 += vD1 * dt; if (rsD1 < 0) rsD1 = 0;
+                vD2 += ((tD2 - rsD2) * rsK - vD2 * rsC) * dt; rsD2 += vD2 * dt; if (rsD2 < 0) rsD2 = 0;
+
                 // --- 4) apply cursors ---
                 var test = _test;
                 if (test != lastTest) { lastTest = test; normalDirty = true; curIdx = -1; }
@@ -303,6 +330,11 @@ public sealed class CursorEngine : IDisposable
                         SetSystemCursor(Help(), OCR_HELP);
                         SetSystemCursor(Cross(), OCR_CROSS);
                         SetSystemCursor(Ibeam(), OCR_IBEAM);
+                        SetSystemCursor(ResizeWE(), OCR_SIZEWE);
+                        SetSystemCursor(ResizeNS(), OCR_SIZENS);
+                        SetSystemCursor(ResizeD1(), OCR_SIZENWSE);
+                        SetSystemCursor(ResizeD2(), OCR_SIZENESW);
+                        SetSystemCursor(Move(), OCR_SIZEALL);
                         busyInit = true;
                     }
                     else if (fgRender)
@@ -323,31 +355,40 @@ public sealed class CursorEngine : IDisposable
                             else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_HELP)) SetSystemCursor(Help(), OCR_HELP);
                             else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_CROSS)) SetSystemCursor(Cross(), OCR_CROSS);
                             else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_IBEAM)) SetSystemCursor(Ibeam(), OCR_IBEAM);
+                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEWE)) SetSystemCursor(ResizeWE(), OCR_SIZEWE);
+                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENS)) SetSystemCursor(ResizeNS(), OCR_SIZENS);
+                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENWSE)) SetSystemCursor(ResizeD1(), OCR_SIZENWSE);
+                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENESW)) SetSystemCursor(ResizeD2(), OCR_SIZENESW);
+                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEALL)) SetSystemCursor(Move(), OCR_SIZEALL);
                         }
                     }
                 }
-                else if (test == TestCursor.Wait || test == TestCursor.AppStarting
-                         || test == TestCursor.Help || test == TestCursor.Cross || test == TestCursor.Ibeam)
+                else if (test == TestCursor.Arrow || test == TestCursor.Hand) // static
                 {
-                    if (fgRender) // force the animated cursor onto the visible slots
+                    if (idx != curIdx || normalDirty)
                     {
-                        IntPtr h = test switch
-                        {
-                            TestCursor.Cross => Cross(),
-                            TestCursor.Help => Help(),
-                            TestCursor.Ibeam => Ibeam(),
-                            _ => Busy(test == TestCursor.AppStarting),
-                        };
-                        SetSystemCursor(h, OCR_NORMAL);
-                        SetSystemCursor(CopyIcon(h), OCR_HAND);
+                        curIdx = idx; normalDirty = false;
+                        var frames = test == TestCursor.Hand ? handFrames : arrowFrames;
+                        SetSystemCursor(CopyIcon(frames[idx]), OCR_NORMAL);
+                        SetSystemCursor(CopyIcon(frames[idx]), OCR_HAND);
                     }
                 }
-                else if (idx != curIdx || normalDirty) // test == Arrow or Hand (static)
+                else if (fgRender) // any composited test cursor: force it onto the visible slots
                 {
-                    curIdx = idx; normalDirty = false;
-                    var frames = test == TestCursor.Hand ? handFrames : arrowFrames;
-                    SetSystemCursor(CopyIcon(frames[idx]), OCR_NORMAL);
-                    SetSystemCursor(CopyIcon(frames[idx]), OCR_HAND);
+                    IntPtr h = test switch
+                    {
+                        TestCursor.Cross => Cross(),
+                        TestCursor.Help => Help(),
+                        TestCursor.Ibeam => Ibeam(),
+                        TestCursor.SizeWE => ResizeWE(),
+                        TestCursor.SizeNS => ResizeNS(),
+                        TestCursor.SizeNWSE => ResizeD1(),
+                        TestCursor.SizeNESW => ResizeD2(),
+                        TestCursor.SizeAll => Move(),
+                        _ => Busy(test == TestCursor.AppStarting), // Wait / AppStarting
+                    };
+                    SetSystemCursor(h, OCR_NORMAL);
+                    SetSystemCursor(CopyIcon(h), OCR_HAND);
                 }
 
                 if (_settings.Debug) Debug.WriteLine($"disp={idx} target={(int)Math.Round(targetDeg)} test={test}");
@@ -461,6 +502,11 @@ public sealed class CursorEngine : IDisposable
     const uint OCR_APPSTARTING = 32650;
     const uint OCR_HELP = 32651;
     const uint OCR_HAND = 32649;
+    const uint OCR_SIZENWSE = 32642;
+    const uint OCR_SIZENESW = 32643;
+    const uint OCR_SIZEWE = 32644;
+    const uint OCR_SIZENS = 32645;
+    const uint OCR_SIZEALL = 32646;
     const uint SPI_SETCURSORS = 0x0057;
     const int CURSOR_SHOWING = 0x00000001;
 

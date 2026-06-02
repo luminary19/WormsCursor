@@ -29,7 +29,10 @@ public sealed class PreferencesForm : Form
     readonly DoubleBufferedPanel _preview;
     Bitmap?[] _previews = Array.Empty<Bitmap?>();
     static readonly TestCursor[] PreviewKinds =
-        { TestCursor.Arrow, TestCursor.Hand, TestCursor.Wait, TestCursor.AppStarting, TestCursor.Help, TestCursor.Cross, TestCursor.Ibeam };
+    {
+        TestCursor.Arrow, TestCursor.Hand, TestCursor.Wait, TestCursor.AppStarting, TestCursor.Help, TestCursor.Cross,
+        TestCursor.Ibeam, TestCursor.SizeWE, TestCursor.SizeNS, TestCursor.SizeNWSE, TestCursor.SizeNESW, TestCursor.SizeAll,
+    };
 
     readonly TrackBar _sizeBar, _thickBar, _radiusBar;
     readonly Label _sizeVal, _thickVal, _radiusVal;
@@ -88,7 +91,11 @@ public sealed class PreferencesForm : Form
         // It reflects the currently APPLIED appearance, not unsaved edits — OK first to
         // test new colours/size. Cleared automatically when this dialog closes.
         _testCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
-        _testCombo.Items.AddRange(new object[] { "Off (normal)", "Arrow", "Hand", "Busy (wait)", "App starting", "Help (arrow + ?)", "Crosshair", "Text (I-beam)" });
+        _testCombo.Items.AddRange(new object[]
+        {
+            "Off (normal)", "Arrow", "Hand", "Busy (wait)", "App starting", "Help (arrow + ?)", "Crosshair", "Text (I-beam)",
+            "Resize ↔", "Resize ↕", "Resize ↘↖", "Resize ↗↙", "Move ✥",
+        });
         _testCombo.SelectedIndex = 0;
         _testCombo.SelectedIndexChanged += (_, _) => _setTest(MapTest(_testCombo.SelectedIndex));
         AddComboRow("Test cursor (force on screen)", _testCombo, ref y);
@@ -184,6 +191,11 @@ public sealed class PreferencesForm : Form
         5 => TestCursor.Help,
         6 => TestCursor.Cross,
         7 => TestCursor.Ibeam,
+        8 => TestCursor.SizeWE,
+        9 => TestCursor.SizeNS,
+        10 => TestCursor.SizeNWSE,
+        11 => TestCursor.SizeNESW,
+        12 => TestCursor.SizeAll,
         _ => TestCursor.Off,
     };
 
@@ -251,7 +263,7 @@ public sealed class PreferencesForm : Form
 
         int n = _previews.Length;
         if (n == 0) return;
-        int cols = (n + 1) / 2;            // keep it to two rows
+        int cols = (int)Math.Ceiling(Math.Sqrt(n)); // a roughly-square grid (grows with the count)
         int rows = (n + cols - 1) / cols;
         float cellW = w / (float)cols, cellH = h / (float)rows;
 

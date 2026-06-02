@@ -13,14 +13,19 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - **Text / I-beam cursor** (`OCR_IBEAM`): a flexible beam — the bottom is rigid but the
   top sways opposite to motion on a soft underdamped spring, so it wobbles like jelly as
   you move and settles afterwards.
+- **Resize cursors** (`OCR_SIZEWE` / `SIZENS` / `SIZENWSE` / `SIZENESW`) and the **move
+  cursor** (`OCR_SIZEALL`): stretched-taffy double-arrows — drag along the axis and the
+  shaft necks thin while the heads fly apart on an underdamped spring, then blob back. Move
+  crosses a horizontal and a vertical taffy arrow into a 4-way glyph whose arms stretch with
+  motion along each axis. (Brings cursor coverage to 12 of the 14 standard system cursors.)
 - **`WormsCursor.Preview`** project: renders a labelled showcase of every themed cursor to
   PNG (a dark sheet plus a transparent one) for the README / docs, used in the new
   **Cursors** section of the README.
 
 ### Changed
 - Preferences preview now shows **all** cursors (arrow, hand, busy, app-starting, help,
-  crosshair, text) in a 2-row grid on a single neutral background, sized so they grow with
-  the cursor-size slider (was a side-by-side dark/light strip of just arrow + hand).
+  crosshair, text, resize, move) in a single neutral grid that grows with the cursor-size
+  slider (was a side-by-side dark/light strip of just arrow + hand).
 - The help cursor's **"?"** is now hand-drawn — a rounded hook plus a separate round dot —
   instead of a font glyph, for cleaner rounding and a correctly-aligned, smaller dot.
 
