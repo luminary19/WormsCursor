@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Reflection;
+using WormsCursor.App.Services;
 using WormsCursor.Core;
 
 namespace WormsCursor.App;
@@ -30,10 +31,14 @@ public sealed class PreferencesForm : Form
     readonly TrackBar _sizeBar, _thickBar, _radiusBar;
     readonly Label _sizeVal, _thickVal, _radiusVal;
     readonly Button _fillBtn, _outlineBtn;
+    readonly UpdateService _updates;
+    readonly Button _updateBtn;
+    readonly Label _updateStatus;
 
-    public PreferencesForm(CursorSettings working)
+    public PreferencesForm(CursorSettings working, UpdateService updates)
     {
         _working = working;
+        _updates = updates;
 
         Text = "WormsCursor — Preferences";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -74,9 +79,12 @@ public sealed class PreferencesForm : Form
         int btnY = y + 8;
         var defaults = new Button { Text = "Defaults", Location = new Point(M, btnY), Size = new Size(90, 30) };
         defaults.Click += (_, _) => ResetDefaults();
+        _updateBtn = new Button { Text = "Check for updates", Location = new Point(M + 98, btnY), Size = new Size(140, 30) };
+        _updateBtn.Click += OnCheckUpdates;
         var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Size = new Size(84, 30), Location = new Point(W - M - 84 - 8 - 84, btnY) };
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(84, 30), Location = new Point(W - M - 84, btnY) };
         Controls.Add(defaults);
+        Controls.Add(_updateBtn);
         Controls.Add(ok);
         Controls.Add(cancel);
         AcceptButton = ok;
@@ -84,9 +92,11 @@ public sealed class PreferencesForm : Form
 
         int footerY = btnY + 30 + 16;
         var version = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "v" + AppVersion(), Location = new Point(M, footerY) };
+        _updateStatus = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = string.Empty, Location = new Point(M + 64, footerY) };
         var link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor", Location = new Point(0, footerY) };
         link.LinkClicked += (_, _) => OpenUrl(RepoUrl);
         Controls.Add(version);
+        Controls.Add(_updateStatus);
         Controls.Add(link);
         link.Left = W - M - link.PreferredWidth; // right-align
 
@@ -200,6 +210,48 @@ public sealed class PreferencesForm : Form
         _fillBtn.BackColor = ParseOr(_working.FillColor, Color.White);
         _outlineBtn.BackColor = ParseOr(_working.OutlineColor, Color.Black);
         OnEdited();
+    }
+
+    async void OnCheckUpdates(object? sender, EventArgs e)
+    {
+        _updateBtn.Enabled = false;
+        SetStatus("Checking…", error: false);
+        try
+        {
+            var r = await _updates.CheckAsync();
+            switch (r.Availability)
+            {
+                case UpdateAvailability.NotInstalled:
+                    SetStatus("Dev build — opening Releases…", error: false);
+                    _updates.OpenReleasesPage();
+                    break;
+                case UpdateAvailability.UpToDate:
+                    SetStatus($"Up to date (v{_updates.CurrentVersionText})", error: false);
+                    break;
+                case UpdateAvailability.Available:
+                    SetStatus($"Update v{r.AvailableVersion} — installing, will restart…", error: false);
+                    await _updates.ApplyAsync(r.VelopackInfo!); // downloads + restarts the app
+                    SetStatus("Downloaded, but the restart didn't happen", error: true);
+                    break;
+                case UpdateAvailability.Failed:
+                    SetStatus("Update check failed", error: true);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Update error: " + ex.Message, error: true);
+        }
+        finally
+        {
+            _updateBtn.Enabled = true;
+        }
+    }
+
+    void SetStatus(string text, bool error)
+    {
+        _updateStatus.Text = text;
+        _updateStatus.ForeColor = error ? Color.Firebrick : SystemColors.GrayText;
     }
 
     // ---------- small utilities ----------

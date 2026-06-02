@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore WormsCursor.sln
+
+      - name: Build (Release)
+        run: dotnet build WormsCursor.sln -c Release --no-restore
+
+      - name: Publish smoke test (self-contained win-x64)
+        shell: pwsh
+        run: |
+          dotnet publish src/WormsCursor.App/WormsCursor.App.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=false -o artifacts/ci
+          # AssemblyName is 'WormsCursor' -> WormsCursor.exe is the entry point.
+          if (-not (Test-Path artifacts/ci/WormsCursor.exe)) {
+            Write-Error "Publish did not produce WormsCursor.exe"
+            exit 1
+          }

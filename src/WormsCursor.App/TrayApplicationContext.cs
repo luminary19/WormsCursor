@@ -121,7 +121,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _preferencesOpen = true;
         try
         {
-            using var dlg = new PreferencesForm(_settings.Clone());
+            using var dlg = new PreferencesForm(_settings.Clone(), _updates);
             if (dlg.ShowDialog() != DialogResult.OK) return;
 
             _settings.CopyFrom(dlg.Settings);   // apply edits to the live settings the engine holds

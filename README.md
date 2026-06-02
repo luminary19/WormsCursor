@@ -43,12 +43,16 @@ WormsCursor.sln
 │  │   ├─ CursorSettings.cs   Tunable parameters (persisted as JSON)
 │  │   └─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
 │  └─ WormsCursor.App/       Tray shell (WinForms, no main window)
-│      ├─ Program.cs
+│      ├─ Program.cs                   Entry point (Velopack hook + single-instance guard)
 │      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the engine
 │      ├─ PreferencesForm.cs          Live settings dialog (size, colours, thickness, radius)
-│      └─ Autostart.cs                 "Start with Windows" via HKCU\…\Run
+│      ├─ SingleInstance.cs            One instance only; a 2nd launch opens Preferences
+│      ├─ Autostart.cs                 "Start with Windows" via HKCU\…\Run
+│      └─ Services/UpdateService.cs    Velopack check / download / apply updates
 └─ tools/
-   ├─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the monochrome arrow
+   ├─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the arrow glyph
+   ├─ pack.ps1               Build a Velopack release locally (Setup.exe + Portable.zip)
+   ├─ RELEASING.md           How to cut a release
    └─ RestoreCursor.ps1      Emergency restore of default cursors
 ```
 
@@ -75,15 +79,16 @@ dotnet run --project src/WormsCursor.App
 ```
 
 A tray icon appears. Right-click it for **Enabled / Start with Windows / Preferences… /
-Exit**; double-click toggles the effect on/off. "Start with Windows" registers a
+Check for updates… / Exit**; double-click toggles the effect on/off. Only one instance
+runs — launching it again just opens **Preferences**. "Start with Windows" registers a
 per-user `HKCU\…\Run` entry (no admin), which you can also manage from Task Manager →
 Startup apps.
 
 **Preferences…** opens a live editor for cursor **size**, **fill** and **outline
 colour**, **outline thickness** and **corner radius**, with a side-by-side preview on
-dark/light backgrounds and a **Defaults** reset. Settings are saved to
-`%LocalAppData%\WormsCursor\settings.json` and persist across restarts — and across
-updates, since they live outside the app folder.
+dark/light backgrounds, a **Defaults** reset, and a **Check for updates** button.
+Settings are saved to `%LocalAppData%\WormsCursor\settings.json` and persist across
+restarts — and across updates, since they live outside the app folder.
 
 ### Standalone build (no .NET install on the target)
 
@@ -95,12 +100,16 @@ dotnet publish src/WormsCursor.App -c Release -r win-x64 --self-contained true -
 > several tens of MB. A framework-dependent build is tiny but needs the
 > *.NET 8 Desktop Runtime* installed.
 
-## Roadmap
+## Releases
 
-- [x] Preferences UI (cursor size, fill/outline colour, outline thickness, corner radius, live preview)
-- [x] Persist settings between runs (JSON in `%LocalAppData%\WormsCursor\`)
-- [x] Dedicated tray icon (white arrow + black frame, `tools/generate-icon.py`)
-- [x] Start with Windows (per-user `HKCU\…\Run`, toggle in the tray menu)
-- [x] Demo video
-- [ ] Behaviour tuning in the UI (rotation speed, smoothing, polling rate)
-- [ ] Installer + auto-update (Velopack), like PowerLink
+Installers and standalone builds are produced by [Velopack](https://velopack.io):
+pushing a `v*` tag runs the release workflow (`.github/workflows/release.yml`), which
+publishes a **`Setup.exe`** installer, a **`Portable.zip`** standalone, and delta
+packages to the repo's GitHub Releases. To build one locally see
+[`tools/RELEASING.md`](tools/RELEASING.md) (`pwsh tools/pack.ps1 -Version x.y.z`). The
+app auto-updates from these releases (tray → **Check for updates…**, or the button in
+Preferences).
+
+## License
+
+[MIT](LICENSE) © 2026 Dawid Wenderski
