@@ -35,6 +35,7 @@ var items = new (TestCursor kind, string label)[]
     (TestCursor.SizeNWSE, "resize ↘↖"),
     (TestCursor.SizeNESW, "resize ↗↙"),
     (TestCursor.SizeAll, "move"),
+    (TestCursor.No, "unavailable"),
 };
 
 using var arrowBase = ArrowRenderer.DrawArrow(s);

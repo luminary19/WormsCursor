@@ -4,7 +4,7 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
-## 0.5.0 - 2026-06-02
+## 0.5.0 - 2026-06-03
 
 ### Added
 - **Crosshair / precision cursor** (`OCR_CROSS`): a reticle — centre dot, four axis ticks
@@ -17,15 +17,19 @@ GitHub releases. The release workflow pulls the matching section into each relea
   cursor** (`OCR_SIZEALL`): stretched-taffy double-arrows — drag along the axis and the
   shaft necks thin while the heads fly apart on an underdamped spring, then blob back. Move
   crosses a horizontal and a vertical taffy arrow into a 4-way glyph whose arms stretch with
-  motion along each axis. (Brings cursor coverage to 12 of the 14 standard system cursors.)
+  motion along each axis.
+- **Unavailable cursor** (`OCR_NO`): a red circle-with-slash whose ring is a jelly blob — it
+  deforms into an egg along the direction of travel and wobbles back to round when you stop.
+- **Alternate-select** (`OCR_UP`) is themed with the same rotating arrow as the normal pointer.
+  WormsCursor now covers **all 14 standard system cursors**.
 - **`WormsCursor.Preview`** project: renders a labelled showcase of every themed cursor to
   PNG (a dark sheet plus a transparent one) for the README / docs, used in the new
   **Cursors** section of the README.
 
 ### Changed
-- Preferences preview now shows **all** cursors (arrow, hand, busy, app-starting, help,
-  crosshair, text, resize, move) in a single neutral grid that grows with the cursor-size
-  slider (was a side-by-side dark/light strip of just arrow + hand).
+- Preferences preview now shows **every** cursor in a single neutral 5-column grid, drawn at
+  **real size (never scaled)**; the window is sized once to fit and the render is debounced so
+  dragging the size slider stays smooth (was a side-by-side dark/light strip of just arrow + hand).
 - The help cursor's **"?"** is now hand-drawn — a rounded hook plus a separate round dot —
   instead of a font glyph, for cleaner rounding and a correctly-aligned, smaller dot.
 

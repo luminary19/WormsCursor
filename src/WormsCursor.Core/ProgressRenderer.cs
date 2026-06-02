@@ -366,6 +366,51 @@ public static class ProgressRenderer
         return bmp;
     }
 
+    /// <summary>Composites the "unavailable" cursor (OCR_NO): a red circle-with-slash whose
+    /// ring is a soft jelly blob — at rest it's perfectly round, but the engine deforms it into
+    /// an egg/oval along the direction of travel (<paramref name="deform"/> = signed stretch,
+    /// <paramref name="axisDeg"/> = its axis) and wobbles it back. The diagonal slash stays put.</summary>
+    public static Bitmap ComposeNo(CursorSettings s, float deform, float axisDeg)
+    {
+        var l = Layout(s);
+        int sz = Math.Max(8, s.Size);
+        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+        float cx = l.HotX, cy = l.HotY;
+        var outline = Parse(s.OutlineColor, Color.Black);
+        var red = Color.FromArgb(222, 50, 50);                   // prohibition red (this cursor's accent)
+        float ob = (float)(s.OutlineThickness * (sz / 64f));
+        float ringR = sz * 0.20f;
+        float ringW = MathF.Max(sz * 0.052f, 2f);
+        float rx = ringR * (1f + deform);                        // stretched along the motion axis
+        float ry = ringR * (1f - deform * 0.7f);                 // squashed across it (jelly)
+
+        void Stroke(Action<Pen> draw)
+        {
+            if (ob > 0.01f)
+                using (var po = new Pen(outline, ringW + 2 * ob) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                    draw(po);
+            using (var pf = new Pen(red, ringW) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                draw(pf);
+        }
+
+        // Slash first (it sits UNDER the ring), in world space so it keeps its fixed diagonal as
+        // the ring wobbles. Then the ring on top, as an ellipse rotated to the motion axis
+        // (uniform pen → even stroke).
+        float h = ringR * 0.98f, c45 = 0.70711f;                 // slash along ↘ (top-left → bottom-right)
+        Stroke(p => g.DrawLine(p, cx - c45 * h, cy - c45 * h, cx + c45 * h, cy + c45 * h));
+
+        var st = g.Save();
+        g.TranslateTransform(cx, cy);
+        g.RotateTransform(axisDeg);
+        Stroke(p => g.DrawEllipse(p, -rx, -ry, rx * 2, ry * 2));
+        g.Restore(st);
+        return bmp;
+    }
+
     /// <summary>Renders a static "at rest" frame of a composited cursor, for the Preferences
     /// preview (arrow pointing right; ring/glyph hanging straight down off the tail; reticle
     /// at its rest gap). Arrow/Hand are drawn by their own renderers, not here.</summary>
@@ -385,6 +430,7 @@ public static class ProgressRenderer
             TestCursor.SizeNWSE => ComposeResize(s, 45f, 0f),
             TestCursor.SizeNESW => ComposeResize(s, -45f, 0f),
             TestCursor.SizeAll => ComposeMove(s, 0f, 0f),
+            TestCursor.No => ComposeNo(s, 0f, 0f),
             _ => Compose(s, arrowBase, 0, rx, ry, 0f, true), // AppStarting
         };
     }

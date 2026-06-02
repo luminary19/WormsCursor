@@ -7,7 +7,7 @@ namespace WormsCursor.Core;
 
 /// <summary>Which cursor the engine should force on screen for visual testing
 /// (Preferences "Test cursor"), or <see cref="Off"/> to resume normal behaviour.</summary>
-public enum TestCursor { Off, Arrow, Hand, Wait, AppStarting, Help, Cross, Ibeam, SizeWE, SizeNS, SizeNWSE, SizeNESW, SizeAll }
+public enum TestCursor { Off, Arrow, Hand, Wait, AppStarting, Help, Cross, Ibeam, SizeWE, SizeNS, SizeNWSE, SizeNESW, SizeAll, No }
 
 /// <summary>
 /// Rotates the system arrow and hand cursors (OCR_NORMAL + OCR_HAND) to follow
@@ -144,6 +144,12 @@ public sealed class CursorEngine : IDisposable
             //     so the heads fly out, the waist necks, and it blobs back when you stop ---
             float rsWE = 0, vWE = 0, rsNS = 0, vNS = 0, rsD1 = 0, vD1 = 0, rsD2 = 0, vD2 = 0;
             const float rsK = 90f, rsC = 4.5f, rsRef = 1300f; // px/s of axis speed for full stretch
+
+            // --- "no / unavailable" state: the ring is a jelly blob that stretches into an egg
+            //     along the direction of travel and wobbles back. noE = signed deform (underdamped
+            //     so it overshoots), noAng = the stretch axis (frozen when the cursor stops) ---
+            float noE = 0, vno = 0, noAng = 0;
+            const float noK = 130f, noC = 6f, noRef = 1100f, noMax = 0.28f;
             int fgEvery = Math.Max(1, _settings.Hz / 60);           // ~60 fps for the animated cursor
             bool busyInit = false;
             var lastTest = TestCursor.Off;
@@ -194,6 +200,9 @@ public sealed class CursorEngine : IDisposable
             IntPtr ResizeD1() { using var b = ProgressRenderer.ComposeResize(_settings, 45f, rsD1); return MakeCursor(b, l.HotX, l.HotY); }
             IntPtr ResizeD2() { using var b = ProgressRenderer.ComposeResize(_settings, -45f, rsD2); return MakeCursor(b, l.HotX, l.HotY); }
             IntPtr Move() { using var b = ProgressRenderer.ComposeMove(_settings, rsWE, rsNS); return MakeCursor(b, l.HotX, l.HotY); }
+
+            // The "unavailable" cursor: a red circle-with-slash whose ring wobbles like jelly.
+            IntPtr No() { using var b = ProgressRenderer.ComposeNo(_settings, noE, noAng); return MakeCursor(b, l.HotX, l.HotY); }
 
             while (_running)
             {
@@ -307,6 +316,12 @@ public sealed class CursorEngine : IDisposable
                 vD1 += ((tD1 - rsD1) * rsK - vD1 * rsC) * dt; rsD1 += vD1 * dt; if (rsD1 < 0) rsD1 = 0;
                 vD2 += ((tD2 - rsD2) * rsK - vD2 * rsC) * dt; rsD2 += vD2 * dt; if (rsD2 < 0) rsD2 = 0;
 
+                // "no" jelly ring: stretch toward the travel direction (axis frozen while still),
+                // underdamped so the egg overshoots and wobbles back to round when you stop.
+                if (spd > 25f) noAng = (float)(Math.Atan2(dy, dx) * 180.0 / Math.PI);
+                float noTgt = MathF.Min(spd / noRef, 1f) * noMax;
+                vno += ((noTgt - noE) * noK - vno * noC) * dt; noE += vno * dt;
+
                 // --- 4) apply cursors ---
                 var test = _test;
                 if (test != lastTest) { lastTest = test; normalDirty = true; curIdx = -1; }
@@ -319,6 +334,7 @@ public sealed class CursorEngine : IDisposable
                         curIdx = idx; normalDirty = false;
                         SetSystemCursor(CopyIcon(arrowFrames[idx]), OCR_NORMAL);
                         SetSystemCursor(CopyIcon(handFrames[idx]), OCR_HAND);
+                        SetSystemCursor(CopyIcon(arrowFrames[idx]), OCR_UP); // alternate-select = same arrow
                     }
                     // Theme the busy slots once, then re-render them ONLY while a busy
                     // cursor is actually on screen (GetCursorInfo) — so an idle tray app
@@ -335,6 +351,7 @@ public sealed class CursorEngine : IDisposable
                         SetSystemCursor(ResizeD1(), OCR_SIZENWSE);
                         SetSystemCursor(ResizeD2(), OCR_SIZENESW);
                         SetSystemCursor(Move(), OCR_SIZEALL);
+                        SetSystemCursor(No(), OCR_NO);
                         busyInit = true;
                     }
                     else if (fgRender)
@@ -360,6 +377,7 @@ public sealed class CursorEngine : IDisposable
                             else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENWSE)) SetSystemCursor(ResizeD1(), OCR_SIZENWSE);
                             else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENESW)) SetSystemCursor(ResizeD2(), OCR_SIZENESW);
                             else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEALL)) SetSystemCursor(Move(), OCR_SIZEALL);
+                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_NO)) SetSystemCursor(No(), OCR_NO);
                         }
                     }
                 }
@@ -371,6 +389,7 @@ public sealed class CursorEngine : IDisposable
                         var frames = test == TestCursor.Hand ? handFrames : arrowFrames;
                         SetSystemCursor(CopyIcon(frames[idx]), OCR_NORMAL);
                         SetSystemCursor(CopyIcon(frames[idx]), OCR_HAND);
+                        SetSystemCursor(CopyIcon(frames[idx]), OCR_UP);
                     }
                 }
                 else if (fgRender) // any composited test cursor: force it onto the visible slots
@@ -385,6 +404,7 @@ public sealed class CursorEngine : IDisposable
                         TestCursor.SizeNWSE => ResizeD1(),
                         TestCursor.SizeNESW => ResizeD2(),
                         TestCursor.SizeAll => Move(),
+                        TestCursor.No => No(),
                         _ => Busy(test == TestCursor.AppStarting), // Wait / AppStarting
                     };
                     SetSystemCursor(h, OCR_NORMAL);
@@ -496,6 +516,7 @@ public sealed class CursorEngine : IDisposable
 
     // ---------- P/Invoke ----------
     const uint OCR_NORMAL = 32512;
+    const uint OCR_UP = 32516;        // "alternate select" — themed with the same rotating arrow
     const uint OCR_IBEAM = 32513;
     const uint OCR_CROSS = 32515;
     const uint OCR_WAIT = 32514;
@@ -507,6 +528,7 @@ public sealed class CursorEngine : IDisposable
     const uint OCR_SIZEWE = 32644;
     const uint OCR_SIZENS = 32645;
     const uint OCR_SIZEALL = 32646;
+    const uint OCR_NO = 32648;
     const uint SPI_SETCURSORS = 0x0057;
     const int CURSOR_SHOWING = 0x00000001;
 

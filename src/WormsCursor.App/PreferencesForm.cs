@@ -18,8 +18,10 @@ public sealed class PreferencesForm : Form
     const string RepoUrl = "https://github.com/dawidope/WormsCursor";
 
     const int M = 16;            // outer margin
-    const int W = 460;           // client width
-    const int PreviewH = 210;
+    const int W = 460;           // base client width (the window grows wider if the preview needs it)
+    const int PreviewGap = 14;   // gap between the preview and the controls below it
+    const int PreviewCols = 5;   // fixed preview columns; rows grow with the cursor count
+    const int CellPad = 14;      // breathing room around each cursor (drawn 1:1, never scaled)
     const int SliderRowH = 56;
     const int ColorRowH = 58;
 
@@ -27,11 +29,16 @@ public sealed class PreferencesForm : Form
     public CursorSettings Settings => _working;
 
     readonly DoubleBufferedPanel _preview;
+    readonly Panel _body;        // every control below the preview, moved/resized as one block
+    readonly System.Windows.Forms.Timer _previewDebounce; // coalesces rapid slider edits into one render
+    int _bodyHeight;             // _body content height (computed once when built)
+    int _cellW = 1, _cellH = 1, _rows = 1; // preview grid metrics (set by LayoutPreview)
     Bitmap?[] _previews = Array.Empty<Bitmap?>();
     static readonly TestCursor[] PreviewKinds =
     {
         TestCursor.Arrow, TestCursor.Hand, TestCursor.Wait, TestCursor.AppStarting, TestCursor.Help, TestCursor.Cross,
         TestCursor.Ibeam, TestCursor.SizeWE, TestCursor.SizeNS, TestCursor.SizeNWSE, TestCursor.SizeNESW, TestCursor.SizeAll,
+        TestCursor.No,
     };
 
     readonly TrackBar _sizeBar, _thickBar, _radiusBar;
@@ -57,13 +64,27 @@ public sealed class PreferencesForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(W, 600); // height finalized at the end
-
-        _preview = new DoubleBufferedPanel { Bounds = new Rectangle(M, M, W - 2 * M, PreviewH), BorderStyle = BorderStyle.FixedSingle };
+        _preview = new DoubleBufferedPanel
+        {
+            Location = new Point(M, M),
+            BackColor = Color.FromArgb(122, 122, 122),
+            // No border (it would eat client pixels and trip the scrollbar). AutoScroll is turned
+            // on in LayoutWindow ONLY when the grid genuinely can't fit on screen.
+        };
         _preview.Paint += PreviewPaint;
         Controls.Add(_preview);
 
-        int y = M + PreviewH + 18;
+        // Everything below the preview lives in _body, so the preview can grow (real-size, never
+        // scaled) and just push the controls down / widen the window as a single block.
+        _body = new Panel { Left = 0, Width = W };
+        Controls.Add(_body);
+
+        // Re-rendering all the cursors at real size is cheap when small but heavy at large sizes,
+        // so dragging the size slider is debounced: redraw once the slider settles, not per tick.
+        _previewDebounce = new System.Windows.Forms.Timer { Interval = 70 };
+        _previewDebounce.Tick += (_, _) => { _previewDebounce.Stop(); RenderPreview(); _preview.Invalidate(); };
+
+        int y = 8; // relative to _body's top
 
         _sizeBar = MakeBar(24, 128, _working.Size);
         _sizeVal = MakeVal();
@@ -94,7 +115,7 @@ public sealed class PreferencesForm : Form
         _testCombo.Items.AddRange(new object[]
         {
             "Off (normal)", "Arrow", "Hand", "Busy (wait)", "App starting", "Help (arrow + ?)", "Crosshair", "Text (I-beam)",
-            "Resize ↔", "Resize ↕", "Resize ↘↖", "Resize ↗↙", "Move ✥",
+            "Resize ↔", "Resize ↕", "Resize ↘↖", "Resize ↗↙", "Move ✥", "Unavailable ⊘",
         });
         _testCombo.SelectedIndex = 0;
         _testCombo.SelectedIndexChanged += (_, _) => _setTest(MapTest(_testCombo.SelectedIndex));
@@ -104,16 +125,17 @@ public sealed class PreferencesForm : Form
         int btnY = y + 8;
         var defaults = new Button { Text = "Defaults", Location = new Point(M, btnY), Size = new Size(90, 30) };
         defaults.Click += (_, _) => ResetDefaults();
-        // Right cluster: Apply | OK | Cancel. Apply commits the edits to the live cursor
-        // without closing, so you can tweak size/colour and watch the test cursor update.
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(84, 30), Location = new Point(W - M - 84, btnY) };
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Size = new Size(84, 30), Location = new Point(W - M - 176, btnY) };
-        var apply = new Button { Text = "Apply", Size = new Size(84, 30), Location = new Point(W - M - 268, btnY) };
+        // Right cluster: Apply | OK | Cancel (anchored right so they follow the window edge as it
+        // widens). Apply commits edits to the live cursor without closing, so you can tweak
+        // size/colour and watch the test cursor update.
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(84, 30), Location = new Point(W - M - 84, btnY), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Size = new Size(84, 30), Location = new Point(W - M - 176, btnY), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        var apply = new Button { Text = "Apply", Size = new Size(84, 30), Location = new Point(W - M - 268, btnY), Anchor = AnchorStyles.Top | AnchorStyles.Right };
         apply.Click += (_, _) => _apply(_working);
-        Controls.Add(defaults);
-        Controls.Add(apply);
-        Controls.Add(ok);
-        Controls.Add(cancel);
+        _body.Controls.Add(defaults);
+        _body.Controls.Add(apply);
+        _body.Controls.Add(ok);
+        _body.Controls.Add(cancel);
         AcceptButton = ok;
         CancelButton = cancel;
 
@@ -126,15 +148,18 @@ public sealed class PreferencesForm : Form
         _updateStatus = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = string.Empty, Location = new Point(M + 50 + 148, footerY + 5) };
         var link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor", Location = new Point(M, footerY + 38) };
         link.LinkClicked += (_, _) => OpenUrl(RepoUrl);
-        Controls.Add(version);
-        Controls.Add(_updateBtn);
-        Controls.Add(_updateStatus);
-        Controls.Add(link);
+        _body.Controls.Add(version);
+        _body.Controls.Add(_updateBtn);
+        _body.Controls.Add(_updateStatus);
+        _body.Controls.Add(link);
 
-        ClientSize = new Size(W, footerY + 38 + link.PreferredHeight + M); // bottom margin under the link line
+        _bodyHeight = footerY + 38 + link.PreferredHeight + M; // bottom margin under the link line
 
         UpdateLabels();
+        MeasureCells();  // fix the grid cell size for the largest cursor the slider allows (128 px)
+        LayoutWindow();  // set the window size ONCE for that grid — no dynamic resizing afterwards
         RenderPreview();
+        _preview.Invalidate();
     }
 
     // ---------- layout helpers ----------
@@ -165,20 +190,23 @@ public sealed class PreferencesForm : Form
 
     void AddSliderRow(string caption, TrackBar bar, Label val, ref int y)
     {
-        Controls.Add(new Label { Text = caption, AutoSize = true, Location = new Point(M, y) });
+        _body.Controls.Add(new Label { Text = caption, AutoSize = true, Location = new Point(M, y) });
         int barY = y + 22;
         bar.SetBounds(M, barY, W - 2 * M - 68, 28);
+        bar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; // stretch with the window
         val.SetBounds(W - M - 56, barY + 5, 56, 18);
-        Controls.Add(bar);
-        Controls.Add(val);
+        val.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _body.Controls.Add(bar);
+        _body.Controls.Add(val);
         y += SliderRowH;
     }
 
     void AddComboRow(string caption, ComboBox combo, ref int y)
     {
-        Controls.Add(new Label { Text = caption, AutoSize = true, Location = new Point(M, y) });
+        _body.Controls.Add(new Label { Text = caption, AutoSize = true, Location = new Point(M, y) });
         combo.SetBounds(M, y + 22, W - 2 * M, 24);
-        Controls.Add(combo);
+        combo.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        _body.Controls.Add(combo);
         y += SliderRowH;
     }
 
@@ -196,6 +224,7 @@ public sealed class PreferencesForm : Form
         10 => TestCursor.SizeNWSE,
         11 => TestCursor.SizeNESW,
         12 => TestCursor.SizeAll,
+        13 => TestCursor.No,
         _ => TestCursor.Off,
     };
 
@@ -204,14 +233,14 @@ public sealed class PreferencesForm : Form
     {
         int half = (W - 2 * M) / 2;
         int swatchW = half - 20;
-        Controls.Add(new Label { Text = capA, AutoSize = true, Location = new Point(M, y) });
+        _body.Controls.Add(new Label { Text = capA, AutoSize = true, Location = new Point(M, y) });
         btnA.SetBounds(M, y + 24, swatchW, 28);
-        Controls.Add(btnA);
+        _body.Controls.Add(btnA);
 
         int x2 = M + half;
-        Controls.Add(new Label { Text = capB, AutoSize = true, Location = new Point(x2, y) });
+        _body.Controls.Add(new Label { Text = capB, AutoSize = true, Location = new Point(x2, y) });
         btnB.SetBounds(x2, y + 24, swatchW, 28);
-        Controls.Add(btnB);
+        _body.Controls.Add(btnB);
 
         y += ColorRowH;
     }
@@ -219,9 +248,64 @@ public sealed class PreferencesForm : Form
     // ---------- behaviour ----------
     void OnEdited()
     {
-        UpdateLabels();
-        RenderPreview();
-        _preview.Invalidate();
+        UpdateLabels();         // instant feedback on the value label
+        _previewDebounce.Stop();
+        _previewDebounce.Start(); // heavy re-render fires once the slider settles (no per-tick lag)
+    }
+
+    // Fixes the grid cell to the largest cursor the size slider allows (128 px), so the window
+    // can be sized ONCE and never has to resize. Smaller sizes just draw smaller, centred in the
+    // (fixed) cell — real size, never scaled.
+    void MeasureCells()
+    {
+        var probe = _working.Clone();
+        probe.Size = 128;
+        probe.Normalize();
+        using var arrowBase = ArrowRenderer.DrawArrow(probe);
+        int maxW = 1, maxH = 1;
+        foreach (var kind in PreviewKinds)
+        {
+            using Bitmap full = kind switch
+            {
+                TestCursor.Arrow => ArrowRenderer.DrawArrow(probe),
+                TestCursor.Hand => HandRenderer.DrawHand(probe),
+                var k => ProgressRenderer.RenderRest(probe, k, arrowBase),
+            };
+            using var t = Trim(full);
+            maxW = Math.Max(maxW, t.Width);
+            maxH = Math.Max(maxH, t.Height);
+        }
+        _cellW = maxW + 2 * CellPad;
+        _cellH = maxH + 2 * CellPad;
+    }
+
+    // Sizes the window once for the fixed 5-column grid (real size, never scaled). Capped to the
+    // screen so it can't run off-screen; if the grid is taller than that, the preview scrolls.
+    void LayoutWindow()
+    {
+        int n = PreviewKinds.Length;
+        _rows = Math.Max(1, (n + PreviewCols - 1) / PreviewCols);
+        int contentW = PreviewCols * _cellW, contentH = _rows * _cellH;
+
+        var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
+        int maxPanelW = wa.Width - 2 * M;
+        int maxPanelH = wa.Height - 2 * M - PreviewGap - _bodyHeight - 64; // title bar + taskbar headroom
+        bool overflow = contentW > maxPanelW || contentH > maxPanelH;
+
+        // Scroll ONLY when the grid can't fit (otherwise no scrollbar at all). When it fits, the
+        // panel is exactly the content size, so nothing overflows.
+        _preview.AutoScroll = overflow;
+        _preview.AutoScrollMinSize = overflow ? new Size(contentW, contentH) : Size.Empty;
+        int sb = overflow ? SystemInformation.VerticalScrollBarWidth + 2 : 0;
+
+        int panelW = Math.Min(contentW + sb, maxPanelW);
+        int panelH = Math.Min(contentH, Math.Max(160, maxPanelH));
+        int clientW = Math.Max(W, panelW + 2 * M);
+        int previewX = (clientW - panelW) / 2; // centre the grid if the window's min width is wider
+
+        _preview.SetBounds(previewX, M, panelW, panelH);
+        _body.SetBounds(0, M + panelH + PreviewGap, clientW, _bodyHeight);
+        ClientSize = new Size(clientW, _body.Bottom);
     }
 
     void UpdateLabels()
@@ -254,38 +338,22 @@ public sealed class PreferencesForm : Form
     void PreviewPaint(object? sender, PaintEventArgs e)
     {
         var g = e.Graphics;
-        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        int w = _preview.ClientSize.Width, h = _preview.ClientSize.Height;
-        // One neutral mid-grey strip: shows both a light fill and a dark outline without
-        // needing separate dark/light panels.
-        using (var bg = new SolidBrush(Color.FromArgb(122, 122, 122)))
-            g.FillRectangle(bg, 0, 0, w, h);
+        g.TranslateTransform(_preview.AutoScrollPosition.X, _preview.AutoScrollPosition.Y); // honour scroll
 
         int n = _previews.Length;
         if (n == 0) return;
-        int cols = (int)Math.Ceiling(Math.Sqrt(n)); // a roughly-square grid (grows with the count)
-        int rows = (n + cols - 1) / cols;
-        float cellW = w / (float)cols, cellH = h / (float)rows;
-
-        // One shared scale so the cells keep the cursors' TRUE relative sizes: fit the
-        // largest trimmed cursor into a cell, capped at 1:1 (never upscale).
-        float maxW = 1f, maxH = 1f;
-        foreach (var b in _previews)
-            if (b is not null) { maxW = Math.Max(maxW, b.Width); maxH = Math.Max(maxH, b.Height); }
-        const float pad = 16f;
-        float scale = Math.Min(1f, Math.Min((cellW - pad) / maxW, (cellH - pad) / maxH));
+        int cols = PreviewCols;
+        // Mid-grey backdrop over the whole grid (shows a light fill and a dark outline at once).
+        using (var bg = new SolidBrush(Color.FromArgb(122, 122, 122)))
+            g.FillRectangle(bg, 0, 0, cols * _cellW, _rows * _cellH);
 
         for (int i = 0; i < n; i++)
         {
             var bmp = _previews[i];
             if (bmp is null) continue;
-            float cx = (i % cols) * cellW + cellW / 2f;
-            float cy = (i / cols) * cellH + cellH / 2f;
-            float dw = bmp.Width * scale, dh = bmp.Height * scale;
-            if (scale >= 0.999f)
-                g.DrawImageUnscaled(bmp, (int)(cx - bmp.Width / 2f), (int)(cy - bmp.Height / 2f));
-            else
-                g.DrawImage(bmp, cx - dw / 2f, cy - dh / 2f, dw, dh);
+            int cx = (i % cols) * _cellW + _cellW / 2;
+            int cy = (i / cols) * _cellH + _cellH / 2;
+            g.DrawImageUnscaled(bmp, cx - bmp.Width / 2, cy - bmp.Height / 2); // real size, never scaled
         }
     }
 
@@ -407,7 +475,11 @@ public sealed class PreferencesForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) foreach (var b in _previews) b?.Dispose();
+        if (disposing)
+        {
+            _previewDebounce?.Dispose();
+            foreach (var b in _previews) b?.Dispose();
+        }
         base.Dispose(disposing);
     }
 

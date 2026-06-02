@@ -25,7 +25,7 @@ _The cursor rotating to follow your mouse movement._
 
 ## Cursors
 
-WormsCursor themes the common system cursors, each with its own motion:
+WormsCursor themes **all 14 standard system cursors**, each with its own physics-driven motion:
 
 ![The WormsCursor cursor set](assets/cursors-transparent.png)
 
@@ -56,6 +56,17 @@ plus a transparent one).
 - The **crosshair** (`OCR_CROSS`) is a precision reticle — a centre dot, four ticks and a
   slowly-rotating broken ring; the ticks breathe and spread out (recoil) when you move fast,
   then settle.
+- The **text / I-beam** cursor (`OCR_IBEAM`) is a flexible beam: the bottom stays rigid while
+  the top sways opposite to your motion on a soft spring, wobbling like jelly and settling.
+- The **resize** cursors (`OCR_SIZEWE` / `SIZENS` / `SIZENWSE` / `SIZENESW`) and the **move**
+  cursor (`OCR_SIZEALL`) are stretched-taffy double-arrows — drag along an axis and the shaft
+  necks thin while the heads fly apart on a spring, then blob back; move crosses a horizontal
+  and a vertical taffy into a 4-way glyph.
+- The **unavailable** cursor (`OCR_NO`) is a red circle-with-slash whose ring is a jelly blob:
+  it deforms into an egg along the direction of travel and wobbles back to round.
+- *Alternate-select* (`OCR_UP`) reuses the same rotating arrow.
+- The animated cursors re-render **only while actually on screen** (matched via `GetCursorInfo`
+  against the live system handle), so an idle tray uses no CPU.
 
 ## Project structure
 
@@ -66,7 +77,7 @@ WormsCursor.sln
 │  │   ├─ CursorEngine.cs     P/Invoke, cursor building, tracking + animation loop
 │  │   ├─ ArrowRenderer.cs    Draws the arrow (size, colours, thickness, corner radius)
 │  │   ├─ HandRenderer.cs     Draws the hand/link cursor (solid fill + baked line art)
-│  │   ├─ ProgressRenderer.cs Draws the busy/progress + help cursors (arrow + ring / "?")
+│  │   ├─ ProgressRenderer.cs Draws the composited cursors (busy, help, crosshair, text, resize/move, unavailable)
 │  │   ├─ HandShape.cs        Baked hand geometry (silhouette + crease marks)
 │  │   ├─ CursorSettings.cs   Tunable parameters (persisted as JSON)
 │  │   └─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
