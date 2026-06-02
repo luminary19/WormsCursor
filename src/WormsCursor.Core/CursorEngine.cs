@@ -162,12 +162,12 @@ public sealed class CursorEngine : IDisposable
     void BuildCursors()
     {
         DestroyCursors();
-        int n = _settings.Steps, canvas = _settings.Canvas, pivot = canvas / 2;
+        int n = _settings.Steps, size = _settings.Size, pivot = size / 2;
         var cursors = new IntPtr[n];
-        using Bitmap baseBmp = ArrowRenderer.DrawArrow(canvas);
+        using Bitmap baseBmp = ArrowRenderer.DrawArrow(_settings);
         for (int i = 0; i < n; i++)
         {
-            using var rot = new Bitmap(canvas, canvas);
+            using var rot = new Bitmap(size, size);
             using (var g = Graphics.FromImage(rot))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;

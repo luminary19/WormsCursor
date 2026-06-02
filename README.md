@@ -39,12 +39,14 @@ WormsCursor.sln
 ├─ src/
 │  ├─ WormsCursor.Core/      Engine — no UI dependencies
 │  │   ├─ CursorEngine.cs     P/Invoke, cursor building, tracking + animation loop
-│  │   ├─ ArrowRenderer.cs    Draws the base arrow bitmap
-│  │   └─ CursorSettings.cs   Tunable parameters (what Preferences will edit)
+│  │   ├─ ArrowRenderer.cs    Draws the arrow (size, colours, thickness, corner radius)
+│  │   ├─ CursorSettings.cs   Tunable parameters (persisted as JSON)
+│  │   └─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
 │  └─ WormsCursor.App/       Tray shell (WinForms, no main window)
 │      ├─ Program.cs
 │      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the engine
-│      └─ PreferencesForm.cs          Settings dialog (skeleton)
+│      ├─ PreferencesForm.cs          Live settings dialog (size, colours, thickness, radius)
+│      └─ Autostart.cs                 "Start with Windows" via HKCU\…\Run
 └─ tools/
    ├─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the monochrome arrow
    └─ RestoreCursor.ps1      Emergency restore of default cursors
@@ -77,6 +79,12 @@ Exit**; double-click toggles the effect on/off. "Start with Windows" registers a
 per-user `HKCU\…\Run` entry (no admin), which you can also manage from Task Manager →
 Startup apps.
 
+**Preferences…** opens a live editor for cursor **size**, **fill** and **outline
+colour**, **outline thickness** and **corner radius**, with a side-by-side preview on
+dark/light backgrounds and a **Defaults** reset. Settings are saved to
+`%LocalAppData%\WormsCursor\settings.json` and persist across restarts — and across
+updates, since they live outside the app folder.
+
 ### Standalone build (no .NET install on the target)
 
 ```powershell
@@ -89,8 +97,10 @@ dotnet publish src/WormsCursor.App -c Release -r win-x64 --self-contained true -
 
 ## Roadmap
 
-- [ ] Real preferences UI (rotation speed, smoothing, polling rate, arrow size/colour)
+- [x] Preferences UI (cursor size, fill/outline colour, outline thickness, corner radius, live preview)
+- [x] Persist settings between runs (JSON in `%LocalAppData%\WormsCursor\`)
 - [x] Dedicated tray icon (white arrow + black frame, `tools/generate-icon.py`)
-- [ ] Persist settings between runs
 - [x] Start with Windows (per-user `HKCU\…\Run`, toggle in the tray menu)
 - [x] Demo video
+- [ ] Behaviour tuning in the UI (rotation speed, smoothing, polling rate)
+- [ ] Installer + auto-update (Velopack), like PowerLink

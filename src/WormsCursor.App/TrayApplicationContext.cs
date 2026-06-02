@@ -8,7 +8,7 @@ namespace WormsCursor.App;
 /// </summary>
 public sealed class TrayApplicationContext : ApplicationContext
 {
-    readonly CursorSettings _settings = new();
+    readonly CursorSettings _settings = SettingsStore.Load();
     readonly CursorEngine _engine;
     readonly NotifyIcon _tray;
     readonly Icon _appIcon;
@@ -89,14 +89,17 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     void OnPreferences(object? sender, EventArgs e)
     {
-        using var dlg = new PreferencesForm(_settings);
-        if (dlg.ShowDialog() == DialogResult.OK && _engine.IsRunning)
-        {
-            // Rebuild cursors/loop so changed settings take effect immediately.
-            _engine.Stop();
-            _engine.Start();
-            _enabledItem.Checked = _engine.IsRunning;
-        }
+        using var dlg = new PreferencesForm(_settings.Clone());
+        if (dlg.ShowDialog() != DialogResult.OK) return;
+
+        _settings.CopyFrom(dlg.Settings);   // apply edits to the live settings the engine holds
+        SettingsStore.Save(_settings);
+
+        // Rebuild so the new appearance takes effect, preserving enabled/disabled state.
+        bool wasRunning = _engine.IsRunning;
+        _engine.Stop();
+        if (wasRunning) _engine.Start();
+        _enabledItem.Checked = _engine.IsRunning;
     }
 
     void OnExit(object? sender, EventArgs e)
