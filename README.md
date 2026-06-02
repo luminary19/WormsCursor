@@ -18,8 +18,7 @@ It runs in the background from the system tray, with no main window.
 
 ## Demo
 
-<!-- TODO: drop a short screen capture here -->
-_Video coming soon._
+[▶ Watch the demo](video.mp4) — the cursor rotating to follow mouse movement.
 
 ## How it works
 
@@ -92,4 +91,4 @@ dotnet publish src/WormsCursor.App -c Release -r win-x64 --self-contained true -
 - [x] Dedicated tray icon (white arrow + black frame, `tools/generate-icon.py`)
 - [ ] Persist settings between runs
 - [x] Start with Windows (per-user `HKCU\…\Run`, toggle in the tray menu)
-- [ ] Demo video
+- [x] Demo video
