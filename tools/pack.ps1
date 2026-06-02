@@ -40,6 +40,7 @@ $RepoUrl    = 'https://github.com/dawidope/WormsCursor'
 $PublishDir = Join-Path $RepoRoot 'artifacts/publish'
 $OutputDir  = Join-Path $RepoRoot 'velopack-output'
 $Csproj     = Join-Path $RepoRoot 'src/WormsCursor.App/WormsCursor.App.csproj'
+$Icon       = Join-Path $RepoRoot 'src/WormsCursor.App/Assets/Icon.ico'
 
 Write-Host "==> Publishing WormsCursor.App (self-contained win-x64)…" -ForegroundColor Cyan
 if (Test-Path $PublishDir) { Remove-Item $PublishDir -Recurse -Force }
@@ -83,6 +84,7 @@ vpk pack `
     --mainExe WormsCursor.exe `
     --packTitle "WormsCursor" `
     --packAuthors "Dawid Wenderski" `
+    --icon $Icon `
     --outputDir $OutputDir
 if ($LASTEXITCODE -ne 0) { throw "vpk pack failed (exit $LASTEXITCODE)." }
 

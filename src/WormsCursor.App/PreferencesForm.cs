@@ -90,17 +90,18 @@ public sealed class PreferencesForm : Form
         AcceptButton = ok;
         CancelButton = cancel;
 
+        // Footer over two lines: version + update status on the first, repo link on
+        // its own line below (so a long URL is never truncated).
         int footerY = btnY + 30 + 16;
         var version = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "v" + AppVersion(), Location = new Point(M, footerY) };
-        _updateStatus = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = string.Empty, Location = new Point(M + 64, footerY) };
-        var link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor", Location = new Point(0, footerY) };
+        _updateStatus = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = string.Empty, Location = new Point(M + 56, footerY) };
+        var link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor", Location = new Point(M, footerY + 22) };
         link.LinkClicked += (_, _) => OpenUrl(RepoUrl);
         Controls.Add(version);
         Controls.Add(_updateStatus);
         Controls.Add(link);
-        link.Left = W - M - link.PreferredWidth; // right-align
 
-        ClientSize = new Size(W, footerY + link.PreferredHeight + M); // bottom margin under the footer
+        ClientSize = new Size(W, footerY + 22 + link.PreferredHeight + M); // bottom margin under the link line
 
         UpdateLabels();
         RenderPreview();

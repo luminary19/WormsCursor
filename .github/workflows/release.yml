@@ -94,6 +94,7 @@ jobs:
             --mainExe WormsCursor.exe `
             --packTitle "WormsCursor" `
             --packAuthors "Dawid Wenderski" `
+            --icon src/WormsCursor.App/Assets/Icon.ico `
             --outputDir velopack-output
 
       - uses: actions/upload-artifact@v7
