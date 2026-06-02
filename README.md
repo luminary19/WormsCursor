@@ -8,10 +8,13 @@ points right; sweep it down and it smoothly slews to point down.
 
 It runs in the background from the system tray, with no main window.
 
-> ⚠️ **It replaces the system-wide arrow cursor** (`SetSystemCursor`). While running,
-> every app sees the rotated arrow. Quitting from the tray restores the Windows
-> defaults. If the process is ever force-killed and the cursor stays rotated, run
-> [`tools/RestoreCursor.ps1`](tools/RestoreCursor.ps1) to put things back.
+> ⚠️ **It replaces the system-wide arrow cursor** (`SetSystemCursor`) while running, so
+> every app sees the rotated arrow. The defaults are restored on quit and on a crash,
+> and WormsCursor reloads the real cursor scheme on every launch — so if it's ever
+> killed outright (Task Manager "End Task", Visual Studio "Stop Debugging") and the
+> cursor stays rotated, just starting it again clears it. To fix it without
+> relaunching, run [`tools/RestoreCursor.ps1`](tools/RestoreCursor.ps1) (logging off
+> resets it too).
 
 ## Demo
 

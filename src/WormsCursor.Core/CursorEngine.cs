@@ -206,8 +206,18 @@ public sealed class CursorEngine : IDisposable
     {
         if (_restored) return;
         _restored = true;
-        SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0); // restore default system cursors
+        RestoreDefaultCursors();
     }
+
+    /// <summary>
+    /// Reloads the user's configured cursor scheme from the registry, undoing any
+    /// <c>SetSystemCursor</c> change — including a rotated cursor left behind by a
+    /// previous instance that was killed (Task Manager / "Stop Debugging") before it
+    /// could restore. SetSystemCursor never touches the registry, so the real scheme
+    /// is always still there. Cheap and safe to call when nothing was hijacked.
+    /// </summary>
+    public static void RestoreDefaultCursors()
+        => SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
 
     // ---------- P/Invoke ----------
     const uint OCR_NORMAL = 32512;

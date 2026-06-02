@@ -50,6 +50,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         Application.ThreadException += (_, _) => _engine.RestoreNow();
         AppDomain.CurrentDomain.UnhandledException += (_, _) => _engine.RestoreNow();
 
+        // Self-heal: if a previous instance was killed (Task Manager / "Stop
+        // Debugging") it may have left a rotated cursor. Reload the real scheme before
+        // we install our own, so re-launching always starts clean.
+        CursorEngine.RestoreDefaultCursors();
+
         _engine.Start();
     }
 
