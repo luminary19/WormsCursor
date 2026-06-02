@@ -38,6 +38,14 @@ PNG_OUT = ASSETS / "icon.png"
 # (tip, upper barb, shaft top, shaft back-top, shaft back-bottom, shaft bottom, lower barb)
 ARROW = [(0, 0), (-14, -9), (-14, -3), (-22, -3), (-22, 3), (-14, 3), (-14, 9)]
 
+# The outline is stroked as an OPEN polyline, so its start/end cap lands wherever it
+# begins. If that's a sharp vertex (the tip) the flat cap leaves a V-notch instead of
+# the rounded corner every other vertex gets. So trace the SAME closed boundary but
+# start/end at the midpoint of the flat left edge (ARROW[3]–ARROW[4]); then every real
+# vertex — the tip included — is an interior joint and rounds consistently.
+_MID_LEFT = (-22.0, 0.0)
+OUTLINE_PATH = [_MID_LEFT, ARROW[4], ARROW[5], ARROW[6], ARROW[0], ARROW[1], ARROW[2], ARROW[3], _MID_LEFT]
+
 SIZES = [16, 20, 24, 32, 48, 64, 128, 256]
 ANGLE_DEG = -45          # rotate so the arrow points up-right
 PAD_FRAC = 0.16          # empty border as a fraction of the canvas
@@ -51,8 +59,10 @@ OUTLINE_MIN = 1.6             # clamped so it stays visible when tiny
 OUTLINE_MAX = 12.0            # and doesn't get chunky at 256px
 
 
-def fit_points(size: int, angle_deg: float) -> list[tuple[float, float]]:
-    """Rotate the arrow, then scale+centre it to fill `size` with PAD_FRAC border."""
+def _fit_transform(size: int, angle_deg: float):
+    """Build a point transform that rotates the arrow and scales+centres it to fill
+    `size` with a PAD_FRAC border. The fit is derived from ARROW so the fill polygon
+    and the outline path share the exact same mapping."""
     a = math.radians(angle_deg)
     ca, sa = math.cos(a), math.sin(a)
 
@@ -65,15 +75,18 @@ def fit_points(size: int, angle_deg: float) -> list[tuple[float, float]]:
 
     rxs = [p[0] for p in rot]
     rys = [p[1] for p in rot]
-    w = max(rxs) - min(rxs)
-    h = max(rys) - min(rys)
     pad = size * PAD_FRAC
-    scale = (size - 2 * pad) / max(w, h)
-
+    scale = (size - 2 * pad) / max(max(rxs) - min(rxs), max(rys) - min(rys))
     mx = (min(rxs) + max(rxs)) / 2
     my = (min(rys) + max(rys)) / 2
     c = size / 2
-    return [((px - mx) * scale + c, (py - my) * scale + c) for px, py in rot]
+
+    def tf(pt):
+        x, y = pt[0] - bx, pt[1] - by
+        rx, ry = x * ca - y * sa, x * sa + y * ca
+        return ((rx - mx) * scale + c, (ry - my) * scale + c)
+
+    return tf
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -84,12 +97,12 @@ def render(size: int) -> Image.Image:
     big = size * SUPERSAMPLE
     img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    pts = fit_points(big, ANGLE_DEG)
-    # White fill, then a black frame stroked along the boundary (joint='curve'
-    # rounds the corners so the sharp tip stays clean).
+    tf = _fit_transform(big, ANGLE_DEG)
     width = round(_clamp(size * OUTLINE_FRAC, OUTLINE_MIN, OUTLINE_MAX) * SUPERSAMPLE)
-    d.polygon(pts, fill=FILL)
-    d.line(pts + [pts[0]], fill=OUTLINE, width=width, joint="curve")
+    # White fill (sharp), then the black frame stroked along the boundary with rounded
+    # joints — the tip included, because OUTLINE_PATH starts/ends on a flat edge.
+    d.polygon([tf(p) for p in ARROW], fill=FILL)
+    d.line([tf(p) for p in OUTLINE_PATH], fill=OUTLINE, width=width, joint="curve")
     return img.resize((size, size), Image.LANCZOS)
 
 
