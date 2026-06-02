@@ -14,6 +14,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Installer + auto-update. Pinned to the same major/build PowerLink ships
+         (0.0.1298) so the vpk CLI tool and the runtime library stay in lockstep. -->
+    <PackageReference Include="Velopack" Version="0.0.1298" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\WormsCursor.Core\WormsCursor.Core.csproj" />
   </ItemGroup>
 

@@ -1,0 +1,125 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore WormsCursor.sln
+
+      - name: Publish App (self-contained win-x64)
+        run: >
+          dotnet publish src/WormsCursor.App/WormsCursor.App.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=false
+          -p:PublishTrimmed=false
+          -o artifacts/publish
+
+      - name: Sanity check payload
+        shell: pwsh
+        run: |
+          # AssemblyName is 'WormsCursor', so the entry point is WormsCursor.exe.
+          $required = @(
+            'WormsCursor.exe',
+            'Assets/Icon.ico',
+            'Assets/icon.png'
+          )
+          $missing = @()
+          foreach ($f in $required) {
+            if (-not (Test-Path "artifacts/publish/$f")) { $missing += $f }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing from publish output: $($missing -join ', ')"
+            Get-ChildItem artifacts/publish -Recurse | Select-Object -First 100
+            exit 1
+          }
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $ver = '${{ github.ref_name }}' -replace '^v',''
+          "version=$ver" >> $env:GITHUB_OUTPUT
+
+      - name: Pack with Velopack
+        shell: pwsh
+        env:
+          # Authenticate vpk's and gh's GitHub API hits so they don't fall under
+          # the anonymous rate limit shared across runner IPs.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Keep vpk in lockstep with the Velopack PackageReference (0.0.1298).
+          dotnet tool install --global vpk --version 0.0.1298
+
+          # Pre-check for a prior stable release with gh, so absence-of-prior and
+          # vpk-download-failure stay separate failure modes (mirrors PowerLink).
+          # A vpk download that silently fails would otherwise ship a release with
+          # a missing/corrupt delta and brick updates on user machines.
+          $priorStable = gh release list --repo ${{ github.repository }} --limit 50 --json isDraft,isPrerelease,tagName |
+              ConvertFrom-Json |
+              Where-Object { -not $_.isDraft -and -not $_.isPrerelease }
+          $priorCount = ($priorStable | Measure-Object).Count
+
+          if ($priorCount -gt 0) {
+            Write-Host "Found $priorCount prior stable release(s). Downloading latest for delta computation."
+            vpk download github --repoUrl https://github.com/${{ github.repository }}
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "vpk download failed despite prior stable release(s) existing. Aborting to avoid shipping a missing/corrupt delta."
+              exit 1
+            }
+          } else {
+            Write-Host "No prior stable releases found. Producing full-only release (no delta)."
+          }
+
+          vpk pack `
+            --packId WormsCursor `
+            --packVersion ${{ steps.ver.outputs.version }} `
+            --packDir artifacts/publish `
+            --mainExe WormsCursor.exe `
+            --packTitle "WormsCursor" `
+            --packAuthors "Dawid Wenderski" `
+            --outputDir velopack-output
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: velopack
+          path: velopack-output/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/*Setup.exe
+            dist/*Portable.zip
+            dist/*.nupkg
+            dist/releases.win.json
+            dist/assets.win.json
+          draft: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true

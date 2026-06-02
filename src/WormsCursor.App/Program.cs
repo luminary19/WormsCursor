@@ -1,3 +1,5 @@
+using Velopack;
+
 namespace WormsCursor.App;
 
 static class Program
@@ -5,9 +7,15 @@ static class Program
     [STAThread]
     static void Main()
     {
-        // Single-instance guard FIRST, before any UI: if another instance is already
-        // running, Acquire() signals it to open Preferences and returns null, so we exit
-        // immediately — no tray icon, no cursor takeover.
+        // Velopack hijacks Main when invoked with --veloapp-* args during
+        // install / update / uninstall: it runs the matching hook and exits
+        // before any UI spins up. Must stay the very first call in Main.
+        // No-ops cleanly for dev builds run straight out of bin\.
+        VelopackApp.Build().Run();
+
+        // Single-instance guard, before any UI: if another instance is already
+        // running, Acquire() signals it to open Preferences and returns null, so we
+        // exit immediately — no tray icon, no cursor takeover.
         using var single = SingleInstance.Acquire();
         if (single is null) return;
 
