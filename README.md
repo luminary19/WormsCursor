@@ -8,11 +8,9 @@ points right; sweep it down and it smoothly slews to point down.
 
 It runs in the background from the system tray, with no main window.
 
-> ⚠️ **It replaces the system-wide arrow cursor** (`SetSystemCursor`) while running, so
-> every app sees the rotated arrow. The defaults are restored on quit, on a crash, and
-> — via a small detached **watchdog** process — even if WormsCursor is killed outright
-> (Task Manager "End Task", Visual Studio "Stop Debugging"). The only way to stay stuck
-> is to kill *both* WormsCursor and its watchdog; then run
+> ⚠️ **It replaces the system-wide arrow cursor** (`SetSystemCursor`). While running,
+> every app sees the rotated arrow. Quitting from the tray restores the Windows
+> defaults. If the process is ever force-killed and the cursor stays rotated, run
 > [`tools/RestoreCursor.ps1`](tools/RestoreCursor.ps1) to put things back.
 
 ## Demo
@@ -40,10 +38,9 @@ WormsCursor.sln
 │  │   ├─ ArrowRenderer.cs    Draws the base arrow bitmap
 │  │   └─ CursorSettings.cs   Tunable parameters (what Preferences will edit)
 │  └─ WormsCursor.App/       Tray shell (WinForms, no main window)
-│      ├─ Program.cs                   Entry point; dispatches --watchdog mode
-│      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the engine + watchdog
-│      ├─ PreferencesForm.cs          Settings dialog (skeleton)
-│      └─ Watchdog.cs                  Detached sibling that restores on a hard kill
+│      ├─ Program.cs
+│      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the engine
+│      └─ PreferencesForm.cs          Settings dialog (skeleton)
 └─ tools/
    ├─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the monochrome arrow
    └─ RestoreCursor.ps1      Emergency restore of default cursors
