@@ -64,14 +64,14 @@ public sealed class PreferencesForm : Form
         _outlineBtn.Click += (_, _) => PickColor(_outlineBtn, c => _working.OutlineColor = ToHex(c));
         AddTwoColorRow("Fill colour", _fillBtn, "Outline colour", _outlineBtn, ref y);
 
-        _thickBar = MakeBar(0, 120, (int)Math.Round(_working.OutlineThickness * 10));
+        _thickBar = MakeBar(0, 40, (int)Math.Round(_working.OutlineThickness * 10));
         _thickVal = MakeVal();
         AddSliderRow("Outline thickness", _thickBar, _thickVal, ref y);
         _thickBar.ValueChanged += (_, _) => { _working.OutlineThickness = _thickBar.Value / 10.0; OnEdited(); };
 
         _radiusBar = MakeBar(0, 120, (int)Math.Round(_working.CornerRadius * 10));
         _radiusVal = MakeVal();
-        AddSliderRow("Corner radius", _radiusBar, _radiusVal, ref y);
+        AddSliderRow("Corner radius (arrow only)", _radiusBar, _radiusVal, ref y);
         _radiusBar.ValueChanged += (_, _) => { _working.CornerRadius = _radiusBar.Value / 10.0; OnEdited(); };
 
         int btnY = y + 8;

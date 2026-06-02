@@ -47,7 +47,7 @@ public sealed class CursorSettings
     public void Normalize()
     {
         Size = Math.Clamp(Size, 24, 256);
-        OutlineThickness = Math.Clamp(OutlineThickness, 0, 12);
+        OutlineThickness = Math.Clamp(OutlineThickness, 0, 4);
         CornerRadius = Math.Clamp(CornerRadius, 0, 12);
         Steps = Math.Clamp(Steps, 8, 720);
         Hz = Math.Clamp(Hz, 30, 240);

@@ -4,14 +4,19 @@ using System.Drawing.Drawing2D;
 namespace WormsCursor.Core;
 
 /// <summary>
-/// Draws the hand cursor (OCR_HAND) from the baked <see cref="HandShape"/> Béziers,
-/// the same way the arrow is drawn (a real <see cref="GraphicsPath"/>, not a flattened
-/// polyline). It fills the outer silhouette with the fill colour for an opaque body,
-/// then fills the full line drawing (all contours, even-odd) with the outline colour —
-/// outline + finger-separation lines + knuckle marks. Finally it strokes the silhouette
-/// with an outline-colour pen, exactly like <see cref="ArrowRenderer"/>: the outline
-/// (not the white body fill) owns the outer edge, so the antialiased body can't bleed a
-/// light halo just past the baked ribbon.
+/// Draws the hand cursor (OCR_HAND) from the baked <see cref="HandShape"/> Béziers the
+/// SAME way the arrow is drawn: fill the silhouette, then stroke every line with a pen
+/// whose width is the outline thickness. So one thickness slider scales ALL of the hand's
+/// lines together — the outer outline, the finger separators AND the knuckle creases —
+/// exactly 1:1 with the arrow (there is no fixed-width ribbon baked into the geometry).
+/// At thickness 0 it's a bare fill, just like the arrow.
+///
+/// Three sets of strokes (all in the outline colour, all scaled by the pen):
+///  • the silhouette outer contour (also filled, so the outline owns the edge — no halo),
+///  • finger SEPARATORS: short lines dropped from the notches between the folded
+///    fingertips (found as local valleys on the silhouette's upper edge),
+///  • knuckle CREASES: the small capsule marks, drawn as their centreline (a thick line),
+///    not their outline (which would render as a hollow pill).
 ///
 /// Fill/outline colour, size and outline thickness are shared with the arrow; corner
 /// radius does not apply. The index fingertip (the hotspot) is placed at the canvas
@@ -54,30 +59,70 @@ public static class HandRenderer
         using (var fill = new SolidBrush(fillColor))
             g.FillPath(fill, body);
 
-        // 2) baked line art (outline ribbon + finger-separation lines + knuckle marks),
-        //    even-odd so the thin ribbon fills as a clean solid border.
-        using (var art = new GraphicsPath { FillMode = FillMode.Alternate })
-        {
-            foreach (var contour in HandShape.Contours)
-            {
-                art.StartFigure();
-                art.AddBeziers(Map(contour));
-                art.CloseFigure();
-            }
-            using var line = new SolidBrush(outlineColor);
-            g.FillPath(line, art);
-        }
-
-        // 3) Stroke the silhouette like the arrow does, so the OUTLINE owns the outer
-        //    edge. The pen is centred on the contour and so extends outward past the
-        //    body fill, covering the antialiased fringe that otherwise reads as a faint
-        //    light halo just outside the baked ribbon. Same technique as ArrowRenderer.
+        // 2) all lines as pen strokes of the outline thickness — same model as the arrow,
+        //    so the slider scales outline + separators + creases together. 0 = none.
         float pen = (float)(s.OutlineThickness * (size / 64f));
         if (pen > 0.01f)
-            using (var p = new Pen(outlineColor, pen) { LineJoin = LineJoin.Round })
-                g.DrawPath(p, body);
+            using (var p = new Pen(outlineColor, pen) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
+            {
+                g.DrawPath(p, body);                                         // outer outline
+                foreach (var (a, b) in FingerSeparators(Map(sil), cx))       // gaps between folded fingers
+                    g.DrawLine(p, a, b);
+                foreach (var (a, b) in CreaseLines(Map))                     // knuckle creases
+                    g.DrawLine(p, a, b);
+            }
 
         return bmp;
+    }
+
+    // Short vertical separators between the folded fingertips. The silhouette's upper edge
+    // dips into a small valley (local max-Y, since fingertips point up = -Y) between each
+    // pair of folded fingers; drop a short line down from each. Restricted to the upper
+    // band and to the right of the index finger, and de-duplicated so two close nodes on
+    // one finger don't double up.
+    static IEnumerable<(PointF, PointF)> FingerSeparators(PointF[] silMapped, float cx)
+    {
+        var A = new List<PointF>();
+        for (int i = 0; i < silMapped.Length; i += 3) A.Add(silMapped[i]); // anchor nodes
+        int n = A.Count;
+        float y0 = float.MaxValue, y1 = float.MinValue, x0 = float.MaxValue, x1 = float.MinValue;
+        foreach (var q in A) { y0 = Math.Min(y0, q.Y); y1 = Math.Max(y1, q.Y); x0 = Math.Min(x0, q.X); x1 = Math.Max(x1, q.X); }
+        float H = y1 - y0, Wd = x1 - x0;
+        float regionMax = y0 + H * 0.45f;   // upper finger band only
+        float xIndexEnd = cx + Wd * 0.02f;   // right of the index finger only
+
+        var notches = new List<PointF>();
+        for (int i = 0; i < n; i++)
+        {
+            var a = A[(i - 1 + n) % n]; var b = A[i]; var c = A[(i + 1) % n];
+            if (b.Y > regionMax || b.X < xIndexEnd) continue;
+            if (b.Y >= a.Y && b.Y >= c.Y) notches.Add(b);
+        }
+        notches.Sort((u, v) => u.X.CompareTo(v.X));
+        float lastX = float.MinValue;
+        foreach (var v in notches)
+        {
+            if (v.X - lastX < H * 0.08f) continue; // merge nodes on the same finger
+            lastX = v.X;
+            yield return (v, new PointF(v.X, v.Y + H * 0.16f));
+        }
+    }
+
+    // The knuckle crease marks (the contours after the silhouette[0] and its inner edge[1])
+    // are thin capsules; collapse each to its centreline segment so stroking it yields a
+    // clean, thickness-scaled crease instead of a hollow capsule outline.
+    static IEnumerable<(PointF, PointF)> CreaseLines(Func<float[], PointF[]> map)
+    {
+        for (int c = 2; c < HandShape.Contours.Length; c++)
+        {
+            var pts = map(HandShape.Contours[c]);
+            float minX = pts[0].X, maxX = pts[0].X, minY = pts[0].Y, maxY = pts[0].Y;
+            foreach (var q in pts)
+            { minX = Math.Min(minX, q.X); maxX = Math.Max(maxX, q.X); minY = Math.Min(minY, q.Y); maxY = Math.Max(maxY, q.Y); }
+            float bw = maxX - minX, bh = maxY - minY;
+            if (bh >= bw) { float xm = (minX + maxX) / 2f, r = bw / 2f; yield return (new PointF(xm, minY + r), new PointF(xm, maxY - r)); }
+            else { float ym = (minY + maxY) / 2f, r = bh / 2f; yield return (new PointF(minX + r, ym), new PointF(maxX - r, ym)); }
+        }
     }
 
     static Color Parse(string hex, Color fallback)
