@@ -16,8 +16,16 @@ public sealed class TrayApplicationContext : ApplicationContext
     readonly ToolStripMenuItem _enabledItem;
     readonly ToolStripMenuItem _startupItem;
 
+    // A hidden, handle-backed control bound to the UI thread. Cross-process signals
+    // (single-instance guard) BeginInvoke through it to hop onto the UI thread before
+    // touching WinForms. We force its handle now, while we're on the STA UI thread.
+    readonly Control _marshal = new();
+    bool _preferencesOpen;
+
     public TrayApplicationContext()
     {
+        _ = _marshal.Handle; // realise the window handle on the UI thread for BeginInvoke
+
         _engine = new CursorEngine(_settings);
         _appIcon = LoadAppIcon();
 
@@ -87,19 +95,42 @@ public sealed class TrayApplicationContext : ApplicationContext
         _startupItem.Checked = _autostart.IsEnabled;
     }
 
-    void OnPreferences(object? sender, EventArgs e)
+    void OnPreferences(object? sender, EventArgs e) => OpenPreferences();
+
+    /// <summary>
+    /// Shows the Preferences dialog and applies any changes. Safe to call from a
+    /// background thread (e.g. the single-instance signal handler): it marshals onto
+    /// the UI thread, since WinForms dialogs may only be shown there. Re-entrancy is
+    /// guarded so a second signal while the dialog is already open is ignored.
+    /// </summary>
+    public void OpenPreferences()
     {
-        using var dlg = new PreferencesForm(_settings.Clone());
-        if (dlg.ShowDialog() != DialogResult.OK) return;
+        if (_marshal.InvokeRequired)
+        {
+            _marshal.BeginInvoke(OpenPreferences);
+            return;
+        }
 
-        _settings.CopyFrom(dlg.Settings);   // apply edits to the live settings the engine holds
-        SettingsStore.Save(_settings);
+        if (_preferencesOpen) return; // already showing; bring no second dialog up
+        _preferencesOpen = true;
+        try
+        {
+            using var dlg = new PreferencesForm(_settings.Clone());
+            if (dlg.ShowDialog() != DialogResult.OK) return;
 
-        // Rebuild so the new appearance takes effect, preserving enabled/disabled state.
-        bool wasRunning = _engine.IsRunning;
-        _engine.Stop();
-        if (wasRunning) _engine.Start();
-        _enabledItem.Checked = _engine.IsRunning;
+            _settings.CopyFrom(dlg.Settings);   // apply edits to the live settings the engine holds
+            SettingsStore.Save(_settings);
+
+            // Rebuild so the new appearance takes effect, preserving enabled/disabled state.
+            bool wasRunning = _engine.IsRunning;
+            _engine.Stop();
+            if (wasRunning) _engine.Start();
+            _enabledItem.Checked = _engine.IsRunning;
+        }
+        finally
+        {
+            _preferencesOpen = false;
+        }
     }
 
     void OnExit(object? sender, EventArgs e)
@@ -126,6 +157,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _tray.Dispose();
             _engine.Dispose();
             _appIcon.Dispose();
+            _marshal.Dispose();
         }
         base.Dispose(disposing);
     }
