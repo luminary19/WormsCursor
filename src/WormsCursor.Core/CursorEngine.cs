@@ -7,7 +7,7 @@ namespace WormsCursor.Core;
 
 /// <summary>Which cursor the engine should force on screen for visual testing
 /// (Preferences "Test cursor"), or <see cref="Off"/> to resume normal behaviour.</summary>
-public enum TestCursor { Off, Arrow, Hand, Wait, AppStarting }
+public enum TestCursor { Off, Arrow, Hand, Wait, AppStarting, Help }
 
 /// <summary>
 /// Rotates the system arrow and hand cursors (OCR_NORMAL + OCR_HAND) to follow
@@ -119,7 +119,8 @@ public sealed class CursorEngine : IDisposable
             float phase = 0;                          // comet rotation
             float bx = 0, by = 0, vbx = 0, vby = 0;   // bob world position + velocity
             bool bobInit = false;
-            float ringCX = 0, ringCY = 0;             // ring centre in canvas px (read by Busy())
+            float ringCX = 0, ringCY = 0;             // bob centre in canvas px (read by Busy()/Help())
+            float helpAngleDeg = 180f;                // string angle for the "?" (180 = hanging upside down)
             int sz = Math.Max(8, _settings.Size);
             const float pendK = 130f, pendC = 3f;     // string stiffness + damping (underdamped: it swings)
             float restDrop = sz * 0.30f;              // how far below the tail it hangs at rest
@@ -127,7 +128,7 @@ public sealed class CursorEngine : IDisposable
             float maxLen = sz * 0.42f;                // taut-string max length from the tail
             float phaseStep = 1.6f * MathF.PI * 2f * dt;            // ~1.6 rev/s
             int fgEvery = Math.Max(1, _settings.Hz / 60);           // ~60 fps for the animated cursor
-            IntPtr lastWait = IntPtr.Zero, lastApp = IntPtr.Zero;   // last handles we set (vs GetCursorInfo)
+            IntPtr lastWait = IntPtr.Zero, lastApp = IntPtr.Zero, lastHelp = IntPtr.Zero; // last handles set (vs GetCursorInfo)
             bool busyInit = false;
             var lastTest = TestCursor.Off;
             int tick = 0;
@@ -142,6 +143,15 @@ public sealed class CursorEngine : IDisposable
                 float rx = withArrow ? ringCX : l.HotX;
                 float ry = withArrow ? ringCY : l.HotY;
                 using var bmp = ProgressRenderer.Compose(_settings, _arrowBase!, deg, rx, ry, phase, withArrow);
+                return MakeCursor(bmp, l.HotX, l.HotY);
+            }
+
+            // The help cursor: the arrow plus a "?" that hangs off the tail on the same
+            // pendulum (ringCX/ringCY) but tilts with the string instead of spinning.
+            IntPtr Help()
+            {
+                double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
+                using var bmp = ProgressRenderer.ComposeHelp(_settings, _arrowBase!, deg, ringCX, ringCY, helpAngleDeg);
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
@@ -216,6 +226,9 @@ public sealed class CursorEngine : IDisposable
                     }
                     ringCX = Math.Clamp(l.HotX + (bx - p.x), l.DotR, l.Canvas - l.DotR);
                     ringCY = Math.Clamp(l.HotY + (by - p.y), l.DotR, l.Canvas - l.DotR);
+                    // string angle (anchor -> bob); +90 so the "?" hangs upside-down at rest
+                    // (straight-down string) and tilts as the bob swings to the sides.
+                    helpAngleDeg = (float)(Math.Atan2(by - ay, bx - ax) * 180.0 / Math.PI) + 90f;
                 }
 
                 // --- 4) apply cursors ---
@@ -238,6 +251,7 @@ public sealed class CursorEngine : IDisposable
                     {
                         lastWait = Busy(false); SetSystemCursor(lastWait, OCR_WAIT);
                         lastApp = Busy(true); SetSystemCursor(lastApp, OCR_APPSTARTING);
+                        lastHelp = Help(); SetSystemCursor(lastHelp, OCR_HELP);
                         busyInit = true;
                     }
                     else if (fgRender)
@@ -247,14 +261,15 @@ public sealed class CursorEngine : IDisposable
                         {
                             if (ci.hCursor == lastWait) { lastWait = Busy(false); SetSystemCursor(lastWait, OCR_WAIT); }
                             else if (ci.hCursor == lastApp) { lastApp = Busy(true); SetSystemCursor(lastApp, OCR_APPSTARTING); }
+                            else if (ci.hCursor == lastHelp) { lastHelp = Help(); SetSystemCursor(lastHelp, OCR_HELP); }
                         }
                     }
                 }
-                else if (test == TestCursor.Wait || test == TestCursor.AppStarting)
+                else if (test == TestCursor.Wait || test == TestCursor.AppStarting || test == TestCursor.Help)
                 {
-                    if (fgRender) // force the animated busy cursor onto the visible slots
+                    if (fgRender) // force the animated busy/help cursor onto the visible slots
                     {
-                        IntPtr h = Busy(test == TestCursor.AppStarting);
+                        IntPtr h = test == TestCursor.Help ? Help() : Busy(test == TestCursor.AppStarting);
                         SetSystemCursor(h, OCR_NORMAL);
                         SetSystemCursor(CopyIcon(h), OCR_HAND);
                     }
@@ -374,6 +389,7 @@ public sealed class CursorEngine : IDisposable
     const uint OCR_NORMAL = 32512;
     const uint OCR_WAIT = 32514;
     const uint OCR_APPSTARTING = 32650;
+    const uint OCR_HELP = 32651;
     const uint OCR_HAND = 32649;
     const uint SPI_SETCURSORS = 0x0057;
 

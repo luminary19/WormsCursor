@@ -33,15 +33,18 @@ public sealed class PreferencesForm : Form
     readonly Button _fillBtn, _outlineBtn;
     readonly ComboBox _testCombo;
     readonly Action<TestCursor> _setTest;
+    readonly Action<CursorSettings> _apply;
     readonly UpdateService _updates;
     readonly Button _updateBtn;
     readonly Label _updateStatus;
 
-    public PreferencesForm(CursorSettings working, UpdateService updates, Action<TestCursor> setTestCursor)
+    public PreferencesForm(CursorSettings working, UpdateService updates,
+                           Action<TestCursor> setTestCursor, Action<CursorSettings> applyLive)
     {
         _working = working;
         _updates = updates;
         _setTest = setTestCursor;
+        _apply = applyLive;
 
         Text = "WormsCursor — Preferences";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -82,7 +85,7 @@ public sealed class PreferencesForm : Form
         // It reflects the currently APPLIED appearance, not unsaved edits — OK first to
         // test new colours/size. Cleared automatically when this dialog closes.
         _testCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
-        _testCombo.Items.AddRange(new object[] { "Off (normal)", "Arrow", "Hand", "Busy (wait)", "App starting" });
+        _testCombo.Items.AddRange(new object[] { "Off (normal)", "Arrow", "Hand", "Busy (wait)", "App starting", "Help (arrow + ?)" });
         _testCombo.SelectedIndex = 0;
         _testCombo.SelectedIndexChanged += (_, _) => _setTest(MapTest(_testCombo.SelectedIndex));
         AddComboRow("Test cursor (force on screen)", _testCombo, ref y);
@@ -91,29 +94,34 @@ public sealed class PreferencesForm : Form
         int btnY = y + 8;
         var defaults = new Button { Text = "Defaults", Location = new Point(M, btnY), Size = new Size(90, 30) };
         defaults.Click += (_, _) => ResetDefaults();
-        _updateBtn = new Button { Text = "Check for updates", Location = new Point(M + 98, btnY), Size = new Size(140, 30) };
-        _updateBtn.Click += OnCheckUpdates;
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Size = new Size(84, 30), Location = new Point(W - M - 84 - 8 - 84, btnY) };
+        // Right cluster: Apply | OK | Cancel. Apply commits the edits to the live cursor
+        // without closing, so you can tweak size/colour and watch the test cursor update.
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(84, 30), Location = new Point(W - M - 84, btnY) };
+        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Size = new Size(84, 30), Location = new Point(W - M - 176, btnY) };
+        var apply = new Button { Text = "Apply", Size = new Size(84, 30), Location = new Point(W - M - 268, btnY) };
+        apply.Click += (_, _) => _apply(_working);
         Controls.Add(defaults);
-        Controls.Add(_updateBtn);
+        Controls.Add(apply);
         Controls.Add(ok);
         Controls.Add(cancel);
         AcceptButton = ok;
         CancelButton = cancel;
 
-        // Footer over two lines: version + update status on the first, repo link on
-        // its own line below (so a long URL is never truncated).
-        int footerY = btnY + 30 + 16;
-        var version = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "v" + AppVersion(), Location = new Point(M, footerY) };
-        _updateStatus = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = string.Empty, Location = new Point(M + 56, footerY) };
-        var link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor", Location = new Point(M, footerY + 22) };
+        // Footer line 1: version + "Check for updates" (moved here off the button row to
+        // make room for Apply) + update status. Line 2: the repo link on its own line.
+        int footerY = btnY + 30 + 14;
+        var version = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "v" + AppVersion(), Location = new Point(M, footerY + 5) };
+        _updateBtn = new Button { Text = "Check for updates", Location = new Point(M + 50, footerY), Size = new Size(140, 26) };
+        _updateBtn.Click += OnCheckUpdates;
+        _updateStatus = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = string.Empty, Location = new Point(M + 50 + 148, footerY + 5) };
+        var link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor", Location = new Point(M, footerY + 38) };
         link.LinkClicked += (_, _) => OpenUrl(RepoUrl);
         Controls.Add(version);
+        Controls.Add(_updateBtn);
         Controls.Add(_updateStatus);
         Controls.Add(link);
 
-        ClientSize = new Size(W, footerY + 22 + link.PreferredHeight + M); // bottom margin under the link line
+        ClientSize = new Size(W, footerY + 38 + link.PreferredHeight + M); // bottom margin under the link line
 
         UpdateLabels();
         RenderPreview();
@@ -170,6 +178,7 @@ public sealed class PreferencesForm : Form
         2 => TestCursor.Hand,
         3 => TestCursor.Wait,
         4 => TestCursor.AppStarting,
+        5 => TestCursor.Help,
         _ => TestCursor.Off,
     };
 

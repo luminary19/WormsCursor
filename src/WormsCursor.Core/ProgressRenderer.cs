@@ -53,16 +53,7 @@ public static class ProgressRenderer
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-        if (withArrow)
-        {
-            int a = arrowBase.Width;                 // arrow tip sits at its own centre
-            var st = g.Save();
-            g.TranslateTransform(l.HotX, l.HotY);
-            g.RotateTransform((float)arrowDeg);
-            g.TranslateTransform(-a / 2f, -a / 2f);
-            g.DrawImage(arrowBase, 0, 0);
-            g.Restore(st);
-        }
+        if (withArrow) DrawArrow(g, l, arrowBase, arrowDeg);
 
         var fill = Parse(s.FillColor, Color.White);
         var outline = Parse(s.OutlineColor, Color.Black);
@@ -82,6 +73,53 @@ public static class ProgressRenderer
                     g.DrawEllipse(p, cx - rr, cy - rr, rr * 2, rr * 2);
         }
         return bmp;
+    }
+
+    /// <summary>Composites the help cursor: the arrow plus a "?" glyph that hangs off the
+    /// arrow's tail like the busy ring (same pendulum), but tilts with the string instead
+    /// of spinning. <paramref name="glyphDeg"/> is the string angle (the engine sets it so
+    /// the "?" hangs upside-down at rest and swings as the cursor moves).</summary>
+    public static Bitmap ComposeHelp(CursorSettings s, Bitmap arrowBase, double arrowDeg,
+                                     float qx, float qy, float glyphDeg)
+    {
+        var l = Layout(s);
+        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+        DrawArrow(g, l, arrowBase, arrowDeg);
+
+        using var fam = new FontFamily("Arial");
+        using var path = new GraphicsPath();
+        path.AddString("?", fam, (int)FontStyle.Bold, s.Size * 0.55f, PointF.Empty, StringFormat.GenericTypographic);
+        var gb = path.GetBounds();
+
+        var st = g.Save();
+        g.TranslateTransform(qx, qy);
+        g.RotateTransform(glyphDeg);
+        g.TranslateTransform(-(gb.X + gb.Width / 2f), -(gb.Y + gb.Height / 2f)); // centre the glyph on the bob
+        using (var br = new SolidBrush(Parse(s.FillColor, Color.White)))
+            g.FillPath(br, path);
+        float pen = (float)(s.OutlineThickness * (s.Size / 64f));
+        if (pen > 0.01f)
+            using (var p = new Pen(Parse(s.OutlineColor, Color.Black), pen) { LineJoin = LineJoin.Round })
+                g.DrawPath(p, path);
+        g.Restore(st);
+        return bmp;
+    }
+
+    // Draws the arrow rotated about its tip (the canvas-centre hotspot), at native size.
+    static void DrawArrow(Graphics g, LayoutInfo l, Bitmap arrowBase, double arrowDeg)
+    {
+        int a = arrowBase.Width;                 // arrow tip sits at its own centre
+        var st = g.Save();
+        g.TranslateTransform(l.HotX, l.HotY);
+        g.RotateTransform((float)arrowDeg);
+        g.TranslateTransform(-a / 2f, -a / 2f);
+        g.DrawImage(arrowBase, 0, 0);
+        g.Restore(st);
     }
 
     static Color Parse(string hex, Color fallback)

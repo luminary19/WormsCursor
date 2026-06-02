@@ -13,9 +13,14 @@ GitHub releases. The release workflow pulls the matching section into each relea
   stop. *Wait* (`OCR_WAIT`) is the same ring centred on the pointer (spin only, no
   physics, so you can always see where you're pointing). They animate only while actually
   on screen (checked via `GetCursorInfo`), so an idle tray uses no CPU.
+- The **help cursor** (`OCR_HELP`) is themed too: the rotating arrow with a "?" that hangs
+  upside-down off the tail on the same pendulum string, swinging to the sides as you move.
 - Preferences: a **Test cursor** control that forces a chosen cursor (arrow, hand, wait,
-  app-starting) on screen, so you can preview the busy animations on demand; it clears
-  automatically when the dialog closes.
+  app-starting, help) on screen, so you can preview the animated cursors on demand; it
+  clears automatically when the dialog closes.
+- Preferences: an **Apply** button that commits edits to the live cursor without closing
+  the dialog (so you can tune size/colour and watch the test cursor update). "Check for
+  updates" moved down beside the version to make room for it.
 
 ## 0.3.0 - 2026-06-02
 

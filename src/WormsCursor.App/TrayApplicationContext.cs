@@ -121,26 +121,35 @@ public sealed class TrayApplicationContext : ApplicationContext
         _preferencesOpen = true;
         try
         {
-            // Pass SetTestCursor so the dialog's "Test cursor" control can force a cursor
-            // on the live (still-running) engine while it's open.
-            using var dlg = new PreferencesForm(_settings.Clone(), _updates, _engine.SetTestCursor);
+            // Pass SetTestCursor + ApplySettings so the dialog's "Test cursor" control can
+            // force a cursor on the live (still-running) engine, and its "Apply" button can
+            // commit edits without closing.
+            using var dlg = new PreferencesForm(_settings.Clone(), _updates, _engine.SetTestCursor, ApplySettings);
             var result = dlg.ShowDialog();
             _engine.SetTestCursor(TestCursor.Off); // always stop forcing a test cursor on close
-            if (result != DialogResult.OK) return;
-
-            _settings.CopyFrom(dlg.Settings);   // apply edits to the live settings the engine holds
-            SettingsStore.Save(_settings);
-
-            // Rebuild so the new appearance takes effect, preserving enabled/disabled state.
-            bool wasRunning = _engine.IsRunning;
-            _engine.Stop();
-            if (wasRunning) _engine.Start();
-            _enabledItem.Checked = _engine.IsRunning;
+            if (result == DialogResult.OK) ApplySettings(dlg.Settings);
         }
         finally
         {
             _preferencesOpen = false;
         }
+    }
+
+    /// <summary>
+    /// Apply edited settings to the live engine — used by both Preferences "Apply" and
+    /// "OK". Persists them and rebuilds the cursors, preserving the enabled/disabled
+    /// state. A running test cursor survives the rebuild, so you can tweak size/colour
+    /// and watch it update without closing the dialog.
+    /// </summary>
+    void ApplySettings(CursorSettings source)
+    {
+        _settings.CopyFrom(source);
+        SettingsStore.Save(_settings);
+
+        bool wasRunning = _engine.IsRunning;
+        _engine.Stop();
+        if (wasRunning) _engine.Start();
+        _enabledItem.Checked = _engine.IsRunning;
     }
 
     // Tray-driven update check. Velopack has no UI of its own, so we surface

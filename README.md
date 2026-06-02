@@ -41,6 +41,8 @@ _The cursor rotating to follow your mouse movement._
   swinging out as you move and settling when you stop — while *wait* (`OCR_WAIT`) is the
   same ring centred on the pointer (spin only). They animate only while actually on screen,
   so an idle tray costs nothing.
+- The **help cursor** (`OCR_HELP`) hangs a "?" upside-down off the arrow's tail on the same
+  string, swinging to the sides as you move and settling when you stop.
 
 ## Project structure
 
@@ -51,7 +53,7 @@ WormsCursor.sln
 │  │   ├─ CursorEngine.cs     P/Invoke, cursor building, tracking + animation loop
 │  │   ├─ ArrowRenderer.cs    Draws the arrow (size, colours, thickness, corner radius)
 │  │   ├─ HandRenderer.cs     Draws the hand/link cursor (solid fill + baked line art)
-│  │   ├─ ProgressRenderer.cs Draws the busy/progress cursor (arrow + trailing comet ring)
+│  │   ├─ ProgressRenderer.cs Draws the busy/progress + help cursors (arrow + ring / "?")
 │  │   ├─ HandShape.cs        Baked hand geometry (silhouette + crease marks)
 │  │   ├─ CursorSettings.cs   Tunable parameters (persisted as JSON)
 │  │   └─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
