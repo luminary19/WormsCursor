@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{58321A67-14F3-4A1A-A160-3C6F127C7451}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WormsCursor.Core", "src\WormsCursor.Core\WormsCursor.Core.csproj", "{3CC27A3B-5368-444C-8E6D-ED0799EA8FAA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WormsCursor.App", "src\WormsCursor.App\WormsCursor.App.csproj", "{804B3F8F-B1B4-43DB-B0A8-633DE070E3E9}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3CC27A3B-5368-444C-8E6D-ED0799EA8FAA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3CC27A3B-5368-444C-8E6D-ED0799EA8FAA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3CC27A3B-5368-444C-8E6D-ED0799EA8FAA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3CC27A3B-5368-444C-8E6D-ED0799EA8FAA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{804B3F8F-B1B4-43DB-B0A8-633DE070E3E9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{804B3F8F-B1B4-43DB-B0A8-633DE070E3E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{804B3F8F-B1B4-43DB-B0A8-633DE070E3E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{804B3F8F-B1B4-43DB-B0A8-633DE070E3E9}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{3CC27A3B-5368-444C-8E6D-ED0799EA8FAA} = {58321A67-14F3-4A1A-A160-3C6F127C7451}
+		{804B3F8F-B1B4-43DB-B0A8-633DE070E3E9} = {58321A67-14F3-4A1A-A160-3C6F127C7451}
+	EndGlobalSection
+EndGlobal

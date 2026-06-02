@@ -1,5 +1,5 @@
 # Emergency restore of the default Windows cursors.
-# Use this if RotatingCursor.exe was force-killed and the cursor got stuck rotated.
+# Use this if WormsCursor.exe was force-killed and the cursor got stuck rotated.
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;

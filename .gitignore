@@ -1,3 +1,24 @@
 # Build output
-*.exe
-*.pdb
+[Bb]in/
+[Oo]bj/
+[Pp]ublish/
+artifacts/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build / restore
+*.binlog
+project.lock.json
+project.assets.json
+msbuild.log
+
+# OS junk
+Thumbs.db
+desktop.ini
+.DS_Store

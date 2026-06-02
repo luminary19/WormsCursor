@@ -1,0 +1,79 @@
+# WormsCursor
+
+A tiny Windows tray utility that **rotates the mouse cursor to follow your movement
+direction** — like the aiming arrow in *Worms 3D*. Move the mouse right and the arrow
+points right; sweep it down and it smoothly slews to point down.
+
+It runs in the background from the system tray, with no main window.
+
+> ⚠️ **It replaces the system-wide arrow cursor** (`SetSystemCursor`). While running,
+> every app sees the rotated arrow. Quitting from the tray restores the Windows
+> defaults. If the process is ever force-killed and the cursor stays rotated, run
+> [`tools/RestoreCursor.ps1`](tools/RestoreCursor.ps1) to put things back.
+
+## Demo
+
+<!-- TODO: drop a short screen capture here -->
+_Video coming soon._
+
+## How it works
+
+- At startup the engine pre-renders **360 rotated copies** of the arrow (one per degree)
+  as cursors, each with the hotspot pinned to the arrow tip.
+- A background loop polls the cursor position (144 Hz by default) and computes the
+  movement direction from **accumulated travel**, so ±1 px jitter doesn't make the arrow
+  wobble on straight or vertical moves.
+- The displayed angle is **animated toward** the target direction (a fixed deg/s slew),
+  so turns look smooth instead of snapping.
+
+## Project structure
+
+```
+WormsCursor.sln
+├─ src/
+│  ├─ WormsCursor.Core/      Engine — no UI dependencies
+│  │   ├─ CursorEngine.cs     P/Invoke, cursor building, tracking + animation loop
+│  │   ├─ ArrowRenderer.cs    Draws the base arrow bitmap
+│  │   └─ CursorSettings.cs   Tunable parameters (what Preferences will edit)
+│  └─ WormsCursor.App/       Tray shell (WinForms, no main window)
+│      ├─ Program.cs
+│      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the engine
+│      └─ PreferencesForm.cs          Settings dialog (skeleton)
+└─ tools/
+   └─ RestoreCursor.ps1      Emergency restore of default cursors
+```
+
+The engine (`Core`) is deliberately UI-agnostic, so the tray shell could later be
+swapped for WPF/WinUI — or packaged for the Microsoft Store — without touching the
+cursor logic.
+
+## Build & run
+
+Requires the **.NET 8 SDK** (Windows). Open `WormsCursor.sln` in Visual Studio 2022+
+and run, or from a terminal:
+
+```powershell
+dotnet build WormsCursor.sln
+dotnet run --project src/WormsCursor.App
+```
+
+A tray icon appears. Right-click it for **Enabled / Preferences… / Exit**;
+double-click toggles the effect on/off.
+
+### Standalone build (no .NET install on the target)
+
+```powershell
+dotnet publish src/WormsCursor.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+```
+
+> Note: WinForms doesn't support trimming/NativeAOT, so a self-contained build is
+> several tens of MB. A framework-dependent build is tiny but needs the
+> *.NET 8 Desktop Runtime* installed.
+
+## Roadmap
+
+- [ ] Real preferences UI (rotation speed, smoothing, polling rate, arrow size/colour)
+- [ ] Dedicated tray icon
+- [ ] Persist settings between runs
+- [ ] Optional "start with Windows"
+- [ ] Demo video
