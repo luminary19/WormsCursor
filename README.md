@@ -71,8 +71,10 @@ dotnet build WormsCursor.sln
 dotnet run --project src/WormsCursor.App
 ```
 
-A tray icon appears. Right-click it for **Enabled / Preferences… / Exit**;
-double-click toggles the effect on/off.
+A tray icon appears. Right-click it for **Enabled / Start with Windows / Preferences… /
+Exit**; double-click toggles the effect on/off. "Start with Windows" registers a
+per-user `HKCU\…\Run` entry (no admin), which you can also manage from Task Manager →
+Startup apps.
 
 ### Standalone build (no .NET install on the target)
 
@@ -89,5 +91,5 @@ dotnet publish src/WormsCursor.App -c Release -r win-x64 --self-contained true -
 - [ ] Real preferences UI (rotation speed, smoothing, polling rate, arrow size/colour)
 - [x] Dedicated tray icon (white arrow + black frame, `tools/generate-icon.py`)
 - [ ] Persist settings between runs
-- [ ] Optional "start with Windows"
+- [x] Start with Windows (per-user `HKCU\…\Run`, toggle in the tray menu)
 - [ ] Demo video

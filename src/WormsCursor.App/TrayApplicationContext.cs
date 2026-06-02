@@ -12,7 +12,9 @@ public sealed class TrayApplicationContext : ApplicationContext
     readonly CursorEngine _engine;
     readonly NotifyIcon _tray;
     readonly Icon _appIcon;
+    readonly IAutostart _autostart = new RegistryAutostart();
     readonly ToolStripMenuItem _enabledItem;
+    readonly ToolStripMenuItem _startupItem;
 
     public TrayApplicationContext()
     {
@@ -24,9 +26,15 @@ public sealed class TrayApplicationContext : ApplicationContext
             CheckOnClick = false, // we manage Checked ourselves so double-click can't desync it
             Checked = true,
         };
+        _startupItem = new ToolStripMenuItem("Start with Windows", null, OnToggleAutostart)
+        {
+            CheckOnClick = false,
+            Checked = _autostart.IsEnabled,
+        };
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(_enabledItem);
+        menu.Items.Add(_startupItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Preferences…", null, OnPreferences);
         menu.Items.Add(new ToolStripSeparator());
@@ -63,6 +71,20 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (_engine.IsRunning) _engine.Stop();
         else _engine.Start();
         _enabledItem.Checked = _engine.IsRunning;
+    }
+
+    void OnToggleAutostart(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (_autostart.IsEnabled) _autostart.Disable();
+            else _autostart.Enable();
+        }
+        catch (Exception ex)
+        {
+            _tray.ShowBalloonTip(3000, "WormsCursor", "Couldn't change autostart: " + ex.Message, ToolTipIcon.Warning);
+        }
+        _startupItem.Checked = _autostart.IsEnabled;
     }
 
     void OnPreferences(object? sender, EventArgs e)
