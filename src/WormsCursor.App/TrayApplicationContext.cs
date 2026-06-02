@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using WormsCursor.Core;
 
 namespace WormsCursor.App;
@@ -12,12 +13,18 @@ public sealed class TrayApplicationContext : ApplicationContext
     readonly CursorEngine _engine;
     readonly NotifyIcon _tray;
     readonly Icon _appIcon;
+    readonly Process? _watchdog;
     readonly ToolStripMenuItem _enabledItem;
 
     public TrayApplicationContext()
     {
         _engine = new CursorEngine(_settings);
         _appIcon = LoadAppIcon();
+
+        // Detached watchdog: the only thing that can restore the cursor if WE get
+        // TerminateProcess'd (Task Manager / "Stop Debugging"). Launch it before we
+        // ever touch the cursor.
+        _watchdog = Watchdog.Launch();
 
         _enabledItem = new ToolStripMenuItem("Enabled", null, OnToggleEnabled)
         {
@@ -96,6 +103,9 @@ public sealed class TrayApplicationContext : ApplicationContext
             _tray.Dispose();
             _engine.Dispose();
             _appIcon.Dispose();
+            // Only releases our handle — the watchdog keeps waiting and will restore
+            // once this process is actually gone (then it exits on its own).
+            _watchdog?.Dispose();
         }
         base.Dispose(disposing);
     }
