@@ -4,6 +4,24 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
+## 0.3.0 - 2026-06-02
+
+### Added
+- The **hand / link cursor** (`OCR_HAND`) now rotates to follow movement too. It's drawn
+  the same way as the arrow — a filled silhouette plus a pen-stroked outline, finger
+  separators and knuckle creases — so it shares the arrow's fill/outline colour, size and
+  outline thickness.
+
+### Changed
+- Outline thickness now scales every hand line together (outline + finger creases),
+  exactly 1:1 with the arrow, and the slider is capped at 4 px (beyond that the lines just
+  merge). At thickness 0 the hand is a bare fill, like the arrow.
+- Preferences: corner radius is now labelled **arrow only** (it never applied to the hand).
+
+### Removed
+- The hand's source SVG and its bake script (`tools/`); `HandShape.cs` is now the baked
+  source of truth (recoverable from git history if the shape ever needs regenerating).
+
 ## 0.2.1 - 2026-06-02
 
 ### Fixed

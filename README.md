@@ -21,7 +21,7 @@ It runs in the background from the system tray, with no main window.
 
 https://github.com/user-attachments/assets/c8095725-6cfe-4c99-b9f3-834460b1514c
 
-_The cursor rotating to follow your mouse movement ([local copy](assets/video.mp4))._
+_The cursor rotating to follow your mouse movement._
 
 ## How it works
 
@@ -32,8 +32,10 @@ _The cursor rotating to follow your mouse movement ([local copy](assets/video.mp
   wobble on straight or vertical moves.
 - The displayed angle is **animated toward** the target direction (a fixed deg/s slew),
   so turns look smooth instead of snapping.
-- Both the **arrow** (`OCR_NORMAL`) and the **hand/link** cursor (`OCR_HAND`) rotate; the
-  hand is traced from a bundled SVG into a baked path and shares the arrow's colours/size.
+- Both the **arrow** (`OCR_NORMAL`) and the **hand/link** cursor (`OCR_HAND`) rotate. The
+  hand is drawn the same way as the arrow — a filled silhouette plus a pen-stroked outline,
+  finger separators and knuckle creases — so it shares the arrow's colour, size and outline
+  thickness (the geometry is baked into `HandShape.cs`).
 
 ## Project structure
 
@@ -44,7 +46,7 @@ WormsCursor.sln
 │  │   ├─ CursorEngine.cs     P/Invoke, cursor building, tracking + animation loop
 │  │   ├─ ArrowRenderer.cs    Draws the arrow (size, colours, thickness, corner radius)
 │  │   ├─ HandRenderer.cs     Draws the hand/link cursor (solid fill + baked line art)
-│  │   ├─ HandShape.cs        Hand path baked from the SVG (generated)
+│  │   ├─ HandShape.cs        Baked hand geometry (silhouette + crease marks)
 │  │   ├─ CursorSettings.cs   Tunable parameters (persisted as JSON)
 │  │   └─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
 │  └─ WormsCursor.App/       Tray shell (WinForms, no main window)
@@ -56,8 +58,6 @@ WormsCursor.sln
 │      └─ Services/UpdateService.cs    Velopack check / download / apply updates
 └─ tools/
    ├─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the arrow glyph
-   ├─ gen-hand-shape.py      Bakes mouse-hand-cursor-icon.svg into HandShape.cs
-   ├─ mouse-hand-cursor-icon.svg  Source art for the hand cursor
    ├─ pack.ps1               Build a Velopack release locally (Setup.exe + Portable.zip)
    ├─ RELEASING.md           How to cut a release
    └─ RestoreCursor.ps1      Emergency restore of default cursors
