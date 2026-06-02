@@ -11,11 +11,13 @@ public sealed class TrayApplicationContext : ApplicationContext
     readonly CursorSettings _settings = new();
     readonly CursorEngine _engine;
     readonly NotifyIcon _tray;
+    readonly Icon _appIcon;
     readonly ToolStripMenuItem _enabledItem;
 
     public TrayApplicationContext()
     {
         _engine = new CursorEngine(_settings);
+        _appIcon = LoadAppIcon();
 
         _enabledItem = new ToolStripMenuItem("Enabled", null, OnToggleEnabled)
         {
@@ -32,7 +34,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _tray = new NotifyIcon
         {
-            Icon = SystemIcons.Application, // TODO: ship a dedicated app icon
+            Icon = _appIcon,
             Text = "WormsCursor",
             Visible = true,
             ContextMenuStrip = menu,
@@ -72,12 +74,23 @@ public sealed class TrayApplicationContext : ApplicationContext
         ExitThread();
     }
 
+    // Loads the monochrome arrow built by tools/generate-icon.py, copied next to
+    // the exe (CopyToOutputDirectory). Picks the small-icon size for a crisp tray
+    // glyph; falls back to the stock icon if the asset is somehow missing.
+    static Icon LoadAppIcon()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "Assets", "Icon.ico");
+        try { return new Icon(path, SystemInformation.SmallIconSize); }
+        catch { return (Icon)SystemIcons.Application.Clone(); }
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
             _tray.Dispose();
             _engine.Dispose();
+            _appIcon.Dispose();
         }
         base.Dispose(disposing);
     }
