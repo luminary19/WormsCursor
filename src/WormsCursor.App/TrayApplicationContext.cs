@@ -121,8 +121,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         _preferencesOpen = true;
         try
         {
-            using var dlg = new PreferencesForm(_settings.Clone(), _updates);
-            if (dlg.ShowDialog() != DialogResult.OK) return;
+            // Pass SetTestCursor so the dialog's "Test cursor" control can force a cursor
+            // on the live (still-running) engine while it's open.
+            using var dlg = new PreferencesForm(_settings.Clone(), _updates, _engine.SetTestCursor);
+            var result = dlg.ShowDialog();
+            _engine.SetTestCursor(TestCursor.Off); // always stop forcing a test cursor on close
+            if (result != DialogResult.OK) return;
 
             _settings.CopyFrom(dlg.Settings);   // apply edits to the live settings the engine holds
             SettingsStore.Save(_settings);

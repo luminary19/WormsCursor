@@ -4,6 +4,19 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
+## 0.4.0 - 2026-06-02
+
+### Added
+- **Busy / progress cursors** are now themed to match. *App-starting* (`OCR_APPSTARTING`)
+  is the rotating arrow plus a spinning comet ring that hangs off its tail on a springy
+  string under gravity — it swings out as you move and settles straight down when you
+  stop. *Wait* (`OCR_WAIT`) is the same ring centred on the pointer (spin only, no
+  physics, so you can always see where you're pointing). They animate only while actually
+  on screen (checked via `GetCursorInfo`), so an idle tray uses no CPU.
+- Preferences: a **Test cursor** control that forces a chosen cursor (arrow, hand, wait,
+  app-starting) on screen, so you can preview the busy animations on demand; it clears
+  automatically when the dialog closes.
+
 ## 0.3.0 - 2026-06-02
 
 ### Added

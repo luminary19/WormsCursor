@@ -5,6 +5,10 @@ using System.Runtime.InteropServices;
 
 namespace WormsCursor.Core;
 
+/// <summary>Which cursor the engine should force on screen for visual testing
+/// (Preferences "Test cursor"), or <see cref="Off"/> to resume normal behaviour.</summary>
+public enum TestCursor { Off, Arrow, Hand, Wait, AppStarting }
+
 /// <summary>
 /// Rotates the system arrow and hand cursors (OCR_NORMAL + OCR_HAND) to follow
 /// mouse-movement direction, like in Worms 3D. UI-agnostic: host it from a tray app,
@@ -23,6 +27,8 @@ public sealed class CursorEngine : IDisposable
     readonly CursorSettings _settings;
     readonly object _gate = new();
     Managed[] _managed = Array.Empty<Managed>();
+    Bitmap? _arrowBase;                       // kept for compositing the busy cursor
+    volatile TestCursor _test = TestCursor.Off;
     Thread? _thread;
     volatile bool _running;
     bool _restored = true;
@@ -30,6 +36,11 @@ public sealed class CursorEngine : IDisposable
     public CursorEngine(CursorSettings settings) => _settings = settings;
 
     public bool IsRunning => _running;
+
+    /// <summary>Force a specific cursor on screen for visual testing, or
+    /// <see cref="TestCursor.Off"/> to resume normal behaviour. Applied on the next
+    /// loop tick; safe to call from the UI thread (just sets a volatile flag).</summary>
+    public void SetTestCursor(TestCursor t) => _test = t;
 
     /// <summary>Builds the rotated cursors and starts the background tracking loop.</summary>
     public void Start()
@@ -86,6 +97,12 @@ public sealed class CursorEngine : IDisposable
             double maxStep = _settings.TurnDps <= 0
                 ? double.PositiveInfinity
                 : _settings.TurnDps / _settings.Hz;       // max rotation per frame
+            float dt = 1f / _settings.Hz;
+
+            var arrowFrames = _managed[0].Frames;          // [0] = arrow, [1] = hand (see BuildCursors)
+            var handFrames = _managed[1].Frames;
+            var l = ProgressRenderer.Layout(_settings);
+            int ciSize = Marshal.SizeOf<CURSORINFO>();
 
             GetCursorPos(out POINT prev);
 
@@ -94,10 +111,44 @@ public sealed class CursorEngine : IDisposable
             double targetDeg = double.NaN;   // where the cursor should point
             double dispDeg = double.NaN;     // what we currently show (animated toward target)
             int idle = 0, curIdx = -1;
+            bool normalDirty = true;         // force a re-push of the normal cursors (e.g. after a test)
+
+            // --- busy/progress spinner state: a pendulum bob (the ring) on a springy
+            //     string anchored to the arrow's tail, under gravity, simulated in WORLD
+            //     coords so it lags/swings when the cursor moves and settles when it stops ---
+            float phase = 0;                          // comet rotation
+            float bx = 0, by = 0, vbx = 0, vby = 0;   // bob world position + velocity
+            bool bobInit = false;
+            float ringCX = 0, ringCY = 0;             // ring centre in canvas px (read by Busy())
+            int sz = Math.Max(8, _settings.Size);
+            const float pendK = 130f, pendC = 3f;     // string stiffness + damping (underdamped: it swings)
+            float restDrop = sz * 0.30f;              // how far below the tail it hangs at rest
+            float gravity = restDrop * pendK;         // chosen so the equilibrium is restDrop below the anchor
+            float maxLen = sz * 0.42f;                // taut-string max length from the tail
+            float phaseStep = 1.6f * MathF.PI * 2f * dt;            // ~1.6 rev/s
+            int fgEvery = Math.Max(1, _settings.Hz / 60);           // ~60 fps for the animated cursor
+            IntPtr lastWait = IntPtr.Zero, lastApp = IntPtr.Zero;   // last handles we set (vs GetCursorInfo)
+            bool busyInit = false;
+            var lastTest = TestCursor.Off;
+            int tick = 0;
+
+            // Composites a busy frame and turns it into a cursor (hotspot = canvas centre).
+            // App-starting: the bob swings off the arrow's tail (pendulum). Wait: no arrow
+            // means no anchor to read, so the ring stays CENTRED on the pointer (spin only,
+            // no physics) — that way you can always see where you're pointing.
+            IntPtr Busy(bool withArrow)
+            {
+                double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
+                float rx = withArrow ? ringCX : l.HotX;
+                float ry = withArrow ? ringCY : l.HotY;
+                using var bmp = ProgressRenderer.Compose(_settings, _arrowBase!, deg, rx, ry, phase, withArrow);
+                return MakeCursor(bmp, l.HotX, l.HotY);
+            }
 
             while (_running)
             {
                 Thread.Sleep(sleepMs);
+                tick++;
                 GetCursorPos(out POINT p);
                 int dx = p.x - prev.x, dy = p.y - prev.y;
                 prev = p;
@@ -129,22 +180,94 @@ public sealed class CursorEngine : IDisposable
                 }
 
                 // --- 2) ANIMATE: move dispDeg toward targetDeg the short way ---
-                if (double.IsNaN(targetDeg)) continue;
-                double diff = targetDeg - dispDeg;
-                diff -= 360.0 * Math.Floor((diff + 180.0) / 360.0); // wrap to [-180, 180)
-                if (Math.Abs(diff) <= maxStep) dispDeg = targetDeg;
-                else dispDeg += Math.Sign(diff) * maxStep;
-                dispDeg -= 360.0 * Math.Floor(dispDeg / 360.0);     // keep within [0, 360)
-
-                int idx = ((int)Math.Round(dispDeg / stepDeg)) % _settings.Steps;
-                if (idx < 0) idx += _settings.Steps;
-                if (idx != curIdx)
+                if (!double.IsNaN(targetDeg))
                 {
-                    curIdx = idx;
-                    foreach (var m in _managed)
-                        SetSystemCursor(CopyIcon(m.Frames[idx]), m.Ocr);
-                    if (_settings.Debug) Debug.WriteLine($"disp={idx} target={(int)Math.Round(targetDeg)}");
+                    double diff = targetDeg - dispDeg;
+                    diff -= 360.0 * Math.Floor((diff + 180.0) / 360.0); // wrap to [-180, 180)
+                    if (Math.Abs(diff) <= maxStep) dispDeg = targetDeg;
+                    else dispDeg += Math.Sign(diff) * maxStep;
+                    dispDeg -= 360.0 * Math.Floor(dispDeg / 360.0);     // keep within [0, 360)
                 }
+                int idx = ((int)Math.Round((double.IsNaN(dispDeg) ? 0.0 : dispDeg) / stepDeg)) % _settings.Steps;
+                if (idx < 0) idx += _settings.Steps;
+
+                // --- 3) advance the spinner: spin the comet, and swing the bob. The
+                //        bob hangs off the arrow's TAIL on a springy string under gravity;
+                //        simulated in world coords so moving the cursor whips the anchor
+                //        and the bob lags/swings, then settles straight down when you stop ---
+                phase += phaseStep;
+                if (phase > MathF.PI * 2f) phase -= MathF.PI * 2f;
+                {
+                    float rad = (float)((double.IsNaN(dispDeg) ? 0.0 : dispDeg) * Math.PI / 180.0);
+                    float ax = p.x - l.TailLen * MathF.Cos(rad);  // anchor = arrow tail (world)
+                    float ay = p.y - l.TailLen * MathF.Sin(rad);
+                    if (!bobInit) { bx = ax; by = ay + restDrop; vbx = vby = 0; bobInit = true; }
+                    vbx += ((ax - bx) * pendK - vbx * pendC) * dt;
+                    vby += ((ay - by) * pendK + gravity - vby * pendC) * dt;
+                    bx += vbx * dt; by += vby * dt;
+                    float sx2 = bx - ax, sy2 = by - ay;
+                    float slen = MathF.Sqrt(sx2 * sx2 + sy2 * sy2);
+                    if (slen > maxLen) // taut string: clamp length and kill outward velocity
+                    {
+                        float nx = sx2 / slen, ny = sy2 / slen;
+                        bx = ax + nx * maxLen; by = ay + ny * maxLen;
+                        float vd = vbx * nx + vby * ny;
+                        if (vd > 0) { vbx -= vd * nx; vby -= vd * ny; }
+                    }
+                    ringCX = Math.Clamp(l.HotX + (bx - p.x), l.DotR, l.Canvas - l.DotR);
+                    ringCY = Math.Clamp(l.HotY + (by - p.y), l.DotR, l.Canvas - l.DotR);
+                }
+
+                // --- 4) apply cursors ---
+                var test = _test;
+                if (test != lastTest) { lastTest = test; normalDirty = true; curIdx = -1; }
+                bool fgRender = tick % fgEvery == 0;
+
+                if (test == TestCursor.Off)
+                {
+                    if (normalDirty || idx != curIdx)
+                    {
+                        curIdx = idx; normalDirty = false;
+                        SetSystemCursor(CopyIcon(arrowFrames[idx]), OCR_NORMAL);
+                        SetSystemCursor(CopyIcon(handFrames[idx]), OCR_HAND);
+                    }
+                    // Theme the busy slots once, then re-render them ONLY while a busy
+                    // cursor is actually on screen (GetCursorInfo) — so an idle tray app
+                    // doesn't burn CPU animating a cursor nobody is looking at.
+                    if (!busyInit)
+                    {
+                        lastWait = Busy(false); SetSystemCursor(lastWait, OCR_WAIT);
+                        lastApp = Busy(true); SetSystemCursor(lastApp, OCR_APPSTARTING);
+                        busyInit = true;
+                    }
+                    else if (fgRender)
+                    {
+                        var ci = new CURSORINFO { cbSize = ciSize };
+                        if (GetCursorInfo(ref ci))
+                        {
+                            if (ci.hCursor == lastWait) { lastWait = Busy(false); SetSystemCursor(lastWait, OCR_WAIT); }
+                            else if (ci.hCursor == lastApp) { lastApp = Busy(true); SetSystemCursor(lastApp, OCR_APPSTARTING); }
+                        }
+                    }
+                }
+                else if (test == TestCursor.Wait || test == TestCursor.AppStarting)
+                {
+                    if (fgRender) // force the animated busy cursor onto the visible slots
+                    {
+                        IntPtr h = Busy(test == TestCursor.AppStarting);
+                        SetSystemCursor(h, OCR_NORMAL);
+                        SetSystemCursor(CopyIcon(h), OCR_HAND);
+                    }
+                }
+                else if (idx != curIdx || normalDirty) // test == Arrow or Hand (static)
+                {
+                    curIdx = idx; normalDirty = false;
+                    var frames = test == TestCursor.Hand ? handFrames : arrowFrames;
+                    SetSystemCursor(CopyIcon(frames[idx]), OCR_NORMAL);
+                    SetSystemCursor(CopyIcon(frames[idx]), OCR_HAND);
+                }
+
+                if (_settings.Debug) Debug.WriteLine($"disp={idx} target={(int)Math.Round(targetDeg)} test={test}");
             }
         }
         finally
@@ -165,11 +288,11 @@ public sealed class CursorEngine : IDisposable
     {
         DestroyCursors();
         int n = _settings.Steps;
-        using Bitmap arrowBase = ArrowRenderer.DrawArrow(_settings);
+        _arrowBase = ArrowRenderer.DrawArrow(_settings); // kept (not disposed) for busy-cursor compositing
         using Bitmap handBase = HandRenderer.DrawHand(_settings);
         _managed = new[]
         {
-            new Managed(OCR_NORMAL, BuildFrames(arrowBase, 0.0, n)),
+            new Managed(OCR_NORMAL, BuildFrames(_arrowBase, 0.0, n)),
             new Managed(OCR_HAND, BuildFrames(handBase, HandShape.BaseAngleDeg, n)),
         };
     }
@@ -204,6 +327,8 @@ public sealed class CursorEngine : IDisposable
             foreach (var h in m.Frames)
                 if (h != IntPtr.Zero) DestroyIcon(h);
         _managed = Array.Empty<Managed>();
+        _arrowBase?.Dispose();
+        _arrowBase = null;
     }
 
     // A system cursor we manage: its OCR id and the n rotated frames (frame i points at
@@ -247,6 +372,8 @@ public sealed class CursorEngine : IDisposable
 
     // ---------- P/Invoke ----------
     const uint OCR_NORMAL = 32512;
+    const uint OCR_WAIT = 32514;
+    const uint OCR_APPSTARTING = 32650;
     const uint OCR_HAND = 32649;
     const uint SPI_SETCURSORS = 0x0057;
 
@@ -255,6 +382,10 @@ public sealed class CursorEngine : IDisposable
     [StructLayout(LayoutKind.Sequential)]
     struct ICONINFO { public bool fIcon; public int xHotspot, yHotspot; public IntPtr hbmMask, hbmColor; }
 
+    [StructLayout(LayoutKind.Sequential)]
+    struct CURSORINFO { public int cbSize; public int flags; public IntPtr hCursor; public POINT ptScreenPos; }
+
+    [DllImport("user32.dll")] static extern bool GetCursorInfo(ref CURSORINFO pci);
     [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll", SetLastError = true)] static extern bool SetSystemCursor(IntPtr hcur, uint id);
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint a, uint b, IntPtr c, uint d);

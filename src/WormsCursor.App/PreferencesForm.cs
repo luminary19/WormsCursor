@@ -31,14 +31,17 @@ public sealed class PreferencesForm : Form
     readonly TrackBar _sizeBar, _thickBar, _radiusBar;
     readonly Label _sizeVal, _thickVal, _radiusVal;
     readonly Button _fillBtn, _outlineBtn;
+    readonly ComboBox _testCombo;
+    readonly Action<TestCursor> _setTest;
     readonly UpdateService _updates;
     readonly Button _updateBtn;
     readonly Label _updateStatus;
 
-    public PreferencesForm(CursorSettings working, UpdateService updates)
+    public PreferencesForm(CursorSettings working, UpdateService updates, Action<TestCursor> setTestCursor)
     {
         _working = working;
         _updates = updates;
+        _setTest = setTestCursor;
 
         Text = "WormsCursor — Preferences";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -73,6 +76,17 @@ public sealed class PreferencesForm : Form
         _radiusVal = MakeVal();
         AddSliderRow("Corner radius (arrow only)", _radiusBar, _radiusVal, ref y);
         _radiusBar.ValueChanged += (_, _) => { _working.CornerRadius = _radiusBar.Value / 10.0; OnEdited(); };
+
+        // Test cursor: forces the chosen cursor on screen so you can see the busy /
+        // progress animation on demand (it normally only shows when the OS decides).
+        // It reflects the currently APPLIED appearance, not unsaved edits — OK first to
+        // test new colours/size. Cleared automatically when this dialog closes.
+        _testCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+        _testCombo.Items.AddRange(new object[] { "Off (normal)", "Arrow", "Hand", "Busy (wait)", "App starting" });
+        _testCombo.SelectedIndex = 0;
+        _testCombo.SelectedIndexChanged += (_, _) => _setTest(MapTest(_testCombo.SelectedIndex));
+        AddComboRow("Test cursor (force on screen)", _testCombo, ref y);
+        FormClosed += (_, _) => _setTest(TestCursor.Off);
 
         int btnY = y + 8;
         var defaults = new Button { Text = "Defaults", Location = new Point(M, btnY), Size = new Size(90, 30) };
@@ -141,6 +155,23 @@ public sealed class PreferencesForm : Form
         Controls.Add(val);
         y += SliderRowH;
     }
+
+    void AddComboRow(string caption, ComboBox combo, ref int y)
+    {
+        Controls.Add(new Label { Text = caption, AutoSize = true, Location = new Point(M, y) });
+        combo.SetBounds(M, y + 22, W - 2 * M, 24);
+        Controls.Add(combo);
+        y += SliderRowH;
+    }
+
+    static TestCursor MapTest(int index) => index switch
+    {
+        1 => TestCursor.Arrow,
+        2 => TestCursor.Hand,
+        3 => TestCursor.Wait,
+        4 => TestCursor.AppStarting,
+        _ => TestCursor.Off,
+    };
 
     // Two colour pickers side by side on one row (Fill | Outline).
     void AddTwoColorRow(string capA, Button btnA, string capB, Button btnB, ref int y)

@@ -36,6 +36,11 @@ _The cursor rotating to follow your mouse movement._
   hand is drawn the same way as the arrow — a filled silhouette plus a pen-stroked outline,
   finger separators and knuckle creases — so it shares the arrow's colour, size and outline
   thickness (the geometry is baked into `HandShape.cs`).
+- The **busy / progress** cursors are themed too. *App-starting* (`OCR_APPSTARTING`) is the
+  rotating arrow with a spinning ring of dots that hangs off its tail like a pendulum —
+  swinging out as you move and settling when you stop — while *wait* (`OCR_WAIT`) is the
+  same ring centred on the pointer (spin only). They animate only while actually on screen,
+  so an idle tray costs nothing.
 
 ## Project structure
 
@@ -46,13 +51,14 @@ WormsCursor.sln
 │  │   ├─ CursorEngine.cs     P/Invoke, cursor building, tracking + animation loop
 │  │   ├─ ArrowRenderer.cs    Draws the arrow (size, colours, thickness, corner radius)
 │  │   ├─ HandRenderer.cs     Draws the hand/link cursor (solid fill + baked line art)
+│  │   ├─ ProgressRenderer.cs Draws the busy/progress cursor (arrow + trailing comet ring)
 │  │   ├─ HandShape.cs        Baked hand geometry (silhouette + crease marks)
 │  │   ├─ CursorSettings.cs   Tunable parameters (persisted as JSON)
 │  │   └─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
 │  └─ WormsCursor.App/       Tray shell (WinForms, no main window)
 │      ├─ Program.cs                   Entry point (Velopack hook + single-instance guard)
 │      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the engine
-│      ├─ PreferencesForm.cs          Live settings dialog (size, colours, thickness, radius)
+│      ├─ PreferencesForm.cs          Live settings dialog (size, colours, thickness, radius, test cursor)
 │      ├─ SingleInstance.cs            One instance only; a 2nd launch opens Preferences
 │      ├─ Autostart.cs                 "Start with Windows" via HKCU\…\Run
 │      └─ Services/UpdateService.cs    Velopack check / download / apply updates
