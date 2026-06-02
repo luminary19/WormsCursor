@@ -29,6 +29,7 @@ var items = new (TestCursor kind, string label)[]
     (TestCursor.AppStarting, "app-starting"),
     (TestCursor.Help, "help"),
     (TestCursor.Cross, "crosshair"),
+    (TestCursor.Ibeam, "text"),
 };
 
 using var arrowBase = ArrowRenderer.DrawArrow(s);
@@ -44,7 +45,7 @@ for (int i = 0; i < items.Length; i++)
     cursors[i] = Trim(full);
 }
 
-const int cols = 3;
+int cols = (items.Length + 1) / 2; // two rows
 int rows = (items.Length + cols - 1) / cols;
 // Cells are sized to the largest trimmed cursor so each can be drawn 1:1 (crisp, never
 // upscaled). True relative sizes are preserved (all share one coordinate space).

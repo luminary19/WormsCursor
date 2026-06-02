@@ -221,6 +221,60 @@ public static class ProgressRenderer
         return bmp;
     }
 
+    /// <summary>Composites the text / I-beam cursor as a flexible beam: the bottom is rigid
+    /// (anchored at the hotspot) and the top sways by <paramref name="topOffX"/>/<paramref
+    /// name="topOffY"/> — the engine drives that with an underdamped spring so the top wobbles
+    /// like jelly when the cursor moves and settles afterwards. Bottom serif stays level; the
+    /// top serif tilts with the bent tip.</summary>
+    public static Bitmap ComposeIbeam(CursorSettings s, float topOffX, float topOffY)
+    {
+        var l = Layout(s);
+        int sz = Math.Max(8, s.Size);
+        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+        float cx = l.HotX, cy = l.HotY;
+        var fill = Parse(s.FillColor, Color.White);
+        var outline = Parse(s.OutlineColor, Color.Black);
+        float ob = (float)(s.OutlineThickness * (sz / 64f));
+        float beamW = MathF.Max(sz * 0.035f, 2f);
+        float halfH = sz * 0.17f;
+        float serif = sz * 0.065f;
+
+        float bx = cx, by = cy + halfH;                       // rigid bottom anchor
+        float tx = cx + topOffX, ty = cy - halfH + topOffY;   // swaying top
+        float c2x = cx + topOffX * 0.55f, c2y = cy - halfH * 0.35f;
+
+        // Cubic Bézier: vertical/centred tangent at the bottom (rigid lower section) bending
+        // out to the swayed top, so the deflection grows toward the tip.
+        using var beam = new GraphicsPath();
+        beam.AddBezier(bx, by, cx, cy + halfH * 0.15f, c2x, c2y, tx, ty);
+
+        // Top serif perpendicular to the beam's tip tangent (P3 - C2); bottom serif level.
+        float tanx = tx - c2x, tany = ty - c2y;
+        float tl = MathF.Sqrt(tanx * tanx + tany * tany);
+        if (tl < 0.001f) { tanx = 0; tany = -1; tl = 1; }
+        float px = -tany / tl, py = tanx / tl;
+
+        void Stroke(Action<Pen> draw)
+        {
+            if (ob > 0.01f)
+                using (var po = new Pen(outline, beamW + 2 * ob) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+                    draw(po);
+            using (var pf = new Pen(fill, beamW) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+                draw(pf);
+        }
+        Stroke(p =>
+        {
+            g.DrawPath(p, beam);
+            g.DrawLine(p, bx - serif, by, bx + serif, by);                               // bottom serif (level)
+            g.DrawLine(p, tx - px * serif, ty - py * serif, tx + px * serif, ty + py * serif); // top serif (tilts)
+        });
+        return bmp;
+    }
+
     /// <summary>Renders a static "at rest" frame of a composited cursor, for the Preferences
     /// preview (arrow pointing right; ring/glyph hanging straight down off the tail; reticle
     /// at its rest gap). Arrow/Hand are drawn by their own renderers, not here.</summary>
@@ -234,6 +288,7 @@ public static class ProgressRenderer
             TestCursor.Wait => Compose(s, arrowBase, 0, l.HotX, l.HotY, 0f, false),
             TestCursor.Help => ComposeHelp(s, arrowBase, 0, rx, ry, 180f),
             TestCursor.Cross => ComposeCross(s, sz * CrossBaseGap, 0f),
+            TestCursor.Ibeam => ComposeIbeam(s, 0f, 0f),
             _ => Compose(s, arrowBase, 0, rx, ry, 0f, true), // AppStarting
         };
     }

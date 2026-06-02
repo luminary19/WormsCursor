@@ -10,16 +10,25 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - **Crosshair / precision cursor** (`OCR_CROSS`): a reticle — centre dot, four axis ticks
   and a slowly-rotating broken ring — whose ticks "breathe" and spread outward (recoil)
   when you move fast, then settle.
+- **Text / I-beam cursor** (`OCR_IBEAM`): a flexible beam — the bottom is rigid but the
+  top sways opposite to motion on a soft underdamped spring, so it wobbles like jelly as
+  you move and settles afterwards.
 - **`WormsCursor.Preview`** project: renders a labelled showcase of every themed cursor to
   PNG (a dark sheet plus a transparent one) for the README / docs, used in the new
   **Cursors** section of the README.
 
 ### Changed
 - Preferences preview now shows **all** cursors (arrow, hand, busy, app-starting, help,
-  crosshair) in a 2-row grid on a single neutral background, sized so they grow with the
-  cursor-size slider (was a side-by-side dark/light strip of just arrow + hand).
+  crosshair, text) in a 2-row grid on a single neutral background, sized so they grow with
+  the cursor-size slider (was a side-by-side dark/light strip of just arrow + hand).
 - The help cursor's **"?"** is now hand-drawn — a rounded hook plus a separate round dot —
   instead of a font glyph, for cleaner rounding and a correctly-aligned, smaller dot.
+
+### Fixed
+- Animated cursors (busy, app-starting, help, crosshair, text) now actually animate while
+  on screen in real apps, not just under the Preferences "Test cursor". `SetSystemCursor`
+  destroys the handle you pass it, so the on-screen-detection check was comparing against
+  a dead handle and never matched; it now matches the live system handle (`LoadCursor`).
 
 ## 0.4.0 - 2026-06-02
 

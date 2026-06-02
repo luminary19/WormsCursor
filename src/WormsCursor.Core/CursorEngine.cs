@@ -7,7 +7,7 @@ namespace WormsCursor.Core;
 
 /// <summary>Which cursor the engine should force on screen for visual testing
 /// (Preferences "Test cursor"), or <see cref="Off"/> to resume normal behaviour.</summary>
-public enum TestCursor { Off, Arrow, Hand, Wait, AppStarting, Help, Cross }
+public enum TestCursor { Off, Arrow, Hand, Wait, AppStarting, Help, Cross, Ibeam }
 
 /// <summary>
 /// Rotates the system arrow and hand cursors (OCR_NORMAL + OCR_HAND) to follow
@@ -133,8 +133,12 @@ public sealed class CursorEngine : IDisposable
             float recoil = 0, vrec = 0;               // extra gap that springs out when moving fast
             float crossGap = 0, ringDeg = 0;          // values read by Cross()
             const float crossK = 120f, crossC = 12f, recoilRef = 1500f; // damped: spreads then snaps back
+
+            // --- jelly text cursor state: the I-beam's top sways opposite to motion on a
+            //     soft underdamped spring (wobbles like jelly), the bottom stays rigid ---
+            float ibOffX = 0, ibOffY = 0, vibX = 0, vibY = 0; // top-of-beam offset + velocity
+            const float ibK = 70f, ibC = 3.5f, ibSwayRef = 1600f; // low damping -> wobble
             int fgEvery = Math.Max(1, _settings.Hz / 60);           // ~60 fps for the animated cursor
-            IntPtr lastWait = IntPtr.Zero, lastApp = IntPtr.Zero, lastHelp = IntPtr.Zero, lastCross = IntPtr.Zero; // last handles set (vs GetCursorInfo)
             bool busyInit = false;
             var lastTest = TestCursor.Off;
             int tick = 0;
@@ -166,6 +170,13 @@ public sealed class CursorEngine : IDisposable
             IntPtr Cross()
             {
                 using var bmp = ProgressRenderer.ComposeCross(_settings, crossGap, ringDeg);
+                return MakeCursor(bmp, l.HotX, l.HotY);
+            }
+
+            // The text / I-beam cursor: rigid bottom, jelly top (ibOffX/ibOffY), hotspot centre.
+            IntPtr Ibeam()
+            {
+                using var bmp = ProgressRenderer.ComposeIbeam(_settings, ibOffX, ibOffY);
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
@@ -256,6 +267,19 @@ public sealed class CursorEngine : IDisposable
                 crossGap = sz * ProgressRenderer.CrossBaseGap + sz * 0.0126f * MathF.Sin(tsec * MathF.PI * 2f * 0.6f) + recoil;
                 ringDeg = tsec * 30f; // ~0.083 rev/s, slow
 
+                // jelly I-beam: the top lags opposite to motion; soft/underdamped -> it wobbles
+                float ibMaxSway = sz * 0.175f;
+                float ibTgtX = 0, ibTgtY = 0;
+                if (spd > 1f)
+                {
+                    float m = MathF.Min(spd / ibSwayRef, 1f) * ibMaxSway;
+                    ibTgtX = -(dx * _settings.Hz / spd) * m;
+                    ibTgtY = -(dy * _settings.Hz / spd) * m;
+                }
+                vibX += ((ibTgtX - ibOffX) * ibK - vibX * ibC) * dt;
+                vibY += ((ibTgtY - ibOffY) * ibK - vibY * ibC) * dt;
+                ibOffX += vibX * dt; ibOffY += vibY * dt;
+
                 // --- 4) apply cursors ---
                 var test = _test;
                 if (test != lastTest) { lastTest = test; normalDirty = true; curIdx = -1; }
@@ -274,26 +298,36 @@ public sealed class CursorEngine : IDisposable
                     // doesn't burn CPU animating a cursor nobody is looking at.
                     if (!busyInit)
                     {
-                        lastWait = Busy(false); SetSystemCursor(lastWait, OCR_WAIT);
-                        lastApp = Busy(true); SetSystemCursor(lastApp, OCR_APPSTARTING);
-                        lastHelp = Help(); SetSystemCursor(lastHelp, OCR_HELP);
-                        lastCross = Cross(); SetSystemCursor(lastCross, OCR_CROSS);
+                        SetSystemCursor(Busy(false), OCR_WAIT);
+                        SetSystemCursor(Busy(true), OCR_APPSTARTING);
+                        SetSystemCursor(Help(), OCR_HELP);
+                        SetSystemCursor(Cross(), OCR_CROSS);
+                        SetSystemCursor(Ibeam(), OCR_IBEAM);
                         busyInit = true;
                     }
                     else if (fgRender)
                     {
+                        // Re-render an animated cursor ONLY while it's the one actually on
+                        // screen, so an idle tray burns no CPU. Detect that by matching the
+                        // displayed handle against the LIVE system handle for each slot
+                        // (LoadCursor reflects the current system cursor table).
+                        // NB: do NOT compare against the handles we passed to SetSystemCursor
+                        // — that call DESTROYS them, so they never equal what GetCursorInfo
+                        // reports (this is why these used to animate only via "Test cursor").
                         var ci = new CURSORINFO { cbSize = ciSize };
-                        if (GetCursorInfo(ref ci))
+                        if (GetCursorInfo(ref ci) && (ci.flags & CURSOR_SHOWING) != 0)
                         {
-                            if (ci.hCursor == lastWait) { lastWait = Busy(false); SetSystemCursor(lastWait, OCR_WAIT); }
-                            else if (ci.hCursor == lastApp) { lastApp = Busy(true); SetSystemCursor(lastApp, OCR_APPSTARTING); }
-                            else if (ci.hCursor == lastHelp) { lastHelp = Help(); SetSystemCursor(lastHelp, OCR_HELP); }
-                            else if (ci.hCursor == lastCross) { lastCross = Cross(); SetSystemCursor(lastCross, OCR_CROSS); }
+                            IntPtr cur = ci.hCursor;
+                            if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_WAIT)) SetSystemCursor(Busy(false), OCR_WAIT);
+                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_APPSTARTING)) SetSystemCursor(Busy(true), OCR_APPSTARTING);
+                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_HELP)) SetSystemCursor(Help(), OCR_HELP);
+                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_CROSS)) SetSystemCursor(Cross(), OCR_CROSS);
+                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_IBEAM)) SetSystemCursor(Ibeam(), OCR_IBEAM);
                         }
                     }
                 }
                 else if (test == TestCursor.Wait || test == TestCursor.AppStarting
-                         || test == TestCursor.Help || test == TestCursor.Cross)
+                         || test == TestCursor.Help || test == TestCursor.Cross || test == TestCursor.Ibeam)
                 {
                     if (fgRender) // force the animated cursor onto the visible slots
                     {
@@ -301,6 +335,7 @@ public sealed class CursorEngine : IDisposable
                         {
                             TestCursor.Cross => Cross(),
                             TestCursor.Help => Help(),
+                            TestCursor.Ibeam => Ibeam(),
                             _ => Busy(test == TestCursor.AppStarting),
                         };
                         SetSystemCursor(h, OCR_NORMAL);
@@ -420,12 +455,14 @@ public sealed class CursorEngine : IDisposable
 
     // ---------- P/Invoke ----------
     const uint OCR_NORMAL = 32512;
+    const uint OCR_IBEAM = 32513;
     const uint OCR_CROSS = 32515;
     const uint OCR_WAIT = 32514;
     const uint OCR_APPSTARTING = 32650;
     const uint OCR_HELP = 32651;
     const uint OCR_HAND = 32649;
     const uint SPI_SETCURSORS = 0x0057;
+    const int CURSOR_SHOWING = 0x00000001;
 
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int x, y; }
 
@@ -436,6 +473,7 @@ public sealed class CursorEngine : IDisposable
     struct CURSORINFO { public int cbSize; public int flags; public IntPtr hCursor; public POINT ptScreenPos; }
 
     [DllImport("user32.dll")] static extern bool GetCursorInfo(ref CURSORINFO pci);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr LoadCursor(IntPtr hInstance, IntPtr lpCursorName);
     [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll", SetLastError = true)] static extern bool SetSystemCursor(IntPtr hcur, uint id);
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint a, uint b, IntPtr c, uint d);

@@ -29,7 +29,7 @@ public sealed class PreferencesForm : Form
     readonly DoubleBufferedPanel _preview;
     Bitmap?[] _previews = Array.Empty<Bitmap?>();
     static readonly TestCursor[] PreviewKinds =
-        { TestCursor.Arrow, TestCursor.Hand, TestCursor.Wait, TestCursor.AppStarting, TestCursor.Help, TestCursor.Cross };
+        { TestCursor.Arrow, TestCursor.Hand, TestCursor.Wait, TestCursor.AppStarting, TestCursor.Help, TestCursor.Cross, TestCursor.Ibeam };
 
     readonly TrackBar _sizeBar, _thickBar, _radiusBar;
     readonly Label _sizeVal, _thickVal, _radiusVal;
@@ -88,7 +88,7 @@ public sealed class PreferencesForm : Form
         // It reflects the currently APPLIED appearance, not unsaved edits — OK first to
         // test new colours/size. Cleared automatically when this dialog closes.
         _testCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
-        _testCombo.Items.AddRange(new object[] { "Off (normal)", "Arrow", "Hand", "Busy (wait)", "App starting", "Help (arrow + ?)", "Crosshair" });
+        _testCombo.Items.AddRange(new object[] { "Off (normal)", "Arrow", "Hand", "Busy (wait)", "App starting", "Help (arrow + ?)", "Crosshair", "Text (I-beam)" });
         _testCombo.SelectedIndex = 0;
         _testCombo.SelectedIndexChanged += (_, _) => _setTest(MapTest(_testCombo.SelectedIndex));
         AddComboRow("Test cursor (force on screen)", _testCombo, ref y);
@@ -183,6 +183,7 @@ public sealed class PreferencesForm : Form
         4 => TestCursor.AppStarting,
         5 => TestCursor.Help,
         6 => TestCursor.Cross,
+        7 => TestCursor.Ibeam,
         _ => TestCursor.Off,
     };
 
@@ -218,8 +219,6 @@ public sealed class PreferencesForm : Form
         _radiusVal.Text = _working.CornerRadius.ToString("0.0");
     }
 
-    const int PreviewCols = 3; // 3 cursors per row, 2 rows
-
     void RenderPreview()
     {
         foreach (var b in _previews) b?.Dispose();
@@ -252,8 +251,9 @@ public sealed class PreferencesForm : Form
 
         int n = _previews.Length;
         if (n == 0) return;
-        int rows = (n + PreviewCols - 1) / PreviewCols;
-        float cellW = w / (float)PreviewCols, cellH = h / (float)rows;
+        int cols = (n + 1) / 2;            // keep it to two rows
+        int rows = (n + cols - 1) / cols;
+        float cellW = w / (float)cols, cellH = h / (float)rows;
 
         // One shared scale so the cells keep the cursors' TRUE relative sizes: fit the
         // largest trimmed cursor into a cell, capped at 1:1 (never upscale).
@@ -267,8 +267,8 @@ public sealed class PreferencesForm : Form
         {
             var bmp = _previews[i];
             if (bmp is null) continue;
-            float cx = (i % PreviewCols) * cellW + cellW / 2f;
-            float cy = (i / PreviewCols) * cellH + cellH / 2f;
+            float cx = (i % cols) * cellW + cellW / 2f;
+            float cy = (i / cols) * cellH + cellH / 2f;
             float dw = bmp.Width * scale, dh = bmp.Height * scale;
             if (scale >= 0.999f)
                 g.DrawImageUnscaled(bmp, (int)(cx - bmp.Width / 2f), (int)(cy - bmp.Height / 2f));
