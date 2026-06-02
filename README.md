@@ -18,7 +18,7 @@ It runs in the background from the system tray, with no main window.
 
 ## Demo
 
-[▶ Watch the demo](video.mp4) — the cursor rotating to follow mouse movement.
+[▶ Watch the demo](assets/video.mp4) — the cursor rotating to follow mouse movement.
 
 ## How it works
 
