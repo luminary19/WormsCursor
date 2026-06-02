@@ -61,6 +61,19 @@ public sealed class CursorEngine : IDisposable
 
     public void Dispose() => Stop();
 
+    /// <summary>
+    /// Immediately stop applying rotated cursors and restore the Windows defaults.
+    /// Safe to call from crash handlers (AppDomain.UnhandledException /
+    /// Application.ThreadException): unlike <see cref="Stop"/> it does not join the
+    /// loop thread or free handles — it just undoes the global system change so a
+    /// dying process never leaves a rotated cursor behind.
+    /// </summary>
+    public void RestoreNow()
+    {
+        _running = false;   // stop the loop from re-applying a rotated cursor
+        RestoreCursors();
+    }
+
     // ---------- the tracking + animation loop (background thread) ----------
     void Loop()
     {
@@ -135,6 +148,7 @@ public sealed class CursorEngine : IDisposable
         finally
         {
             timeEndPeriod(1);
+            RestoreCursors(); // restore even if the loop threw — never die rotated
         }
     }
 

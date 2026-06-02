@@ -42,8 +42,13 @@ public sealed class TrayApplicationContext : ApplicationContext
         _tray.DoubleClick += (_, _) => OnToggleEnabled(this, EventArgs.Empty);
 
         // Safety net: restore the default cursors no matter how we exit.
+        // SetSystemCursor is a global, persistent change, so every interceptable
+        // teardown path must undo it.
         Application.ApplicationExit += (_, _) => _engine.Dispose();
         AppDomain.CurrentDomain.ProcessExit += (_, _) => _engine.Dispose();
+        // Crash paths: restore before the process goes down.
+        Application.ThreadException += (_, _) => _engine.RestoreNow();
+        AppDomain.CurrentDomain.UnhandledException += (_, _) => _engine.RestoreNow();
 
         _engine.Start();
     }
