@@ -42,7 +42,13 @@ SIZES = [16, 20, 24, 32, 48, 64, 128, 256]
 ANGLE_DEG = -45          # rotate so the arrow points up-right
 PAD_FRAC = 0.16          # empty border as a fraction of the canvas
 SUPERSAMPLE = 4          # draw NxN then downscale for antialiasing
-COLOR = (255, 255, 255, 255)  # flat white
+
+FILL = (255, 255, 255, 255)   # white interior
+OUTLINE = (0, 0, 0, 255)      # black frame — keeps the glyph readable on BOTH
+                              # dark (tray) and light (Explorer) backgrounds
+OUTLINE_FRAC = 0.07           # outline thickness as a fraction of icon size,
+OUTLINE_MIN = 1.6             # clamped so it stays visible when tiny
+OUTLINE_MAX = 12.0            # and doesn't get chunky at 256px
 
 
 def fit_points(size: int, angle_deg: float) -> list[tuple[float, float]]:
@@ -70,10 +76,20 @@ def fit_points(size: int, angle_deg: float) -> list[tuple[float, float]]:
     return [((px - mx) * scale + c, (py - my) * scale + c) for px, py in rot]
 
 
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+
 def render(size: int) -> Image.Image:
     big = size * SUPERSAMPLE
     img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-    ImageDraw.Draw(img).polygon(fit_points(big, ANGLE_DEG), fill=COLOR)
+    d = ImageDraw.Draw(img)
+    pts = fit_points(big, ANGLE_DEG)
+    # White fill, then a black frame stroked along the boundary (joint='curve'
+    # rounds the corners so the sharp tip stays clean).
+    width = round(_clamp(size * OUTLINE_FRAC, OUTLINE_MIN, OUTLINE_MAX) * SUPERSAMPLE)
+    d.polygon(pts, fill=FILL)
+    d.line(pts + [pts[0]], fill=OUTLINE, width=width, joint="curve")
     return img.resize((size, size), Image.LANCZOS)
 
 

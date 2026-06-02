@@ -22,3 +22,6 @@ msbuild.log
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Claude Code
+.claude/
