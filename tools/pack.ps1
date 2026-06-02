@@ -70,7 +70,10 @@ if (-not (Get-Command vpk -ErrorAction SilentlyContinue)) {
 if ($DownloadPrior) {
     Write-Host "==> Downloading latest GitHub release for delta computation…" -ForegroundColor Cyan
     # vpk reads GH_TOKEN from the environment to avoid the anonymous rate limit.
-    vpk download github --repoUrl $RepoUrl
+    # Download INTO $OutputDir (same dir as vpk pack) so pack finds the prior full
+    # package to diff against — otherwise it lands in vpk's default dir and pack ships
+    # full-only (no delta).
+    vpk download github --repoUrl $RepoUrl --outputDir $OutputDir
     if ($LASTEXITCODE -ne 0) {
         throw "vpk download failed. For the first release omit -DownloadPrior."
     }
