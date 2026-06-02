@@ -59,6 +59,12 @@ public sealed class PreferencesForm : Form
         _setTest = setTestCursor;
         _apply = applyLive;
 
+        // Auto-rescale the whole dialog when it crosses to a monitor with a different scale
+        // (the process is PerMonitorV2, but WinForms only auto-scales a form on a DPI change
+        // when AutoScaleMode is Font/Dpi — the hand-coded default is Inherit ≈ none, so the
+        // window otherwise stays at the DPI it opened on and looks cut off on the other screen).
+        AutoScaleMode = AutoScaleMode.Font;
+
         Text = "WormsCursor — Preferences";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterScreen;

@@ -4,6 +4,14 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
+## Unreleased
+
+### Fixed
+- The Preferences window now rescales when dragged between monitors with different display
+  scaling (e.g. 150% ↔ 200%). It's a hand-coded form that never set `AutoScaleMode`, so
+  WinForms didn't re-scale it on a DPI change (despite the app being PerMonitorV2) and it
+  looked cut off on the other monitor; it now uses `AutoScaleMode.Font`.
+
 ## 0.5.0 - 2026-06-03
 
 ### Added
