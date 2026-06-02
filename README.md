@@ -4,7 +4,8 @@
 
 A tiny Windows tray utility that **rotates the mouse cursor to follow your movement
 direction** — like the aiming arrow in *Worms 3D*. Move the mouse right and the arrow
-points right; sweep it down and it smoothly slews to point down.
+points right; sweep it down and it smoothly slews to point down. The link/hand cursor
+rotates the same way.
 
 It runs in the background from the system tray, with no main window.
 
@@ -31,6 +32,8 @@ _The cursor rotating to follow your mouse movement ([local copy](assets/video.mp
   wobble on straight or vertical moves.
 - The displayed angle is **animated toward** the target direction (a fixed deg/s slew),
   so turns look smooth instead of snapping.
+- Both the **arrow** (`OCR_NORMAL`) and the **hand/link** cursor (`OCR_HAND`) rotate; the
+  hand is traced from a bundled SVG into a baked path and shares the arrow's colours/size.
 
 ## Project structure
 
@@ -40,6 +43,8 @@ WormsCursor.sln
 │  ├─ WormsCursor.Core/      Engine — no UI dependencies
 │  │   ├─ CursorEngine.cs     P/Invoke, cursor building, tracking + animation loop
 │  │   ├─ ArrowRenderer.cs    Draws the arrow (size, colours, thickness, corner radius)
+│  │   ├─ HandRenderer.cs     Draws the hand/link cursor (solid fill + baked line art)
+│  │   ├─ HandShape.cs        Hand path baked from the SVG (generated)
 │  │   ├─ CursorSettings.cs   Tunable parameters (persisted as JSON)
 │  │   └─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
 │  └─ WormsCursor.App/       Tray shell (WinForms, no main window)
@@ -51,6 +56,8 @@ WormsCursor.sln
 │      └─ Services/UpdateService.cs    Velopack check / download / apply updates
 └─ tools/
    ├─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the arrow glyph
+   ├─ gen-hand-shape.py      Bakes mouse-hand-cursor-icon.svg into HandShape.cs
+   ├─ mouse-hand-cursor-icon.svg  Source art for the hand cursor
    ├─ pack.ps1               Build a Velopack release locally (Setup.exe + Portable.zip)
    ├─ RELEASING.md           How to cut a release
    └─ RestoreCursor.ps1      Emergency restore of default cursors

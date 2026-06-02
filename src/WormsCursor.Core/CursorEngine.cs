@@ -6,8 +6,9 @@ using System.Runtime.InteropServices;
 namespace WormsCursor.Core;
 
 /// <summary>
-/// Rotates the system arrow cursor (OCR_NORMAL) to follow mouse-movement direction,
-/// like in Worms 3D. UI-agnostic: host it from a tray app, a console, tests, etc.
+/// Rotates the system arrow and hand cursors (OCR_NORMAL + OCR_HAND) to follow
+/// mouse-movement direction, like in Worms 3D. UI-agnostic: host it from a tray app,
+/// a console, tests, etc.
 ///
 /// Direction is computed from ACCUMULATED travel (not from each micro-sample), so
 /// ±1 px jitter doesn't cause wobble on straight/vertical moves. The displayed angle
@@ -21,7 +22,7 @@ public sealed class CursorEngine : IDisposable
 {
     readonly CursorSettings _settings;
     readonly object _gate = new();
-    IntPtr[] _cursors = Array.Empty<IntPtr>();
+    Managed[] _managed = Array.Empty<Managed>();
     Thread? _thread;
     volatile bool _running;
     bool _restored = true;
@@ -140,7 +141,8 @@ public sealed class CursorEngine : IDisposable
                 if (idx != curIdx)
                 {
                     curIdx = idx;
-                    SetSystemCursor(CopyIcon(_cursors[idx]), OCR_NORMAL);
+                    foreach (var m in _managed)
+                        SetSystemCursor(CopyIcon(m.Frames[idx]), m.Ocr);
                     if (_settings.Debug) Debug.WriteLine($"disp={idx} target={(int)Math.Round(targetDeg)}");
                 }
             }
@@ -162,9 +164,23 @@ public sealed class CursorEngine : IDisposable
     void BuildCursors()
     {
         DestroyCursors();
-        int n = _settings.Steps, size = _settings.Size, pivot = size / 2;
-        var cursors = new IntPtr[n];
-        using Bitmap baseBmp = ArrowRenderer.DrawArrow(_settings);
+        int n = _settings.Steps;
+        using Bitmap arrowBase = ArrowRenderer.DrawArrow(_settings);
+        using Bitmap handBase = HandRenderer.DrawHand(_settings);
+        _managed = new[]
+        {
+            new Managed(OCR_NORMAL, BuildFrames(arrowBase, 0.0, n)),
+            new Managed(OCR_HAND, BuildFrames(handBase, HandShape.BaseAngleDeg, n)),
+        };
+    }
+
+    // Builds n cursor frames; frame i points at (i * 360/n) degrees. baseAngleDeg is the
+    // direction the source bitmap already points, so it's subtracted out.
+    static IntPtr[] BuildFrames(Bitmap baseBmp, double baseAngleDeg, int n)
+    {
+        int size = baseBmp.Width, pivot = size / 2;
+        double step = 360.0 / n;
+        var frames = new IntPtr[n];
         for (int i = 0; i < n; i++)
         {
             using var rot = new Bitmap(size, size);
@@ -173,20 +189,30 @@ public sealed class CursorEngine : IDisposable
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                 g.TranslateTransform(pivot, pivot);
-                g.RotateTransform((float)(i * (360.0 / n)));
+                g.RotateTransform((float)(i * step - baseAngleDeg));
                 g.TranslateTransform(-pivot, -pivot);
                 g.DrawImage(baseBmp, 0, 0);
             }
-            cursors[i] = MakeCursor(rot, pivot, pivot);
+            frames[i] = MakeCursor(rot, pivot, pivot);
         }
-        _cursors = cursors;
+        return frames;
     }
 
     void DestroyCursors()
     {
-        foreach (var h in _cursors)
-            if (h != IntPtr.Zero) DestroyIcon(h);
-        _cursors = Array.Empty<IntPtr>();
+        foreach (var m in _managed)
+            foreach (var h in m.Frames)
+                if (h != IntPtr.Zero) DestroyIcon(h);
+        _managed = Array.Empty<Managed>();
+    }
+
+    // A system cursor we manage: its OCR id and the n rotated frames (frame i points at
+    // i * 360/n degrees, ready to apply directly).
+    sealed class Managed
+    {
+        public readonly uint Ocr;
+        public readonly IntPtr[] Frames;
+        public Managed(uint ocr, IntPtr[] frames) { Ocr = ocr; Frames = frames; }
     }
 
     // alpha-correct cursor with an explicit hotspot (GetHicon -> CreateIconIndirect)
@@ -221,6 +247,7 @@ public sealed class CursorEngine : IDisposable
 
     // ---------- P/Invoke ----------
     const uint OCR_NORMAL = 32512;
+    const uint OCR_HAND = 32649;
     const uint SPI_SETCURSORS = 0x0057;
 
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int x, y; }

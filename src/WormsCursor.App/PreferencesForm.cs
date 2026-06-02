@@ -26,7 +26,7 @@ public sealed class PreferencesForm : Form
     public CursorSettings Settings => _working;
 
     readonly DoubleBufferedPanel _preview;
-    Bitmap? _previewBmp;
+    Bitmap? _arrowBmp, _handBmp;
 
     readonly TrackBar _sizeBar, _thickBar, _radiusBar;
     readonly Label _sizeVal, _thickVal, _radiusVal;
@@ -176,11 +176,12 @@ public sealed class PreferencesForm : Form
 
     void RenderPreview()
     {
-        _previewBmp?.Dispose();
-        // Render at the ACTUAL cursor size and draw it 1:1 (DrawImageUnscaled), so the
-        // preview is both crisp (no upscaling/blur) and a true WYSIWYG match for the
-        // cursor you actually get on screen.
-        _previewBmp = ArrowRenderer.DrawArrow(_working);
+        _arrowBmp?.Dispose();
+        _handBmp?.Dispose();
+        // Render both cursors at their ACTUAL size and draw 1:1 (DrawImageUnscaled):
+        // crisp (no upscaling) and a true WYSIWYG match for what you get on screen.
+        _arrowBmp = ArrowRenderer.DrawArrow(_working);
+        _handBmp = HandRenderer.DrawHand(_working);
     }
 
     void PreviewPaint(object? sender, PaintEventArgs e)
@@ -192,10 +193,18 @@ public sealed class PreferencesForm : Form
         using (var light = new SolidBrush(Color.FromArgb(243, 243, 243)))
             g.FillRectangle(light, half, 0, w - half, h);
 
-        if (_previewBmp is null) return;
-        int bw = _previewBmp.Width, bh = _previewBmp.Height;
-        g.DrawImageUnscaled(_previewBmp, (half - bw) / 2, (h - bh) / 2);              // dark half, crisp
-        g.DrawImageUnscaled(_previewBmp, half + (w - half - bw) / 2, (h - bh) / 2);   // light half, crisp
+        // Arrow + hand side by side on each background.
+        float lw = w - half;
+        DrawCursorAt(g, _arrowBmp, half * 0.25f, h);
+        DrawCursorAt(g, _handBmp, half * 0.75f, h);
+        DrawCursorAt(g, _arrowBmp, half + lw * 0.25f, h);
+        DrawCursorAt(g, _handBmp, half + lw * 0.75f, h);
+    }
+
+    static void DrawCursorAt(Graphics g, Bitmap? bmp, float centerX, int h)
+    {
+        if (bmp is null) return;
+        g.DrawImageUnscaled(bmp, (int)(centerX - bmp.Width / 2f), (h - bmp.Height) / 2);
     }
 
     void PickColor(Button btn, Action<Color> assign)
@@ -286,7 +295,7 @@ public sealed class PreferencesForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _previewBmp?.Dispose();
+        if (disposing) { _arrowBmp?.Dispose(); _handBmp?.Dispose(); }
         base.Dispose(disposing);
     }
 
