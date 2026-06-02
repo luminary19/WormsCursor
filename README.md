@@ -18,7 +18,9 @@ It runs in the background from the system tray, with no main window.
 
 ## Demo
 
-[▶ Watch the demo](assets/video.mp4) — the cursor rotating to follow mouse movement.
+https://github.com/user-attachments/assets/c8095725-6cfe-4c99-b9f3-834460b1514c
+
+_The cursor rotating to follow your mouse movement ([local copy](assets/video.mp4))._
 
 ## How it works
 
