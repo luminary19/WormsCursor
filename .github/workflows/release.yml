@@ -111,13 +111,28 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+
       - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
 
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Print the section under the matching '## <version>' header, up to the next '## '.
+          awk -v pat="$VERSION" '
+            /^## / { if (matched) exit; if (index($0, pat) > 0) { matched = 1; next } }
+            matched { print }
+          ' CHANGELOG.md > release-body.md
+          if [ ! -s release-body.md ]; then
+            echo "::warning::No CHANGELOG.md section for $VERSION — using auto-generated notes only."
+          fi
+
       - uses: softprops/action-gh-release@v3
         with:
+          body_path: release-body.md
           files: |
             dist/*Setup.exe
             dist/*Portable.zip

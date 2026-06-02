@@ -60,11 +60,9 @@ public sealed class PreferencesForm : Form
 
         _fillBtn = MakeColorButton(ParseOr(_working.FillColor, Color.White));
         _fillBtn.Click += (_, _) => PickColor(_fillBtn, c => _working.FillColor = ToHex(c));
-        AddColorRow("Fill colour", _fillBtn, ref y);
-
         _outlineBtn = MakeColorButton(ParseOr(_working.OutlineColor, Color.Black));
         _outlineBtn.Click += (_, _) => PickColor(_outlineBtn, c => _working.OutlineColor = ToHex(c));
-        AddColorRow("Outline colour", _outlineBtn, ref y);
+        AddTwoColorRow("Fill colour", _fillBtn, "Outline colour", _outlineBtn, ref y);
 
         _thickBar = MakeBar(0, 120, (int)Math.Round(_working.OutlineThickness * 10));
         _thickVal = MakeVal();
@@ -144,11 +142,20 @@ public sealed class PreferencesForm : Form
         y += SliderRowH;
     }
 
-    void AddColorRow(string caption, Button btn, ref int y)
+    // Two colour pickers side by side on one row (Fill | Outline).
+    void AddTwoColorRow(string capA, Button btnA, string capB, Button btnB, ref int y)
     {
-        Controls.Add(new Label { Text = caption, AutoSize = true, Location = new Point(M, y) });
-        btn.Location = new Point(M, y + 24); // clear gap so the caption never touches the swatch
-        Controls.Add(btn);
+        int half = (W - 2 * M) / 2;
+        int swatchW = half - 20;
+        Controls.Add(new Label { Text = capA, AutoSize = true, Location = new Point(M, y) });
+        btnA.SetBounds(M, y + 24, swatchW, 28);
+        Controls.Add(btnA);
+
+        int x2 = M + half;
+        Controls.Add(new Label { Text = capB, AutoSize = true, Location = new Point(x2, y) });
+        btnB.SetBounds(x2, y + 24, swatchW, 28);
+        Controls.Add(btnB);
+
         y += ColorRowH;
     }
 
