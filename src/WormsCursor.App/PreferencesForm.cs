@@ -8,17 +8,23 @@ namespace WormsCursor.App;
 /// <summary>
 /// Live cursor-appearance editor. Works on a clone of the settings (passed in) and
 /// exposes the edited copy via <see cref="Settings"/>; the caller applies it on OK.
-/// A preview pane renders the arrow with the same <see cref="ArrowRenderer"/> the
+/// The preview pane renders the arrow with the same <see cref="ArrowRenderer"/> the
 /// engine uses, on both a dark and a light background.
 /// </summary>
 public sealed class PreferencesForm : Form
 {
     const string RepoUrl = "https://github.com/dawidope/WormsCursor";
 
+    const int M = 16;            // outer margin
+    const int W = 460;           // client width
+    const int PreviewH = 140;
+    const int SliderRowH = 56;
+    const int ColorRowH = 58;
+
     readonly CursorSettings _working;
     public CursorSettings Settings => _working;
 
-    readonly Panel _preview;
+    readonly DoubleBufferedPanel _preview;
     Bitmap? _previewBmp;
 
     readonly TrackBar _sizeBar, _thickBar, _radiusBar;
@@ -34,18 +40,17 @@ public sealed class PreferencesForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(440, 500);
+        ClientSize = new Size(W, 600); // height finalized at the end
 
-        _preview = new Panel { Location = new Point(12, 12), Size = new Size(416, 150), BorderStyle = BorderStyle.FixedSingle };
+        _preview = new DoubleBufferedPanel { Bounds = new Rectangle(M, M, W - 2 * M, PreviewH), BorderStyle = BorderStyle.FixedSingle };
         _preview.Paint += PreviewPaint;
         Controls.Add(_preview);
 
-        int y = 176;
-        const int row = 52;
+        int y = M + PreviewH + 18;
 
         _sizeBar = MakeBar(24, 128, _working.Size);
         _sizeVal = MakeVal();
-        AddSliderRow("Cursor size", _sizeBar, _sizeVal, ref y, row);
+        AddSliderRow("Cursor size", _sizeBar, _sizeVal, ref y);
         _sizeBar.ValueChanged += (_, _) => { _working.Size = _sizeBar.Value; OnEdited(); };
 
         _fillBtn = MakeColorButton(ParseOr(_working.FillColor, Color.White));
@@ -58,31 +63,34 @@ public sealed class PreferencesForm : Form
 
         _thickBar = MakeBar(0, 120, (int)Math.Round(_working.OutlineThickness * 10));
         _thickVal = MakeVal();
-        AddSliderRow("Outline thickness", _thickBar, _thickVal, ref y, row);
+        AddSliderRow("Outline thickness", _thickBar, _thickVal, ref y);
         _thickBar.ValueChanged += (_, _) => { _working.OutlineThickness = _thickBar.Value / 10.0; OnEdited(); };
 
         _radiusBar = MakeBar(0, 120, (int)Math.Round(_working.CornerRadius * 10));
         _radiusVal = MakeVal();
-        AddSliderRow("Corner radius", _radiusBar, _radiusVal, ref y, row);
+        AddSliderRow("Corner radius", _radiusBar, _radiusVal, ref y);
         _radiusBar.ValueChanged += (_, _) => { _working.CornerRadius = _radiusBar.Value / 10.0; OnEdited(); };
 
-        var defaults = new Button { Text = "Defaults", Location = new Point(12, y + 8), Size = new Size(90, 30) };
+        int btnY = y + 8;
+        var defaults = new Button { Text = "Defaults", Location = new Point(M, btnY), Size = new Size(90, 30) };
         defaults.Click += (_, _) => ResetDefaults();
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Size = new Size(80, 30), Location = new Point(258, y + 8) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(80, 30), Location = new Point(346, y + 8) };
+        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Size = new Size(84, 30), Location = new Point(W - M - 84 - 8 - 84, btnY) };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(84, 30), Location = new Point(W - M - 84, btnY) };
         Controls.Add(defaults);
         Controls.Add(ok);
         Controls.Add(cancel);
         AcceptButton = ok;
         CancelButton = cancel;
 
-        int footerY = y + 50;
-        var version = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "v" + AppVersion(), Location = new Point(12, footerY) };
+        int footerY = btnY + 30 + 16;
+        var version = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "v" + AppVersion(), Location = new Point(M, footerY) };
         var link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor", Location = new Point(0, footerY) };
         link.LinkClicked += (_, _) => OpenUrl(RepoUrl);
         Controls.Add(version);
         Controls.Add(link);
-        link.Left = ClientSize.Width - link.PreferredWidth - 12; // right-align
+        link.Left = W - M - link.PreferredWidth; // right-align
+
+        ClientSize = new Size(W, footerY + link.PreferredHeight + M); // bottom margin under the footer
 
         UpdateLabels();
         RenderPreview();
@@ -98,33 +106,39 @@ public sealed class PreferencesForm : Form
         AutoSize = false,
     };
 
-    static Label MakeVal() => new() { AutoSize = true };
-
-    static Button MakeColorButton(Color c) => new()
+    static Label MakeVal() => new()
     {
-        BackColor = c,
-        FlatStyle = FlatStyle.Flat,
-        UseVisualStyleBackColor = false,
-        Size = new Size(120, 26),
+        AutoSize = false,
+        Size = new Size(56, 18),
+        TextAlign = ContentAlignment.MiddleRight,
+        ForeColor = SystemColors.ControlText,
     };
 
-    void AddSliderRow(string caption, TrackBar bar, Label val, ref int y, int row)
+    static Button MakeColorButton(Color c)
     {
-        Controls.Add(new Label { Text = caption, AutoSize = true, Location = new Point(12, y) });
-        bar.Location = new Point(12, y + 18);
-        bar.Size = new Size(330, 30);
-        val.Location = new Point(352, y + 24);
+        var b = new Button { BackColor = c, FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false, Size = new Size(150, 28) };
+        b.FlatAppearance.BorderColor = Color.FromArgb(120, 120, 120);
+        b.FlatAppearance.BorderSize = 1;
+        return b;
+    }
+
+    void AddSliderRow(string caption, TrackBar bar, Label val, ref int y)
+    {
+        Controls.Add(new Label { Text = caption, AutoSize = true, Location = new Point(M, y) });
+        int barY = y + 22;
+        bar.SetBounds(M, barY, W - 2 * M - 68, 28);
+        val.SetBounds(W - M - 56, barY + 5, 56, 18);
         Controls.Add(bar);
         Controls.Add(val);
-        y += row;
+        y += SliderRowH;
     }
 
     void AddColorRow(string caption, Button btn, ref int y)
     {
-        Controls.Add(new Label { Text = caption, AutoSize = true, Location = new Point(12, y) });
-        btn.Location = new Point(12, y + 18);
+        Controls.Add(new Label { Text = caption, AutoSize = true, Location = new Point(M, y) });
+        btn.Location = new Point(M, y + 24); // clear gap so the caption never touches the swatch
         Controls.Add(btn);
-        y += 50;
+        y += ColorRowH;
     }
 
     // ---------- behaviour ----------
@@ -145,6 +159,9 @@ public sealed class PreferencesForm : Form
     void RenderPreview()
     {
         _previewBmp?.Dispose();
+        // Render at the ACTUAL cursor size and draw it 1:1 (DrawImageUnscaled), so the
+        // preview is both crisp (no upscaling/blur) and a true WYSIWYG match for the
+        // cursor you actually get on screen.
         _previewBmp = ArrowRenderer.DrawArrow(_working);
     }
 
@@ -158,12 +175,9 @@ public sealed class PreferencesForm : Form
             g.FillRectangle(light, half, 0, w - half, h);
 
         if (_previewBmp is null) return;
-        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        const float zoom = 1.6f;
-        int dw = (int)(_previewBmp.Width * zoom), dh = (int)(_previewBmp.Height * zoom);
-        g.DrawImage(_previewBmp, (half - dw) / 2, (h - dh) / 2, dw, dh);                 // dark half
-        g.DrawImage(_previewBmp, half + (w - half - dw) / 2, (h - dh) / 2, dw, dh);      // light half
+        int bw = _previewBmp.Width, bh = _previewBmp.Height;
+        g.DrawImageUnscaled(_previewBmp, (half - bw) / 2, (h - bh) / 2);              // dark half, crisp
+        g.DrawImageUnscaled(_previewBmp, half + (w - half - bw) / 2, (h - bh) / 2);   // light half, crisp
     }
 
     void PickColor(Button btn, Action<Color> assign)
@@ -214,5 +228,12 @@ public sealed class PreferencesForm : Form
     {
         if (disposing) _previewBmp?.Dispose();
         base.Dispose(disposing);
+    }
+
+    /// <summary>A panel that double-buffers its client area so the live preview repaints
+    /// without flicker while sliders are dragged.</summary>
+    sealed class DoubleBufferedPanel : Panel
+    {
+        public DoubleBufferedPanel() => DoubleBuffered = true;
     }
 }
