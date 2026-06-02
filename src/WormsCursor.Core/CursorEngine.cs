@@ -7,7 +7,7 @@ namespace WormsCursor.Core;
 
 /// <summary>Which cursor the engine should force on screen for visual testing
 /// (Preferences "Test cursor"), or <see cref="Off"/> to resume normal behaviour.</summary>
-public enum TestCursor { Off, Arrow, Hand, Wait, AppStarting, Help }
+public enum TestCursor { Off, Arrow, Hand, Wait, AppStarting, Help, Cross }
 
 /// <summary>
 /// Rotates the system arrow and hand cursors (OCR_NORMAL + OCR_HAND) to follow
@@ -127,8 +127,14 @@ public sealed class CursorEngine : IDisposable
             float gravity = restDrop * pendK;         // chosen so the equilibrium is restDrop below the anchor
             float maxLen = sz * 0.42f;                // taut-string max length from the tail
             float phaseStep = 1.6f * MathF.PI * 2f * dt;            // ~1.6 rev/s
+
+            // --- crosshair state: a breathing gap + recoil spring + a slowly spinning ring ---
+            float tsec = 0;                           // master clock for breathing / ring rotation
+            float recoil = 0, vrec = 0;               // extra gap that springs out when moving fast
+            float crossGap = 0, ringDeg = 0;          // values read by Cross()
+            const float crossK = 120f, crossC = 12f, recoilRef = 1500f; // damped: spreads then snaps back
             int fgEvery = Math.Max(1, _settings.Hz / 60);           // ~60 fps for the animated cursor
-            IntPtr lastWait = IntPtr.Zero, lastApp = IntPtr.Zero, lastHelp = IntPtr.Zero; // last handles set (vs GetCursorInfo)
+            IntPtr lastWait = IntPtr.Zero, lastApp = IntPtr.Zero, lastHelp = IntPtr.Zero, lastCross = IntPtr.Zero; // last handles set (vs GetCursorInfo)
             bool busyInit = false;
             var lastTest = TestCursor.Off;
             int tick = 0;
@@ -152,6 +158,14 @@ public sealed class CursorEngine : IDisposable
             {
                 double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
                 using var bmp = ProgressRenderer.ComposeHelp(_settings, _arrowBase!, deg, ringCX, ringCY, helpAngleDeg);
+                return MakeCursor(bmp, l.HotX, l.HotY);
+            }
+
+            // The crosshair: a precision reticle, hotspot dead centre. No arrow, no
+            // direction-follow — just the breathing/recoiling gap and the spinning ring.
+            IntPtr Cross()
+            {
+                using var bmp = ProgressRenderer.ComposeCross(_settings, crossGap, ringDeg);
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
@@ -231,6 +245,17 @@ public sealed class CursorEngine : IDisposable
                     helpAngleDeg = (float)(Math.Atan2(by - ay, bx - ax) * 180.0 / Math.PI) + 90f;
                 }
 
+                // crosshair: advance the clock (breathing + ring spin) and the recoil
+                // spring (the gap spreads with cursor speed, then snaps back to rest).
+                tsec += dt;
+                float spd = MathF.Sqrt((float)(dx * dx + dy * dy)) * _settings.Hz; // px/s
+                float rtgt = MathF.Min(spd / recoilRef, 1f) * (sz * 0.105f);
+                vrec += ((rtgt - recoil) * crossK - vrec * crossC) * dt;
+                recoil += vrec * dt;
+                if (recoil < 0) recoil = 0;
+                crossGap = sz * ProgressRenderer.CrossBaseGap + sz * 0.0126f * MathF.Sin(tsec * MathF.PI * 2f * 0.6f) + recoil;
+                ringDeg = tsec * 30f; // ~0.083 rev/s, slow
+
                 // --- 4) apply cursors ---
                 var test = _test;
                 if (test != lastTest) { lastTest = test; normalDirty = true; curIdx = -1; }
@@ -252,6 +277,7 @@ public sealed class CursorEngine : IDisposable
                         lastWait = Busy(false); SetSystemCursor(lastWait, OCR_WAIT);
                         lastApp = Busy(true); SetSystemCursor(lastApp, OCR_APPSTARTING);
                         lastHelp = Help(); SetSystemCursor(lastHelp, OCR_HELP);
+                        lastCross = Cross(); SetSystemCursor(lastCross, OCR_CROSS);
                         busyInit = true;
                     }
                     else if (fgRender)
@@ -262,14 +288,21 @@ public sealed class CursorEngine : IDisposable
                             if (ci.hCursor == lastWait) { lastWait = Busy(false); SetSystemCursor(lastWait, OCR_WAIT); }
                             else if (ci.hCursor == lastApp) { lastApp = Busy(true); SetSystemCursor(lastApp, OCR_APPSTARTING); }
                             else if (ci.hCursor == lastHelp) { lastHelp = Help(); SetSystemCursor(lastHelp, OCR_HELP); }
+                            else if (ci.hCursor == lastCross) { lastCross = Cross(); SetSystemCursor(lastCross, OCR_CROSS); }
                         }
                     }
                 }
-                else if (test == TestCursor.Wait || test == TestCursor.AppStarting || test == TestCursor.Help)
+                else if (test == TestCursor.Wait || test == TestCursor.AppStarting
+                         || test == TestCursor.Help || test == TestCursor.Cross)
                 {
-                    if (fgRender) // force the animated busy/help cursor onto the visible slots
+                    if (fgRender) // force the animated cursor onto the visible slots
                     {
-                        IntPtr h = test == TestCursor.Help ? Help() : Busy(test == TestCursor.AppStarting);
+                        IntPtr h = test switch
+                        {
+                            TestCursor.Cross => Cross(),
+                            TestCursor.Help => Help(),
+                            _ => Busy(test == TestCursor.AppStarting),
+                        };
                         SetSystemCursor(h, OCR_NORMAL);
                         SetSystemCursor(CopyIcon(h), OCR_HAND);
                     }
@@ -387,6 +420,7 @@ public sealed class CursorEngine : IDisposable
 
     // ---------- P/Invoke ----------
     const uint OCR_NORMAL = 32512;
+    const uint OCR_CROSS = 32515;
     const uint OCR_WAIT = 32514;
     const uint OCR_APPSTARTING = 32650;
     const uint OCR_HELP = 32651;

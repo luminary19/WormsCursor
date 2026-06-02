@@ -15,6 +15,7 @@ namespace WormsCursor.Core;
 public static class ProgressRenderer
 {
     public const int Dots = 8;
+    public const float CrossBaseGap = 0.063f; // crosshair gap fraction at rest (engine adds breathing + recoil)
 
     /// <summary>Geometry for a given size: canvas, the arrow-tip hotspot, ring/dot radii
     /// and the tail length (tip → string anchor), all in canvas pixels.</summary>
@@ -91,23 +92,150 @@ public static class ProgressRenderer
 
         DrawArrow(g, l, arrowBase, arrowDeg);
 
-        using var fam = new FontFamily("Arial");
-        using var path = new GraphicsPath();
-        path.AddString("?", fam, (int)FontStyle.Bold, s.Size * 0.55f, PointF.Empty, StringFormat.GenericTypographic);
-        var gb = path.GetBounds();
+        // Hand-drawn "?" built from primitives so we control the rounding: a rounded top
+        // hook that curves down into a short vertical stem, plus a separate round dot below.
+        int sz = Math.Max(8, s.Size);
+        var fill = Parse(s.FillColor, Color.White);
+        var outline = Parse(s.OutlineColor, Color.Black);
+        float strokeW = sz * 0.05f;                              // stem / hook thickness
+        float dotR = sz * 0.035f;                                // round dot radius
+        float ob = (float)(s.OutlineThickness * (sz / 64f));     // outline border (each side)
+
+        // Geometry in a local space (we'll re-centre on the combined bounds afterwards).
+        // The hook is the upper curve of a "?": it opens at the lower-left, sweeps over the
+        // top and comes down the right, then curls back to centre and turns into a short
+        // vertical stem ending above the dot. Coordinates are tuned against a ~0.5*sz glyph.
+        float r = sz * 0.085f;                                   // hook radius
+        float topY = 0f;                                         // top of the hook arc
+        float cxh = 0f;                                          // stem x (glyph centre line)
+        using var hook = new GraphicsPath();
+        // 1) Open top arc: from the lower-left opening, up and over the top, down to the
+        //    right side at about mid-height. Symmetric control points give a clean round arc.
+        hook.AddBezier(
+            cxh - r * 0.95f, topY + r * 1.05f,                   // start (lower-left opening)
+            cxh - r * 1.15f, topY - r * 0.55f,                   // control – out and up
+            cxh + r * 1.15f, topY - r * 0.55f,                   // control – over the top
+            cxh + r * 0.95f, topY + r * 1.05f);                  // end (right side, mid-height)
+        // 2) Curl from the right side inward to the centre line, finishing with a vertical
+        //    downward tangent so it flows into a straight stem (control directly above end).
+        float stemEndY = topY + r * 2.45f;
+        hook.AddBezier(
+            cxh + r * 0.95f, topY + r * 1.05f,                   // continue from right side
+            cxh + r * 0.70f, topY + r * 1.65f,                   // control – sweep down & in
+            cxh, topY + r * 1.55f,                               // control – arrive at centre line
+            cxh, stemEndY);                                      // end of stem (centred, above dot)
+
+        float gap = sz * 0.0425f;                                // visible gap stem-end → dot
+        float dotCx = cxh;                                       // dot centred under the stem
+        float dotCy = stemEndY + gap + dotR;
+
+        // Combined bounds = union of the stroked hook (path bounds grown by half the widest
+        // pen) and the dot (grown by its outline). Centre the whole glyph on that union so
+        // the existing translate-by-minus-centre keeps it positioned and rotated correctly.
+        float half = strokeW / 2f + (ob > 0.01f ? ob : 0f);
+        var hb = hook.GetBounds();
+        float minX = MathF.Min(hb.X - half, dotCx - dotR - ob);
+        float maxX = MathF.Max(hb.X + hb.Width + half, dotCx + dotR + ob);
+        float minY = MathF.Min(hb.Y - half, dotCy - dotR - ob);
+        float maxY = MathF.Max(hb.Y + hb.Height + half, dotCy + dotR + ob);
+        float cX = (minX + maxX) / 2f, cY = (minY + maxY) / 2f;
 
         var st = g.Save();
         g.TranslateTransform(qx, qy);
         g.RotateTransform(glyphDeg);
-        g.TranslateTransform(-(gb.X + gb.Width / 2f), -(gb.Y + gb.Height / 2f)); // centre the glyph on the bob
-        using (var br = new SolidBrush(Parse(s.FillColor, Color.White)))
-            g.FillPath(br, path);
-        float pen = (float)(s.OutlineThickness * (s.Size / 64f));
-        if (pen > 0.01f)
-            using (var p = new Pen(Parse(s.OutlineColor, Color.Black), pen) { LineJoin = LineJoin.Round })
-                g.DrawPath(p, path);
+        g.TranslateTransform(-cX, -cY); // centre the glyph on the bob
+
+        // Outline-under / fill-over (mirrors ComposeCross): wide outline-coloured stroke
+        // first, then the fill-coloured stroke on top; same for the dot's two circles.
+        if (ob > 0.01f)
+            using (var po = new Pen(outline, strokeW + 2 * ob)
+                   { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+                g.DrawPath(po, hook);
+        using (var pf = new Pen(fill, strokeW)
+               { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+            g.DrawPath(pf, hook);
+
+        if (ob > 0.01f)
+            using (var bo = new SolidBrush(outline))
+                g.FillEllipse(bo, dotCx - dotR - ob, dotCy - dotR - ob, (dotR + ob) * 2, (dotR + ob) * 2);
+        using (var bf = new SolidBrush(fill))
+            g.FillEllipse(bf, dotCx - dotR, dotCy - dotR, dotR * 2, dotR * 2);
+
         g.Restore(st);
         return bmp;
+    }
+
+    /// <summary>Composites the crosshair / precision cursor: a centre dot, four axis ticks
+    /// and a slowly-rotating broken ring. <paramref name="gap"/> is the distance from the
+    /// centre to where each tick starts (the engine breathes it and adds recoil when the
+    /// cursor moves fast); <paramref name="ringDeg"/> rotates the outer ring. Hotspot is the
+    /// centre (precision point). Lines are stroked outline-under/fill-over for the same
+    /// filled-with-an-outline look as the other cursors.</summary>
+    public static Bitmap ComposeCross(CursorSettings s, float gap, float ringDeg)
+    {
+        var l = Layout(s);
+        int sz = Math.Max(8, s.Size);
+        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+        float cx = l.HotX, cy = l.HotY;
+        var fill = Parse(s.FillColor, Color.White);
+        var outline = Parse(s.OutlineColor, Color.Black);
+        float ob = (float)(s.OutlineThickness * (sz / 64f)); // outline border (each side)
+        float lineW = MathF.Max(sz * 0.049f, 2f);
+        float tickLen = sz * 0.105f;
+        float ringR = sz * 0.224f;
+
+        // Draw a shape twice: a wider outline-coloured pen underneath, the fill on top.
+        void Stroke(Action<Pen> draw)
+        {
+            if (ob > 0.01f)
+                using (var po = new Pen(outline, lineW + 2 * ob) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                    draw(po);
+            using (var pf = new Pen(fill, lineW) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                draw(pf);
+        }
+
+        Stroke(p =>
+        {
+            g.DrawLine(p, cx, cy - gap, cx, cy - gap - tickLen); // up
+            g.DrawLine(p, cx, cy + gap, cx, cy + gap + tickLen); // down
+            g.DrawLine(p, cx - gap, cy, cx - gap - tickLen, cy); // left
+            g.DrawLine(p, cx + gap, cy, cx + gap + tickLen, cy); // right
+        });
+        Stroke(p =>
+        {
+            for (int i = 0; i < 4; i++)
+                g.DrawArc(p, cx - ringR, cy - ringR, ringR * 2, ringR * 2, ringDeg + i * 90f + 12f, 66f);
+        });
+
+        float dr = MathF.Max(sz * 0.0245f, 1.25f); // centre dot
+        if (ob > 0.01f)
+            using (var bo = new SolidBrush(outline))
+                g.FillEllipse(bo, cx - dr - ob, cy - dr - ob, (dr + ob) * 2, (dr + ob) * 2);
+        using (var bf = new SolidBrush(fill))
+            g.FillEllipse(bf, cx - dr, cy - dr, dr * 2, dr * 2);
+
+        return bmp;
+    }
+
+    /// <summary>Renders a static "at rest" frame of a composited cursor, for the Preferences
+    /// preview (arrow pointing right; ring/glyph hanging straight down off the tail; reticle
+    /// at its rest gap). Arrow/Hand are drawn by their own renderers, not here.</summary>
+    public static Bitmap RenderRest(CursorSettings s, TestCursor kind, Bitmap arrowBase)
+    {
+        var l = Layout(s);
+        int sz = Math.Max(8, s.Size);
+        float rx = l.HotX - l.TailLen, ry = l.HotY + sz * 0.30f; // bob hangs below the tail at rest
+        return kind switch
+        {
+            TestCursor.Wait => Compose(s, arrowBase, 0, l.HotX, l.HotY, 0f, false),
+            TestCursor.Help => ComposeHelp(s, arrowBase, 0, rx, ry, 180f),
+            TestCursor.Cross => ComposeCross(s, sz * CrossBaseGap, 0f),
+            _ => Compose(s, arrowBase, 0, rx, ry, 0f, true), // AppStarting
+        };
     }
 
     // Draws the arrow rotated about its tip (the canvas-centre hotspot), at native size.

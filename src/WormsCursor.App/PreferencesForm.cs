@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Reflection;
 using WormsCursor.App.Services;
 using WormsCursor.Core;
@@ -18,7 +19,7 @@ public sealed class PreferencesForm : Form
 
     const int M = 16;            // outer margin
     const int W = 460;           // client width
-    const int PreviewH = 140;
+    const int PreviewH = 210;
     const int SliderRowH = 56;
     const int ColorRowH = 58;
 
@@ -26,7 +27,9 @@ public sealed class PreferencesForm : Form
     public CursorSettings Settings => _working;
 
     readonly DoubleBufferedPanel _preview;
-    Bitmap? _arrowBmp, _handBmp;
+    Bitmap?[] _previews = Array.Empty<Bitmap?>();
+    static readonly TestCursor[] PreviewKinds =
+        { TestCursor.Arrow, TestCursor.Hand, TestCursor.Wait, TestCursor.AppStarting, TestCursor.Help, TestCursor.Cross };
 
     readonly TrackBar _sizeBar, _thickBar, _radiusBar;
     readonly Label _sizeVal, _thickVal, _radiusVal;
@@ -85,7 +88,7 @@ public sealed class PreferencesForm : Form
         // It reflects the currently APPLIED appearance, not unsaved edits — OK first to
         // test new colours/size. Cleared automatically when this dialog closes.
         _testCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
-        _testCombo.Items.AddRange(new object[] { "Off (normal)", "Arrow", "Hand", "Busy (wait)", "App starting", "Help (arrow + ?)" });
+        _testCombo.Items.AddRange(new object[] { "Off (normal)", "Arrow", "Hand", "Busy (wait)", "App starting", "Help (arrow + ?)", "Crosshair" });
         _testCombo.SelectedIndex = 0;
         _testCombo.SelectedIndexChanged += (_, _) => _setTest(MapTest(_testCombo.SelectedIndex));
         AddComboRow("Test cursor (force on screen)", _testCombo, ref y);
@@ -179,6 +182,7 @@ public sealed class PreferencesForm : Form
         3 => TestCursor.Wait,
         4 => TestCursor.AppStarting,
         5 => TestCursor.Help,
+        6 => TestCursor.Cross,
         _ => TestCursor.Off,
     };
 
@@ -214,37 +218,93 @@ public sealed class PreferencesForm : Form
         _radiusVal.Text = _working.CornerRadius.ToString("0.0");
     }
 
+    const int PreviewCols = 3; // 3 cursors per row, 2 rows
+
     void RenderPreview()
     {
-        _arrowBmp?.Dispose();
-        _handBmp?.Dispose();
-        // Render both cursors at their ACTUAL size and draw 1:1 (DrawImageUnscaled):
-        // crisp (no upscaling) and a true WYSIWYG match for what you get on screen.
-        _arrowBmp = ArrowRenderer.DrawArrow(_working);
-        _handBmp = HandRenderer.DrawHand(_working);
+        foreach (var b in _previews) b?.Dispose();
+        // All cursors at their ACTUAL size. Arrow/Hand from their own renderers; the
+        // composited ones rendered in their "at rest" pose. Each is then trimmed to its
+        // ink so the padded 2x canvas (for the swing) doesn't shrink it in the preview.
+        using var arrowBase = ArrowRenderer.DrawArrow(_working); // base for the composited cursors
+        _previews = new Bitmap?[PreviewKinds.Length];
+        for (int i = 0; i < PreviewKinds.Length; i++)
+        {
+            using Bitmap full = PreviewKinds[i] switch
+            {
+                TestCursor.Arrow => ArrowRenderer.DrawArrow(_working),
+                TestCursor.Hand => HandRenderer.DrawHand(_working),
+                var k => ProgressRenderer.RenderRest(_working, k, arrowBase),
+            };
+            _previews[i] = Trim(full);
+        }
     }
 
     void PreviewPaint(object? sender, PaintEventArgs e)
     {
         var g = e.Graphics;
-        int w = _preview.ClientSize.Width, h = _preview.ClientSize.Height, half = w / 2;
-        using (var dark = new SolidBrush(Color.FromArgb(31, 31, 31)))
-            g.FillRectangle(dark, 0, 0, half, h);
-        using (var light = new SolidBrush(Color.FromArgb(243, 243, 243)))
-            g.FillRectangle(light, half, 0, w - half, h);
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        int w = _preview.ClientSize.Width, h = _preview.ClientSize.Height;
+        // One neutral mid-grey strip: shows both a light fill and a dark outline without
+        // needing separate dark/light panels.
+        using (var bg = new SolidBrush(Color.FromArgb(122, 122, 122)))
+            g.FillRectangle(bg, 0, 0, w, h);
 
-        // Arrow + hand side by side on each background.
-        float lw = w - half;
-        DrawCursorAt(g, _arrowBmp, half * 0.25f, h);
-        DrawCursorAt(g, _handBmp, half * 0.75f, h);
-        DrawCursorAt(g, _arrowBmp, half + lw * 0.25f, h);
-        DrawCursorAt(g, _handBmp, half + lw * 0.75f, h);
+        int n = _previews.Length;
+        if (n == 0) return;
+        int rows = (n + PreviewCols - 1) / PreviewCols;
+        float cellW = w / (float)PreviewCols, cellH = h / (float)rows;
+
+        // One shared scale so the cells keep the cursors' TRUE relative sizes: fit the
+        // largest trimmed cursor into a cell, capped at 1:1 (never upscale).
+        float maxW = 1f, maxH = 1f;
+        foreach (var b in _previews)
+            if (b is not null) { maxW = Math.Max(maxW, b.Width); maxH = Math.Max(maxH, b.Height); }
+        const float pad = 16f;
+        float scale = Math.Min(1f, Math.Min((cellW - pad) / maxW, (cellH - pad) / maxH));
+
+        for (int i = 0; i < n; i++)
+        {
+            var bmp = _previews[i];
+            if (bmp is null) continue;
+            float cx = (i % PreviewCols) * cellW + cellW / 2f;
+            float cy = (i / PreviewCols) * cellH + cellH / 2f;
+            float dw = bmp.Width * scale, dh = bmp.Height * scale;
+            if (scale >= 0.999f)
+                g.DrawImageUnscaled(bmp, (int)(cx - bmp.Width / 2f), (int)(cy - bmp.Height / 2f));
+            else
+                g.DrawImage(bmp, cx - dw / 2f, cy - dh / 2f, dw, dh);
+        }
     }
 
-    static void DrawCursorAt(Graphics g, Bitmap? bmp, float centerX, int h)
+    // Crops a bitmap to its non-transparent bounds (so the cursor's big transparent
+    // canvas doesn't dominate the preview layout). Returns a clone if fully transparent.
+    static Bitmap Trim(Bitmap src)
     {
-        if (bmp is null) return;
-        g.DrawImageUnscaled(bmp, (int)(centerX - bmp.Width / 2f), (h - bmp.Height) / 2);
+        var rect = new Rectangle(0, 0, src.Width, src.Height);
+        var data = src.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        int stride = data.Stride;
+        var buf = new byte[stride * src.Height];
+        System.Runtime.InteropServices.Marshal.Copy(data.Scan0, buf, 0, buf.Length);
+        src.UnlockBits(data);
+
+        int minX = src.Width, minY = src.Height, maxX = -1, maxY = -1;
+        for (int y = 0; y < src.Height; y++)
+            for (int x = 0; x < src.Width; x++)
+                if (buf[y * stride + x * 4 + 3] > 8) // alpha
+                {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+        if (maxX < minX) return (Bitmap)src.Clone();
+
+        var crop = new Bitmap(maxX - minX + 1, maxY - minY + 1);
+        using var cg = Graphics.FromImage(crop);
+        cg.DrawImage(src, new Rectangle(0, 0, crop.Width, crop.Height),
+                     Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1), GraphicsUnit.Pixel);
+        return crop;
     }
 
     void PickColor(Button btn, Action<Color> assign)
@@ -335,7 +395,7 @@ public sealed class PreferencesForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _arrowBmp?.Dispose(); _handBmp?.Dispose(); }
+        if (disposing) foreach (var b in _previews) b?.Dispose();
         base.Dispose(disposing);
     }
 

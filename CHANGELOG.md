@@ -4,6 +4,23 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
+## 0.5.0 - 2026-06-02
+
+### Added
+- **Crosshair / precision cursor** (`OCR_CROSS`): a reticle — centre dot, four axis ticks
+  and a slowly-rotating broken ring — whose ticks "breathe" and spread outward (recoil)
+  when you move fast, then settle.
+- **`WormsCursor.Preview`** project: renders a labelled showcase of every themed cursor to
+  PNG (a dark sheet plus a transparent one) for the README / docs, used in the new
+  **Cursors** section of the README.
+
+### Changed
+- Preferences preview now shows **all** cursors (arrow, hand, busy, app-starting, help,
+  crosshair) in a 2-row grid on a single neutral background, sized so they grow with the
+  cursor-size slider (was a side-by-side dark/light strip of just arrow + hand).
+- The help cursor's **"?"** is now hand-drawn — a rounded hook plus a separate round dot —
+  instead of a font glyph, for cleaner rounding and a correctly-aligned, smaller dot.
+
 ## 0.4.0 - 2026-06-02
 
 ### Added
