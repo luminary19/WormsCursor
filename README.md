@@ -19,7 +19,7 @@ It runs in the background from the system tray, with no main window.
 
 ## Demo
 
-https://github.com/user-attachments/assets/c8095725-6cfe-4c99-b9f3-834460b1514c
+https://github.com/user-attachments/assets/b9455296-e3a6-4c48-b90b-70b054ceaf4b
 
 _The cursor rotating to follow your mouse movement._
 
