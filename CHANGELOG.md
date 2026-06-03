@@ -7,6 +7,11 @@ GitHub releases. The release workflow pulls the matching section into each relea
 ## 0.6.0 - 2026-06-03
 
 ### Added
+- **Wider, two-column Preferences layout**: the cursor preview is now a **7×2 grid** (matching
+  the README sheet) instead of 5 columns, and the controls below sit in two columns — sliders
+  on the left, colours + the *Test cursor* combo on the right — so the window is wide-and-short
+  rather than a tall stack. The colour buttons now show their hex value in a contrasting ink so
+  a black/white swatch still reads as a colour picker.
 - **Hover-to-try in the Preferences preview**: moving the mouse over a cursor tile borrows
   that cursor onto your real pointer (live), and the tile empties to a dashed pocket so it's
   clear where it went. Moving off the grid hands the pointer back to whatever the *Test

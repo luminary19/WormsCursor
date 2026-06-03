@@ -18,12 +18,12 @@ public sealed class PreferencesForm : Form
     const string RepoUrl = "https://github.com/dawidope/WormsCursor";
 
     const int M = 16;            // outer margin
-    const int W = 460;           // base client width (the window grows wider if the preview needs it)
+    const int W = 460;           // minimum client width (the window grows wider for the 7-col preview)
     const int PreviewGap = 14;   // gap between the preview and the controls below it
-    const int PreviewCols = 5;   // fixed preview columns; rows grow with the cursor count
+    const int PreviewCols = 7;   // fixed preview columns: 13 cursors -> 2 tidy rows (matches the README sheet)
     const int CellPad = 14;      // breathing room around each cursor (drawn 1:1, never scaled)
-    const int SliderRowH = 56;
-    const int ColorRowH = 58;
+    const int ColGap = 28;       // gap between the two control columns below the preview
+    const int RowH = 58;         // height of one control row (caption + control + gap)
 
     readonly CursorSettings _working;
     public CursorSettings Settings => _working;
@@ -44,8 +44,13 @@ public sealed class PreferencesForm : Form
 
     readonly TrackBar _sizeBar, _thickBar, _radiusBar;
     readonly Label _sizeVal, _thickVal, _radiusVal;
+    readonly Label _sizeCap, _thickCap, _radiusCap, _fillCap, _outlineCap, _testCap;
     readonly Button _fillBtn, _outlineBtn;
     readonly ComboBox _testCombo;
+    readonly Label _tip;
+    readonly Button _defaultsBtn, _applyBtn, _okBtn, _cancelBtn;
+    readonly Label _version;
+    readonly LinkLabel _link;
     readonly Action<TestCursor> _setTest;
     readonly Action<CursorSettings> _apply;
     readonly UpdateService _updates;
@@ -96,37 +101,39 @@ public sealed class PreferencesForm : Form
         _previewDebounce = new System.Windows.Forms.Timer { Interval = 70 };
         _previewDebounce.Tick += (_, _) => { _previewDebounce.Stop(); RenderPreview(); _preview.Invalidate(); };
 
-        int y = 8; // relative to _body's top
+        // The controls are CREATED here but POSITIONED by LayoutBody once the final window
+        // width is known (the window widens to fit the 7-column preview). Layout is two
+        // columns — sliders left, colours + test on the right — so the dialog stays wide
+        // and short rather than a tall single stack.
 
-        _body.Controls.Add(new Label
-        {
-            Text = "Tip: hover a cursor tile above to try it live on your pointer.",
-            AutoSize = true,
-            ForeColor = SystemColors.GrayText,
-            Location = new Point(M, y),
-        });
-        y += 24;
+        // Full-width tip above the two columns.
+        _tip = MakeCaption("Tip: hover a cursor tile above to try it live on your pointer.");
+        _tip.ForeColor = SystemColors.GrayText;
 
+        // --- left column: the three numeric sliders ---
         _sizeBar = MakeBar(24, 128, _working.Size);
         _sizeVal = MakeVal();
-        AddSliderRow("Cursor size", _sizeBar, _sizeVal, ref y);
+        _sizeCap = MakeCaption("Cursor size");
         _sizeBar.ValueChanged += (_, _) => { _working.Size = _sizeBar.Value; OnEdited(); };
-
-        _fillBtn = MakeColorButton(ParseOr(_working.FillColor, Color.White));
-        _fillBtn.Click += (_, _) => PickColor(_fillBtn, c => _working.FillColor = ToHex(c));
-        _outlineBtn = MakeColorButton(ParseOr(_working.OutlineColor, Color.Black));
-        _outlineBtn.Click += (_, _) => PickColor(_outlineBtn, c => _working.OutlineColor = ToHex(c));
-        AddTwoColorRow("Fill colour", _fillBtn, "Outline colour", _outlineBtn, ref y);
 
         _thickBar = MakeBar(0, 40, (int)Math.Round(_working.OutlineThickness * 10));
         _thickVal = MakeVal();
-        AddSliderRow("Outline thickness", _thickBar, _thickVal, ref y);
+        _thickCap = MakeCaption("Outline thickness");
         _thickBar.ValueChanged += (_, _) => { _working.OutlineThickness = _thickBar.Value / 10.0; OnEdited(); };
 
         _radiusBar = MakeBar(0, 120, (int)Math.Round(_working.CornerRadius * 10));
         _radiusVal = MakeVal();
-        AddSliderRow("Corner radius (arrow only)", _radiusBar, _radiusVal, ref y);
+        _radiusCap = MakeCaption("Corner radius (arrow only)");
         _radiusBar.ValueChanged += (_, _) => { _working.CornerRadius = _radiusBar.Value / 10.0; OnEdited(); };
+
+        // --- right column: the two colours + the test-cursor combo ---
+        _fillBtn = MakeColorButton(ParseOr(_working.FillColor, Color.White));
+        _fillBtn.Click += (_, _) => PickColor(_fillBtn, c => _working.FillColor = ToHex(c));
+        _fillCap = MakeCaption("Fill colour");
+
+        _outlineBtn = MakeColorButton(ParseOr(_working.OutlineColor, Color.Black));
+        _outlineBtn.Click += (_, _) => PickColor(_outlineBtn, c => _working.OutlineColor = ToHex(c));
+        _outlineCap = MakeCaption("Outline colour");
 
         // Test cursor: forces the chosen cursor on screen so you can see the busy /
         // progress animation on demand (it normally only shows when the OS decides).
@@ -140,41 +147,38 @@ public sealed class PreferencesForm : Form
         });
         _testCombo.SelectedIndex = 0;
         _testCombo.SelectedIndexChanged += (_, _) => _setTest(MapTest(_testCombo.SelectedIndex));
-        AddComboRow("Test cursor (force on screen)", _testCombo, ref y);
+        _testCap = MakeCaption("Test cursor (force on screen)");
         FormClosed += (_, _) => _setTest(TestCursor.Off);
 
-        int btnY = y + 8;
-        var defaults = new Button { Text = "Defaults", Location = new Point(M, btnY), Size = new Size(90, 30) };
-        defaults.Click += (_, _) => ResetDefaults();
-        // Right cluster: Apply | OK | Cancel (anchored right so they follow the window edge as it
-        // widens). Apply commits edits to the live cursor without closing, so you can tweak
+        // --- action buttons: Defaults + Check-for-updates (left) | Apply OK Cancel (right) ---
+        // Apply commits edits to the live cursor without closing, so you can tweak
         // size/colour and watch the test cursor update.
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(84, 30), Location = new Point(W - M - 84, btnY), Anchor = AnchorStyles.Top | AnchorStyles.Right };
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Size = new Size(84, 30), Location = new Point(W - M - 176, btnY), Anchor = AnchorStyles.Top | AnchorStyles.Right };
-        var apply = new Button { Text = "Apply", Size = new Size(84, 30), Location = new Point(W - M - 268, btnY), Anchor = AnchorStyles.Top | AnchorStyles.Right };
-        apply.Click += (_, _) => _apply(_working);
-        _body.Controls.Add(defaults);
-        _body.Controls.Add(apply);
-        _body.Controls.Add(ok);
-        _body.Controls.Add(cancel);
-        AcceptButton = ok;
-        CancelButton = cancel;
+        _defaultsBtn = new Button { Text = "Defaults", Size = new Size(90, 30) };
+        _defaultsBtn.Click += (_, _) => ResetDefaults();
+        _cancelBtn = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(84, 30) };
+        _okBtn = new Button { Text = "OK", DialogResult = DialogResult.OK, Size = new Size(84, 30) };
+        _applyBtn = new Button { Text = "Apply", Size = new Size(84, 30) };
+        _applyBtn.Click += (_, _) => _apply(_working);
+        AcceptButton = _okBtn;
+        CancelButton = _cancelBtn;
 
-        // Footer line 1: version + "Check for updates" (moved here off the button row to
-        // make room for Apply) + update status. Line 2: the repo link on its own line.
-        int footerY = btnY + 30 + 14;
-        var version = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "v" + AppVersion(), Location = new Point(M, footerY + 5) };
-        _updateBtn = new Button { Text = "Check for updates", Location = new Point(M + 50, footerY), Size = new Size(140, 26) };
+        // --- footer: version + the repo link on one line ---
+        _version = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "v" + AppVersion() };
+        _updateBtn = new Button { Text = "Check for updates", Size = new Size(140, 26) };
         _updateBtn.Click += OnCheckUpdates;
-        _updateStatus = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = string.Empty, Location = new Point(M + 50 + 148, footerY + 5) };
-        var link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor", Location = new Point(M, footerY + 38) };
-        link.LinkClicked += (_, _) => OpenUrl(RepoUrl);
-        _body.Controls.Add(version);
-        _body.Controls.Add(_updateBtn);
-        _body.Controls.Add(_updateStatus);
-        _body.Controls.Add(link);
+        _updateStatus = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = string.Empty };
+        _link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor" };
+        _link.LinkClicked += (_, _) => OpenUrl(RepoUrl);
 
-        _bodyHeight = footerY + 38 + link.PreferredHeight + M; // bottom margin under the link line
+        foreach (Control c in new Control[]
+        {
+            _tip,
+            _sizeCap, _sizeBar, _sizeVal, _thickCap, _thickBar, _thickVal, _radiusCap, _radiusBar, _radiusVal,
+            _fillCap, _fillBtn, _outlineCap, _outlineBtn, _testCap, _testCombo,
+            _defaultsBtn, _applyBtn, _okBtn, _cancelBtn,
+            _version, _updateBtn, _updateStatus, _link,
+        })
+            _body.Controls.Add(c);
 
         UpdateLabels();
         MeasureCells();  // fix the grid cell size for the largest cursor the slider allows (128 px)
@@ -203,32 +207,88 @@ public sealed class PreferencesForm : Form
 
     static Button MakeColorButton(Color c)
     {
-        var b = new Button { BackColor = c, FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false, Size = new Size(150, 28) };
+        var b = new Button { FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false, Size = new Size(150, 28) };
         b.FlatAppearance.BorderColor = Color.FromArgb(120, 120, 120);
         b.FlatAppearance.BorderSize = 1;
+        StyleSwatch(b, c);
         return b;
     }
 
-    void AddSliderRow(string caption, TrackBar bar, Label val, ref int y)
+    // Paints a colour button with its colour plus the hex value in a contrasting ink, so a
+    // pure black/white swatch still reads as a clickable colour picker, not a blank bar.
+    static void StyleSwatch(Button b, Color c)
     {
-        _body.Controls.Add(new Label { Text = caption, AutoSize = true, Location = new Point(M, y) });
-        int barY = y + 22;
-        bar.SetBounds(M, barY, W - 2 * M - 68, 28);
-        bar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; // stretch with the window
-        val.SetBounds(W - M - 56, barY + 5, 56, 18);
-        val.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        _body.Controls.Add(bar);
-        _body.Controls.Add(val);
-        y += SliderRowH;
+        b.BackColor = c;
+        b.Text = ToHex(c);
+        double lum = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0;
+        b.ForeColor = lum > 0.55 ? Color.FromArgb(45, 45, 45) : Color.White;
     }
 
-    void AddComboRow(string caption, ComboBox combo, ref int y)
+    static Label MakeCaption(string text) => new() { Text = text, AutoSize = true };
+
+    // Positions every control inside _body for a given body width: two columns of three
+    // rows each (sliders left, colours + test on the right) keep the dialog wide-and-short,
+    // with the action buttons and footer spanning the full width below. Row heights don't
+    // depend on the width, so LayoutWindow can call this to learn _bodyHeight and again
+    // once the final width is settled.
+    void LayoutBody(int width)
     {
-        _body.Controls.Add(new Label { Text = caption, AutoSize = true, Location = new Point(M, y) });
-        combo.SetBounds(M, y + 22, W - 2 * M, 24);
-        combo.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        _body.Controls.Add(combo);
-        y += SliderRowH;
+        int colW = (width - 2 * M - ColGap) / 2;
+        int leftX = M, rightX = M + colW + ColGap;
+
+        int top = 8;
+        _tip.Location = new Point(M, top);
+        top += 28;
+
+        // left column — the numeric sliders
+        int ly = top;
+        ly = PlaceSlider(_sizeCap, _sizeBar, _sizeVal, leftX, ly, colW);
+        ly = PlaceSlider(_thickCap, _thickBar, _thickVal, leftX, ly, colW);
+        ly = PlaceSlider(_radiusCap, _radiusBar, _radiusVal, leftX, ly, colW);
+
+        // right column — colours + the test combo
+        int ry = top;
+        ry = PlaceField(_fillCap, _fillBtn, rightX, ry, colW, 28);
+        ry = PlaceField(_outlineCap, _outlineBtn, rightX, ry, colW, 28);
+        ry = PlaceField(_testCap, _testCombo, rightX, ry, colW, 24);
+
+        // action buttons — Defaults + Check-for-updates on the left, Apply|OK|Cancel clustered
+        // at the right. The wide window leaves a comfortable gap in the middle, so the update
+        // status text sits right beside its button again.
+        int btnY = Math.Max(ly, ry) + 6;
+        _defaultsBtn.Location = new Point(M, btnY);
+        _updateBtn.Location = new Point(_defaultsBtn.Right + 8, btnY + 2); // 26-tall button centred on the 30-tall row
+        _updateStatus.Location = new Point(_updateBtn.Right + 12, btnY + 8);
+        _cancelBtn.Location = new Point(width - M - _cancelBtn.Width, btnY);
+        _okBtn.Location = new Point(_cancelBtn.Left - 8 - _okBtn.Width, btnY);
+        _applyBtn.Location = new Point(_okBtn.Left - 8 - _applyBtn.Width, btnY);
+
+        // footer — version + repo link on a single line below the buttons
+        int footerY = btnY + 30 + 14;
+        _version.Location = new Point(M, footerY);
+        _link.Location = new Point(_version.Right + 14, footerY);
+
+        // Fixed line height (~20): autosize PreferredHeight is unreliable before the form gets
+        // a handle, which would clip the footer off the bottom.
+        _bodyHeight = footerY + 20 + M;
+    }
+
+    // One slider row: caption, then a full-column-width bar with a right-aligned value label.
+    static int PlaceSlider(Label cap, TrackBar bar, Label val, int x, int y, int colW)
+    {
+        const int valW = 56;
+        cap.Location = new Point(x, y);
+        bar.SetBounds(x, y + 22, colW - valW - 6, 28);
+        val.SetBounds(x + colW - valW, y + 27, valW, 18);
+        return y + RowH;
+    }
+
+    // One captioned control filling the column width (colour button / combo).
+    static int PlaceField(Label cap, Control field, int x, int y, int colW, int h)
+    {
+        cap.Location = new Point(x, y);
+        field.SetBounds(x, y + 22, colW, h);
+        return y + RowH;
     }
 
     static TestCursor MapTest(int index) => index switch
@@ -248,23 +308,6 @@ public sealed class PreferencesForm : Form
         13 => TestCursor.No,
         _ => TestCursor.Off,
     };
-
-    // Two colour pickers side by side on one row (Fill | Outline).
-    void AddTwoColorRow(string capA, Button btnA, string capB, Button btnB, ref int y)
-    {
-        int half = (W - 2 * M) / 2;
-        int swatchW = half - 20;
-        _body.Controls.Add(new Label { Text = capA, AutoSize = true, Location = new Point(M, y) });
-        btnA.SetBounds(M, y + 24, swatchW, 28);
-        _body.Controls.Add(btnA);
-
-        int x2 = M + half;
-        _body.Controls.Add(new Label { Text = capB, AutoSize = true, Location = new Point(x2, y) });
-        btnB.SetBounds(x2, y + 24, swatchW, 28);
-        _body.Controls.Add(btnB);
-
-        y += ColorRowH;
-    }
 
     // ---------- behaviour ----------
     void OnEdited()
@@ -300,7 +343,7 @@ public sealed class PreferencesForm : Form
         _cellH = maxH + 2 * CellPad;
     }
 
-    // Sizes the window once for the fixed 5-column grid (real size, never scaled). Capped to the
+    // Sizes the window once for the fixed 7-column grid (real size, never scaled). Capped to the
     // screen so it can't run off-screen; if the grid is taller than that, the preview scrolls.
     void LayoutWindow()
     {
@@ -310,6 +353,11 @@ public sealed class PreferencesForm : Form
 
         var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
         int maxPanelW = wa.Width - 2 * M;
+
+        // Body height is width-independent, so lay it out at a provisional width to learn
+        // _bodyHeight (needed for the vertical-overflow check), then again at the final width.
+        LayoutBody(Math.Max(W, Math.Min(contentW, maxPanelW) + 2 * M));
+
         int maxPanelH = wa.Height - 2 * M - PreviewGap - _bodyHeight - 64; // title bar + taskbar headroom
         bool overflow = contentW > maxPanelW || contentH > maxPanelH;
 
@@ -323,6 +371,8 @@ public sealed class PreferencesForm : Form
         int panelH = Math.Min(contentH, Math.Max(160, maxPanelH));
         int clientW = Math.Max(W, panelW + 2 * M);
         int previewX = (clientW - panelW) / 2; // centre the grid if the window's min width is wider
+
+        LayoutBody(clientW); // final control positions at the real width
 
         _preview.SetBounds(previewX, M, panelW, panelH);
         _body.SetBounds(0, M + panelH + PreviewGap, clientW, _bodyHeight);
@@ -459,7 +509,7 @@ public sealed class PreferencesForm : Form
         using var dlg = new ColorDialog { Color = btn.BackColor, FullOpen = true };
         if (dlg.ShowDialog(this) == DialogResult.OK)
         {
-            btn.BackColor = dlg.Color;
+            StyleSwatch(btn, dlg.Color);
             assign(dlg.Color);
             OnEdited();
         }
@@ -471,8 +521,8 @@ public sealed class PreferencesForm : Form
         _sizeBar.Value = Math.Clamp(_working.Size, _sizeBar.Minimum, _sizeBar.Maximum);
         _thickBar.Value = Math.Clamp((int)Math.Round(_working.OutlineThickness * 10), _thickBar.Minimum, _thickBar.Maximum);
         _radiusBar.Value = Math.Clamp((int)Math.Round(_working.CornerRadius * 10), _radiusBar.Minimum, _radiusBar.Maximum);
-        _fillBtn.BackColor = ParseOr(_working.FillColor, Color.White);
-        _outlineBtn.BackColor = ParseOr(_working.OutlineColor, Color.Black);
+        StyleSwatch(_fillBtn, ParseOr(_working.FillColor, Color.White));
+        StyleSwatch(_outlineBtn, ParseOr(_working.OutlineColor, Color.Black));
         OnEdited();
     }
 
