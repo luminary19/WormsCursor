@@ -33,6 +33,7 @@ public sealed class PreferencesForm : Form
     readonly System.Windows.Forms.Timer _previewDebounce; // coalesces rapid slider edits into one render
     int _bodyHeight;             // _body content height (computed once when built)
     int _cellW = 1, _cellH = 1, _rows = 1; // preview grid metrics (set by LayoutPreview)
+    int _hoverIndex = -1;        // preview tile under the mouse (-1 = none): its cursor is "borrowed" onto the live pointer
     Bitmap?[] _previews = Array.Empty<Bitmap?>();
     static readonly TestCursor[] PreviewKinds =
     {
@@ -78,6 +79,11 @@ public sealed class PreferencesForm : Form
             // on in LayoutWindow ONLY when the grid genuinely can't fit on screen.
         };
         _preview.Paint += PreviewPaint;
+        // Hover-to-try: moving over a tile borrows that cursor onto the real pointer
+        // (and hides the tile, since the cursor is "now on your pointer"); leaving the
+        // grid hands the pointer back to whatever the Test-cursor combo has selected.
+        _preview.MouseMove += PreviewMouseMove;
+        _preview.MouseLeave += PreviewMouseLeave;
         Controls.Add(_preview);
 
         // Everything below the preview lives in _body, so the preview can grow (real-size, never
@@ -91,6 +97,15 @@ public sealed class PreferencesForm : Form
         _previewDebounce.Tick += (_, _) => { _previewDebounce.Stop(); RenderPreview(); _preview.Invalidate(); };
 
         int y = 8; // relative to _body's top
+
+        _body.Controls.Add(new Label
+        {
+            Text = "Tip: hover a cursor tile above to try it live on your pointer.",
+            AutoSize = true,
+            ForeColor = SystemColors.GrayText,
+            Location = new Point(M, y),
+        });
+        y += 24;
 
         _sizeBar = MakeBar(24, 128, _working.Size);
         _sizeVal = MakeVal();
@@ -355,12 +370,58 @@ public sealed class PreferencesForm : Form
 
         for (int i = 0; i < n; i++)
         {
+            int col = i % cols, row = i / cols;
+            if (i == _hoverIndex)
+            {
+                // This tile's cursor is borrowed onto the live pointer — leave an empty
+                // dashed pocket so it's obvious where it went (and that hovering did something).
+                var cell = new Rectangle(col * _cellW + 3, row * _cellH + 3, _cellW - 7, _cellH - 7);
+                using (var hole = new SolidBrush(Color.FromArgb(96, 96, 96)))
+                    g.FillRectangle(hole, cell);
+                using (var pen = new Pen(Color.FromArgb(185, 185, 185)) { DashStyle = DashStyle.Dash })
+                    g.DrawRectangle(pen, cell);
+                continue;
+            }
             var bmp = _previews[i];
             if (bmp is null) continue;
-            int cx = (i % cols) * _cellW + _cellW / 2;
-            int cy = (i / cols) * _cellH + _cellH / 2;
+            int cx = col * _cellW + _cellW / 2;
+            int cy = row * _cellH + _cellH / 2;
             g.DrawImageUnscaled(bmp, cx - bmp.Width / 2, cy - bmp.Height / 2); // real size, never scaled
         }
+    }
+
+    // Hovering a tile "borrows" that cursor onto the real pointer (live preview); moving
+    // off a tile within the grid (idx < 0) hands the pointer back to the Test-cursor combo.
+    void PreviewMouseMove(object? sender, MouseEventArgs e)
+    {
+        int idx = HitTestPreview(e.Location);
+        if (idx == _hoverIndex) return;
+        _hoverIndex = idx;
+        _setTest(idx >= 0 ? PreviewKinds[idx] : MapTest(_testCombo.SelectedIndex));
+        _preview.Invalidate();
+    }
+
+    // Left the grid entirely: restore whatever the Test-cursor combo last selected.
+    void PreviewMouseLeave(object? sender, EventArgs e)
+    {
+        if (_hoverIndex < 0) return;
+        _hoverIndex = -1;
+        _setTest(MapTest(_testCombo.SelectedIndex));
+        _preview.Invalidate();
+    }
+
+    // Maps a point in the preview panel (client coords) to a cursor-tile index, or -1 for
+    // none. AutoScrollPosition is <= 0 when scrolled, so subtracting it yields content coords
+    // (mirrors the TranslateTransform in PreviewPaint).
+    int HitTestPreview(Point pt)
+    {
+        int x = pt.X - _preview.AutoScrollPosition.X;
+        int y = pt.Y - _preview.AutoScrollPosition.Y;
+        if (x < 0 || y < 0) return -1;
+        int col = x / _cellW, row = y / _cellH;
+        if (col < 0 || col >= PreviewCols) return -1;
+        int idx = row * PreviewCols + col;
+        return idx >= 0 && idx < _previews.Length ? idx : -1;
     }
 
     // Crops a bitmap to its non-transparent bounds (so the cursor's big transparent
