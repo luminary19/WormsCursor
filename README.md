@@ -68,6 +68,21 @@ plus a transparent one).
 - The animated cursors re-render **only while actually on screen** (matched via `GetCursorInfo`
   against the live system handle), so an idle tray uses no CPU.
 
+## Known issues
+
+- **Animated cursors flicker on a mixed-DPI multi-monitor setup.** If your monitors run at
+  different display scales (e.g. 125% on one, 150% on another), the *animated* cursors
+  (busy/wait, app-starting, help, crosshair, …) can strobe while shown on the higher-DPI
+  screen. They animate by re-installing the cursor via `SetSystemCursor` every frame, and on a
+  monitor whose scale differs from the one the cursor was created for, Windows re-composites
+  the global cursor on each swap — which flashes. The **static** cursors (the rotating
+  arrow/hand at rest) are re-installed only on a direction change, so they don't flicker.
+  Single-DPI setups and matching scales are unaffected. Workarounds: set both monitors to the
+  same scale, or enable **Pointer trails** (Settings → Bluetooth & devices → Mouse → Additional
+  mouse settings → Pointer Options, shortest setting), which forces a cursor-draw path that
+  sidesteps the flicker. A proper fix would mean drawing the animated cursors in our own overlay
+  instead of through `SetSystemCursor` (tracked for a future release).
+
 ## Project structure
 
 ```

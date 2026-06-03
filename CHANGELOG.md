@@ -19,17 +19,18 @@ GitHub releases. The release workflow pulls the matching section into each relea
   currently **applied** appearance — click **Apply** to preview unsaved size/colour edits.
 
 ### Fixed
-- **Animated cursors no longer flicker on mixed-DPI multi-monitor setups** (e.g. crossing a
-  125% screen to a 150% one). The animated cursors are re-created ~60×/s, and a PerMonitorV2
-  process has Windows re-scale each freshly-created cursor for the monitor it's shown on, so
-  that per-frame rescale churn made them strobe on the higher-DPI screen. We now create all
-  cursors with `SetThreadCursorCreationScaling(CURSOR_CREATION_SCALING_NONE)` so they're shown
-  1:1 at their rendered pixel size on every monitor (Windows 11 22000+; older builds keep the
-  previous behaviour).
 - The Preferences window now rescales when dragged between monitors with different display
   scaling (e.g. 150% ↔ 200%). It's a hand-coded form that never set `AutoScaleMode`, so
   WinForms didn't re-scale it on a DPI change (despite the app being PerMonitorV2) and it
   looked cut off on the other monitor; it now uses `AutoScaleMode.Font`.
+
+### Known issues
+- **Animated cursors flicker on mixed-DPI multi-monitor setups** (e.g. a 125% screen next to a
+  150% one). The animated cursors re-install via `SetSystemCursor` every frame; on a monitor
+  whose scale differs from the one the cursor was created for, Windows re-composites the global
+  cursor on each swap, which flashes. Static cursors (the rotating arrow/hand at rest) are
+  unaffected. Workaround: match both monitors' scale, or enable Pointer trails (shortest). A
+  proper fix needs the animated cursors drawn in our own overlay instead of `SetSystemCursor`.
 
 ## 0.5.0 - 2026-06-03
 
