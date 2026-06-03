@@ -4,9 +4,23 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
-## Unreleased
+## 0.6.0 - 2026-06-03
+
+### Added
+- **Hover-to-try in the Preferences preview**: moving the mouse over a cursor tile borrows
+  that cursor onto your real pointer (live), and the tile empties to a dashed pocket so it's
+  clear where it went. Moving off the grid hands the pointer back to whatever the *Test
+  cursor* combo has selected. Like the *Test cursor* combo, the on-screen cursor reflects the
+  currently **applied** appearance — click **Apply** to preview unsaved size/colour edits.
 
 ### Fixed
+- **Animated cursors no longer flicker on mixed-DPI multi-monitor setups** (e.g. crossing a
+  125% screen to a 150% one). The animated cursors are re-created ~60×/s, and a PerMonitorV2
+  process has Windows re-scale each freshly-created cursor for the monitor it's shown on, so
+  that per-frame rescale churn made them strobe on the higher-DPI screen. We now create all
+  cursors with `SetThreadCursorCreationScaling(CURSOR_CREATION_SCALING_NONE)` so they're shown
+  1:1 at their rendered pixel size on every monitor (Windows 11 22000+; older builds keep the
+  previous behaviour).
 - The Preferences window now rescales when dragged between monitors with different display
   scaling (e.g. 150% ↔ 200%). It's a hand-coded form that never set `AutoScaleMode`, so
   WinForms didn't re-scale it on a DPI change (despite the app being PerMonitorV2) and it

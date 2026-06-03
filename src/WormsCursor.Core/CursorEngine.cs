@@ -487,14 +487,46 @@ public sealed class CursorEngine : IDisposable
     // alpha-correct cursor with an explicit hotspot (GetHicon -> CreateIconIndirect)
     static IntPtr MakeCursor(Bitmap bmp, int hotX, int hotY)
     {
-        IntPtr hIcon = bmp.GetHicon();
-        GetIconInfo(hIcon, out ICONINFO ii);
-        ii.fIcon = false; ii.xHotspot = hotX; ii.yHotspot = hotY;
-        IntPtr hCur = CreateIconIndirect(ref ii);
-        if (ii.hbmColor != IntPtr.Zero) DeleteObject(ii.hbmColor);
-        if (ii.hbmMask != IntPtr.Zero) DeleteObject(ii.hbmMask);
-        DestroyIcon(hIcon);
-        return hCur;
+        // Create the cursor with per-monitor scaling DISABLED. We already render every
+        // cursor at its exact target pixel size, so we want Windows to show it 1:1 on
+        // every monitor. Without this, a PerMonitorV2 process has each freshly-created
+        // cursor re-scaled for the monitor it's shown on — and because the animated
+        // cursors are re-created ~60x/s, that per-frame rescale makes them FLICKER when
+        // the pointer is on a non-100% monitor (e.g. crossing 125% -> 150%). Scoped per
+        // creation and reset afterwards so we never leak the setting onto the UI thread.
+        bool noScale = TryDisableCursorScaling();
+        try
+        {
+            IntPtr hIcon = bmp.GetHicon();
+            GetIconInfo(hIcon, out ICONINFO ii);
+            ii.fIcon = false; ii.xHotspot = hotX; ii.yHotspot = hotY;
+            IntPtr hCur = CreateIconIndirect(ref ii);
+            if (ii.hbmColor != IntPtr.Zero) DeleteObject(ii.hbmColor);
+            if (ii.hbmMask != IntPtr.Zero) DeleteObject(ii.hbmMask);
+            DestroyIcon(hIcon);
+            return hCur;
+        }
+        finally
+        {
+            if (noScale) SetThreadCursorCreationScaling(CURSOR_CREATION_SCALING_DEFAULT);
+        }
+    }
+
+    // 0 = not probed yet, 1 = API present, -1 = missing (Windows 10: it's 22000+ only).
+    static int _cursorScalingApi;
+
+    // Turns off per-monitor cursor scaling for the calling thread; returns false (no-op)
+    // on Windows builds without SetThreadCursorCreationScaling, where cursors keep the
+    // system's default scaling behaviour.
+    static bool TryDisableCursorScaling()
+    {
+        if (_cursorScalingApi < 0) return false;
+        try { SetThreadCursorCreationScaling(CURSOR_CREATION_SCALING_NONE); _cursorScalingApi = 1; return true; }
+        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException)
+        {
+            _cursorScalingApi = -1;
+            return false;
+        }
     }
 
     void RestoreCursors()
@@ -531,6 +563,8 @@ public sealed class CursorEngine : IDisposable
     const uint OCR_NO = 32648;
     const uint SPI_SETCURSORS = 0x0057;
     const int CURSOR_SHOWING = 0x00000001;
+    const uint CURSOR_CREATION_SCALING_NONE = 1;    // never scale cursors created on this thread
+    const uint CURSOR_CREATION_SCALING_DEFAULT = 2; // reset to the system's default scaling
 
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int x, y; }
 
@@ -540,6 +574,9 @@ public sealed class CursorEngine : IDisposable
     [StructLayout(LayoutKind.Sequential)]
     struct CURSORINFO { public int cbSize; public int flags; public IntPtr hCursor; public POINT ptScreenPos; }
 
+    // Windows 11 22000+: sets the DPI the cursors created on this thread are intended for
+    // (or the NONE/DEFAULT sentinels). Resolved lazily; absent on Windows 10 (see TryDisableCursorScaling).
+    [DllImport("user32.dll")] static extern uint SetThreadCursorCreationScaling(uint cursorDpi);
     [DllImport("user32.dll")] static extern bool GetCursorInfo(ref CURSORINFO pci);
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr LoadCursor(IntPtr hInstance, IntPtr lpCursorName);
     [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
