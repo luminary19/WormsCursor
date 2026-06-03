@@ -4,7 +4,7 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
-## 0.6.0 - 2026-06-03
+## 0.6.1 - 2026-06-03
 
 ### Added
 - **Wider, two-column Preferences layout**: the cursor preview is now a **7×2 grid** (matching
