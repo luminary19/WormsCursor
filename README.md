@@ -9,6 +9,10 @@ rotates the same way.
 
 It runs in the background from the system tray, with no main window.
 
+<p align="center">
+  <img src="assets/demo.gif" width="640" alt="WormsCursor: the arrow cursor rotating to follow mouse movement, with themed system cursors">
+</p>
+
 > ⚠️ **It replaces the system-wide arrow cursor** (`SetSystemCursor`) while running, so
 > every app sees the rotated arrow. The defaults are restored on quit and on a crash,
 > and WormsCursor reloads the real cursor scheme on every launch — so if it's ever
