@@ -24,6 +24,8 @@ public sealed class PreferencesForm : Form
     const int CellPad = 14;      // breathing room around each cursor (drawn 1:1, never scaled)
     const int ColGap = 28;       // gap between the two control columns below the preview
     const int RowH = 58;         // height of one control row (caption + control + gap)
+    const int ShowtimeLeadIn = 3; // seconds counted down before Showtime forces the first cursor
+    const int ShowtimeStepMs = 1500; // dwell on each cursor once cycling starts
 
     readonly CursorSettings _working;
     public CursorSettings Settings => _working;
@@ -31,9 +33,18 @@ public sealed class PreferencesForm : Form
     readonly DoubleBufferedPanel _preview;
     readonly Panel _body;        // every control below the preview, moved/resized as one block
     readonly System.Windows.Forms.Timer _previewDebounce; // coalesces rapid slider edits into one render
+    readonly System.Windows.Forms.Timer _showtime;        // hands-free demo: forces each test cursor in turn
     int _bodyHeight;             // _body content height (computed once when built)
     int _cellW = 1, _cellH = 1, _rows = 1; // preview grid metrics (set by LayoutPreview)
     int _hoverIndex = -1;        // preview tile under the mouse (-1 = none): its cursor is "borrowed" onto the live pointer
+
+    // --- showtime state (the auto-cycling demo) ---
+    readonly bool _showtimeLoops = true; // false = one pass through all cursors, then auto-stop
+    bool _showtimeRunning;       // active (covers both the lead-in countdown and the cycling)
+    bool _suppressTestCombo;     // guard: programmatic combo moves during showtime mustn't re-force a cursor
+    int _showtimeStep = -1;      // -1 during the lead-in, else the index into PreviewKinds
+    int _showtimeCountdown;      // seconds left in the lead-in
+    int _preShowtimeIndex;       // combo selection to restore when showtime ends
     Bitmap?[] _previews = Array.Empty<Bitmap?>();
     static readonly TestCursor[] PreviewKinds =
     {
@@ -42,11 +53,16 @@ public sealed class PreferencesForm : Form
         TestCursor.No,
     };
 
+    // Cursors shown in the showtime cycle, in order — currently the full preview set. To leave
+    // one out of the demo, drop it here (e.g. `k => k != TestCursor.Wait` skips the plain spinner).
+    static readonly TestCursor[] ShowtimeKinds = Array.FindAll(PreviewKinds, _ => true);
+
     readonly TrackBar _sizeBar, _thickBar, _radiusBar;
     readonly Label _sizeVal, _thickVal, _radiusVal;
     readonly Label _sizeCap, _thickCap, _radiusCap, _fillCap, _outlineCap, _testCap;
     readonly Button _fillBtn, _outlineBtn;
     readonly ComboBox _testCombo;
+    readonly Button _showtimeBtn;
     readonly Label _tip;
     readonly Button _defaultsBtn, _applyBtn, _okBtn, _cancelBtn;
     readonly Label _version;
@@ -146,9 +162,20 @@ public sealed class PreferencesForm : Form
             "Resize ↔", "Resize ↕", "Resize ↘↖", "Resize ↗↙", "Move ✥", "Unavailable ⊘",
         });
         _testCombo.SelectedIndex = 0;
-        _testCombo.SelectedIndexChanged += (_, _) => _setTest(MapTest(_testCombo.SelectedIndex));
+        _testCombo.SelectedIndexChanged += (_, _) => { if (!_suppressTestCombo) _setTest(MapTest(_testCombo.SelectedIndex)); };
         _testCap = MakeCaption("Test cursor (force on screen)");
-        FormClosed += (_, _) => _setTest(TestCursor.Off);
+
+        // Showtime: a hands-free demo for recording. After a 3-2-1 lead-in (time to start your
+        // capture) it forces each test cursor in turn, one per second, looping until you Stop.
+        // Move the mouse while it runs so the motion-driven animations actually play. The combo
+        // follows along (disabled) to show the live cursor's name; the button doubles as Stop.
+        _showtimeBtn = new Button { Text = "▶ Showtime" };
+        _showtimeBtn.Click += (_, _) => ToggleShowtime();
+        _showtime = new System.Windows.Forms.Timer { Interval = 1000 }; // 1s during the lead-in, then ShowtimeStepMs
+        _showtime.Tick += OnShowtimeTick;
+
+        // Stop forcing any test cursor — and halt showtime — when the dialog closes.
+        FormClosed += (_, _) => { _showtime.Stop(); _setTest(TestCursor.Off); };
 
         // --- action buttons: Defaults + Check-for-updates (left) | Apply OK Cancel (right) ---
         // Apply commits edits to the live cursor without closing, so you can tweak
@@ -174,7 +201,7 @@ public sealed class PreferencesForm : Form
         {
             _tip,
             _sizeCap, _sizeBar, _sizeVal, _thickCap, _thickBar, _thickVal, _radiusCap, _radiusBar, _radiusVal,
-            _fillCap, _fillBtn, _outlineCap, _outlineBtn, _testCap, _testCombo,
+            _fillCap, _fillBtn, _outlineCap, _outlineBtn, _testCap, _testCombo, _showtimeBtn,
             _defaultsBtn, _applyBtn, _okBtn, _cancelBtn,
             _version, _updateBtn, _updateStatus, _link,
         })
@@ -250,7 +277,14 @@ public sealed class PreferencesForm : Form
         int ry = top;
         ry = PlaceField(_fillCap, _fillBtn, rightX, ry, colW, 28);
         ry = PlaceField(_outlineCap, _outlineBtn, rightX, ry, colW, 28);
-        ry = PlaceField(_testCap, _testCombo, rightX, ry, colW, 24);
+
+        // test row: caption, then the combo and the Showtime button sharing the column width
+        _testCap.Location = new Point(rightX, ry);
+        const int stW = 104, stGap = 6;
+        int comboW = colW - stW - stGap;
+        _testCombo.SetBounds(rightX, ry + 22, comboW, 24);
+        _showtimeBtn.SetBounds(rightX + comboW + stGap, ry + 20, stW, 27);
+        ry += RowH;
 
         // action buttons — Defaults + Check-for-updates on the left, Apply|OK|Cancel clustered
         // at the right. The wide window leaves a comfortable gap in the middle, so the update
@@ -444,6 +478,7 @@ public sealed class PreferencesForm : Form
     // off a tile within the grid (idx < 0) hands the pointer back to the Test-cursor combo.
     void PreviewMouseMove(object? sender, MouseEventArgs e)
     {
+        if (_showtimeRunning) return; // showtime owns the cursor — ignore hover-to-try
         int idx = HitTestPreview(e.Location);
         if (idx == _hoverIndex) return;
         _hoverIndex = idx;
@@ -454,10 +489,74 @@ public sealed class PreferencesForm : Form
     // Left the grid entirely: restore whatever the Test-cursor combo last selected.
     void PreviewMouseLeave(object? sender, EventArgs e)
     {
+        if (_showtimeRunning) return; // showtime owns the cursor — ignore hover-to-try
         if (_hoverIndex < 0) return;
         _hoverIndex = -1;
         _setTest(MapTest(_testCombo.SelectedIndex));
         _preview.Invalidate();
+    }
+
+    // ---------- showtime (the hands-free demo cycle) ----------
+    // Click to start: a 3-2-1 lead-in, then every test cursor in turn (one per second),
+    // looping until you click Stop or close the dialog. Move the mouse while it runs so the
+    // motion-driven cursors (rotation, swing, jelly, taffy) animate as they pass by.
+    void ToggleShowtime()
+    {
+        if (_showtimeRunning) { StopShowtime(); return; }
+
+        _preShowtimeIndex = _testCombo.SelectedIndex; // restore the prior selection on Stop
+        _showtimeRunning = true;
+        _showtimeStep = -1;                           // still in the lead-in
+        _showtimeCountdown = ShowtimeLeadIn;
+        _testCombo.Enabled = false;                   // showtime owns the cursor while it runs
+        SetTestComboSilently(0);                      // normal cursor during the countdown
+        _setTest(TestCursor.Off);
+        _showtimeBtn.Text = $"Starting {_showtimeCountdown}…";
+        _showtime.Interval = 1000;                    // tick the lead-in countdown once per second
+        _showtime.Start();
+    }
+
+    void StopShowtime()
+    {
+        _showtime.Stop();
+        _showtimeRunning = false;
+        _showtimeStep = -1;
+        _showtimeBtn.Text = "▶ Showtime";
+        _testCombo.Enabled = true;
+        int restore = Math.Clamp(_preShowtimeIndex, 0, _testCombo.Items.Count - 1);
+        SetTestComboSilently(restore);
+        _setTest(MapTest(restore));                   // hand the cursor back to the combo's selection
+    }
+
+    void OnShowtimeTick(object? sender, EventArgs e)
+    {
+        // Lead-in: count down 3… 2… 1… before the first cursor appears.
+        if (_showtimeStep < 0)
+        {
+            _showtimeCountdown--;
+            if (_showtimeCountdown > 0) { _showtimeBtn.Text = $"Starting {_showtimeCountdown}…"; return; }
+            _showtimeStep = 0;
+            _showtime.Interval = ShowtimeStepMs;      // lead-in done — slow to the per-cursor dwell
+        }
+        else if (++_showtimeStep >= ShowtimeKinds.Length)
+        {
+            if (!_showtimeLoops) { StopShowtime(); return; }
+            _showtimeStep = 0;                        // loop back to the first cursor
+        }
+
+        var kind = ShowtimeKinds[_showtimeStep];
+        SetTestComboSilently(Array.IndexOf(PreviewKinds, kind) + 1); // mirror into the combo so its name shows
+        _setTest(kind);
+        _showtimeBtn.Text = $"■ Stop ({_showtimeStep + 1}/{ShowtimeKinds.Length})";
+    }
+
+    // Moves the combo selection for display only — showtime drives the cursor itself, so the
+    // combo's change handler must not also force one (and fight the timer).
+    void SetTestComboSilently(int index)
+    {
+        _suppressTestCombo = true;
+        _testCombo.SelectedIndex = index;
+        _suppressTestCombo = false;
     }
 
     // Maps a point in the preview panel (client coords) to a cursor-tile index, or -1 for
@@ -595,6 +694,7 @@ public sealed class PreferencesForm : Form
         if (disposing)
         {
             _previewDebounce?.Dispose();
+            _showtime?.Dispose();
             foreach (var b in _previews) b?.Dispose();
         }
         base.Dispose(disposing);
