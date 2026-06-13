@@ -27,7 +27,9 @@ public sealed class CursorEngine : IDisposable
     readonly CursorSettings _settings;
     readonly object _gate = new();
     Managed[] _managed = Array.Empty<Managed>();
-    Bitmap? _arrowBase;                       // kept for compositing the busy cursor
+    Bitmap? _arrowBase;                       // kept for compositing the busy cursor + click-pop scaling
+    Bitmap? _handBase;                        // kept for click-pop scaling of the hand
+    volatile bool _ibeamKick;                 // a keystroke arrived (set by NudgeIbeam) -> hop the I-beam
     volatile TestCursor _test = TestCursor.Off;
     Thread? _thread;
     volatile bool _running;
@@ -41,6 +43,12 @@ public sealed class CursorEngine : IDisposable
     /// <see cref="TestCursor.Off"/> to resume normal behaviour. Applied on the next
     /// loop tick; safe to call from the UI thread (just sets a volatile flag).</summary>
     public void SetTestCursor(TestCursor t) => _test = t;
+
+    /// <summary>Signal a keystroke so the on-screen I-beam does a little "hop" (click
+    /// feedback). Called from the app's keyboard hook on the UI thread; just sets a flag,
+    /// consumed on the next loop tick. No-op unless click feedback is on and an I-beam is
+    /// actually showing.</summary>
+    public void NudgeIbeam() => _ibeamKick = true;
 
     /// <summary>Builds the rotated cursors and starts the background tracking loop.</summary>
     public void Start()
@@ -173,6 +181,20 @@ public sealed class CursorEngine : IDisposable
             var lastTest = TestCursor.Off;
             int tick = 0;
 
+            // --- click squash&pop: the pointer scales down while a mouse button is held and
+            //     springs back with a little overshoot on release (underdamped). Mouse-button
+            //     state is POLLED (GetAsyncKeyState) — no global mouse hook. ---
+            bool clickFx = _settings.ClickFeedback;        // immutable for the run (Apply restarts)
+            float popScale = 1f, vPop = 0f;                // 1 = rest
+            const float popK = 220f, popC = 12f, popSquash = 0.86f;
+            int lastPopIdx = -1, lastPopScaleQ = -1;       // skip re-rendering an unchanged scaled frame
+
+            // --- I-beam typing hop: a keystroke (fed in via NudgeIbeam from the app's keyboard
+            //     hook) gives the beam an upward impulse that springs back; read by Ibeam(). ---
+            float hopY = 0f, vHop = 0f;
+            const float hopK = 180f, hopC = 9f;
+            float hopKick = sz * 1.6f;                     // initial upward speed (px/s) -> ~0.12*sz peak
+
             // Composites a busy frame and turns it into a cursor (hotspot = canvas centre).
             // App-starting: the bob swings off the arrow's tail (pendulum). Wait: no arrow
             // means no anchor to read, so the ring stays CENTRED on the pointer (spin only,
@@ -206,7 +228,7 @@ public sealed class CursorEngine : IDisposable
             // The text / I-beam cursor: rigid bottom, jelly top (ibOffX/ibOffY), hotspot centre.
             IntPtr Ibeam()
             {
-                using var bmp = ProgressRenderer.ComposeIbeam(_settings, ibOffX, ibOffY);
+                using var bmp = ProgressRenderer.ComposeIbeam(_settings, ibOffX, ibOffY, hopY);
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
@@ -340,6 +362,22 @@ public sealed class CursorEngine : IDisposable
                 float noTgt = MathF.Min(spd / noRef, 1f) * noMax;
                 vno += ((noTgt - noE) * noK - vno * noC) * dt; noE += vno * dt;
 
+                // click squash&pop: poll the mouse buttons, then spring popScale toward the
+                // target (squashed while held, 1 at rest) — underdamped, so release overshoots.
+                bool btnDown = clickFx && ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0
+                                        || (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0);
+                float popTgt = btnDown ? popSquash : 1f;
+                vPop += ((popTgt - popScale) * popK - vPop * popC) * dt;
+                popScale += vPop * dt;
+                if (!clickFx) { popScale = 1f; vPop = 0f; }
+
+                // I-beam typing hop: consume a queued keystroke into an upward impulse, then
+                // spring the offset back to 0 (underdamped -> it bounces). Cheap scalar math
+                // every tick; Ibeam() reads hopY when it next re-renders the on-screen beam.
+                if (_ibeamKick) { _ibeamKick = false; if (clickFx) vHop = -hopKick; }
+                vHop += (-hopY * hopK - vHop * hopC) * dt;
+                hopY += vHop * dt;
+
                 // --- 4) apply cursors ---
                 var test = _test;
                 if (test != lastTest) { lastTest = test; normalDirty = true; curIdx = -1; }
@@ -347,7 +385,27 @@ public sealed class CursorEngine : IDisposable
 
                 if (test == TestCursor.Off)
                 {
-                    if (normalDirty || idx != curIdx)
+                    // While the click pop is in flight, render the pointer scaled-about-hotspot
+                    // from the base bitmaps (~60fps, only when the frame actually changed); once
+                    // it settles, fall back to the crisp pre-rendered frames.
+                    bool popActive = clickFx && (btnDown || MathF.Abs(popScale - 1f) > 0.004f || MathF.Abs(vPop) > 0.02f);
+                    if (popActive)
+                    {
+                        int popScaleQ = (int)MathF.Round(popScale * 200f);
+                        if (fgRender && (idx != lastPopIdx || popScaleQ != lastPopScaleQ))
+                        {
+                            lastPopIdx = idx; lastPopScaleQ = popScaleQ;
+                            double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
+                            if (onArrow)
+                            {
+                                SetSystemCursor(RotatedScaled(_arrowBase!, 0.0, deg, popScale), OCR_NORMAL);
+                                SetSystemCursor(RotatedScaled(_arrowBase!, 0.0, deg, popScale), OCR_UP);
+                            }
+                            if (onHand) SetSystemCursor(RotatedScaled(_handBase!, HandShape.BaseAngleDeg, deg, popScale), OCR_HAND);
+                        }
+                        curIdx = -1; normalDirty = true; // force a crisp re-apply once the pop ends
+                    }
+                    else if (normalDirty || idx != curIdx)
                     {
                         curIdx = idx; normalDirty = false;
                         if (onArrow)
@@ -455,12 +513,14 @@ public sealed class CursorEngine : IDisposable
     {
         DestroyCursors();
         int n = _settings.Steps;
-        _arrowBase = ArrowRenderer.DrawArrow(_settings); // kept (not disposed) for busy-cursor compositing
-        using Bitmap handBase = HandRenderer.DrawHand(_settings);
+        // Both bases are kept (not disposed): the arrow for busy-cursor compositing, and both
+        // for re-rendering scaled-about-hotspot frames during the click squash&pop.
+        _arrowBase = ArrowRenderer.DrawArrow(_settings);
+        _handBase = HandRenderer.DrawHand(_settings);
         _managed = new[]
         {
             new Managed(OCR_NORMAL, BuildFrames(_arrowBase, 0.0, n)),
-            new Managed(OCR_HAND, BuildFrames(handBase, HandShape.BaseAngleDeg, n)),
+            new Managed(OCR_HAND, BuildFrames(_handBase, HandShape.BaseAngleDeg, n)),
         };
     }
 
@@ -488,6 +548,26 @@ public sealed class CursorEngine : IDisposable
         return frames;
     }
 
+    // One rotated + uniformly-scaled cursor frame from a base bitmap, scaled about the centre
+    // (which is the hotspot, so it doesn't drift). Used per-frame during the click squash&pop;
+    // the pre-rendered BuildFrames handles cover the steady (scale == 1) state.
+    static IntPtr RotatedScaled(Bitmap baseBmp, double baseAngleDeg, double deg, float scale)
+    {
+        int size = baseBmp.Width, pivot = size / 2;
+        using var rot = new Bitmap(size, size);
+        using (var g = Graphics.FromImage(rot))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.TranslateTransform(pivot, pivot);
+            g.RotateTransform((float)(deg - baseAngleDeg));
+            g.ScaleTransform(scale, scale);
+            g.TranslateTransform(-pivot, -pivot);
+            g.DrawImage(baseBmp, 0, 0);
+        }
+        return MakeCursor(rot, pivot, pivot);
+    }
+
     void DestroyCursors()
     {
         foreach (var m in _managed)
@@ -496,6 +576,8 @@ public sealed class CursorEngine : IDisposable
         _managed = Array.Empty<Managed>();
         _arrowBase?.Dispose();
         _arrowBase = null;
+        _handBase?.Dispose();
+        _handBase = null;
     }
 
     // A system cursor we manage: its OCR id and the n rotated frames (frame i points at
@@ -554,6 +636,7 @@ public sealed class CursorEngine : IDisposable
     const uint OCR_NO = 32648;
     const uint SPI_SETCURSORS = 0x0057;
     const int CURSOR_SHOWING = 0x00000001;
+    const int VK_LBUTTON = 0x01, VK_RBUTTON = 0x02; // polled for the click squash&pop (no mouse hook)
 
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int x, y; }
 
@@ -566,6 +649,7 @@ public sealed class CursorEngine : IDisposable
     [DllImport("user32.dll")] static extern bool GetCursorInfo(ref CURSORINFO pci);
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr LoadCursor(IntPtr hInstance, IntPtr lpCursorName);
     [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
     [DllImport("user32.dll", SetLastError = true)] static extern bool SetSystemCursor(IntPtr hcur, uint id);
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint a, uint b, IntPtr c, uint d);
     [DllImport("user32.dll")] static extern IntPtr CopyIcon(IntPtr hIcon);

@@ -25,6 +25,10 @@ public sealed class TrayApplicationContext : ApplicationContext
     readonly Control _marshal = new();
     bool _preferencesOpen;
 
+    // Typing-hop keyboard hook (click feedback). Non-null only while it's installed; lives on
+    // the UI thread so the low-level hook has a message loop. See SyncClickFeedbackHook.
+    LowLevelKeyboardHook? _keyHook;
+
     public TrayApplicationContext()
     {
         _ = _marshal.Handle; // realise the window handle on the UI thread for BeginInvoke
@@ -78,6 +82,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         CursorEngine.RestoreDefaultCursors();
 
         _engine.Start();
+        SyncClickFeedbackHook();
     }
 
     void OnToggleEnabled(object? sender, EventArgs e)
@@ -85,6 +90,25 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (_engine.IsRunning) _engine.Stop();
         else _engine.Start();
         _enabledItem.Checked = _engine.IsRunning;
+        SyncClickFeedbackHook();
+    }
+
+    // Installs the typing-hop keyboard hook only while click feedback is ON and the engine is
+    // running, and tears it down otherwise — so we don't hold a global hook when the feature is
+    // off or the cursor theming is disabled. Must run on the UI thread (it has the message loop).
+    void SyncClickFeedbackHook()
+    {
+        bool want = _engine.IsRunning && _settings.ClickFeedback;
+        if (want && _keyHook is null)
+        {
+            _keyHook = new LowLevelKeyboardHook();
+            _keyHook.KeyDown += _engine.NudgeIbeam;
+        }
+        else if (!want && _keyHook is not null)
+        {
+            _keyHook.Dispose();
+            _keyHook = null;
+        }
     }
 
     void OnToggleAutostart(object? sender, EventArgs e)
@@ -150,6 +174,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _engine.Stop();
         if (wasRunning) _engine.Start();
         _enabledItem.Checked = _engine.IsRunning;
+        SyncClickFeedbackHook(); // ClickFeedback may have been toggled
     }
 
     // Tray-driven update check. Velopack has no UI of its own, so we surface
@@ -211,6 +236,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     void OnExit(object? sender, EventArgs e)
     {
         _tray.Visible = false;
+        _keyHook?.Dispose();
         _engine.Dispose();
         ExitThread();
     }
@@ -229,6 +255,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         if (disposing)
         {
+            _keyHook?.Dispose();
             _tray.Dispose();
             _engine.Dispose();
             _appIcon.Dispose();

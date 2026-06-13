@@ -31,6 +31,10 @@ public sealed class CursorSettings
     /// <see cref="Size"/>. 0 = sharp corners.</summary>
     public double CornerRadius { get; set; } = 0.0;
 
+    /// <summary>Click feedback: the pointer does a little "squash &amp; pop" while a mouse
+    /// button is held, and the I-beam hops as you type. On by default.</summary>
+    public bool ClickFeedback { get; set; } = true;
+
     // ---------- which cursors are themed (preferences UI) ----------
 
     /// <summary>Cursor kinds the user has switched OFF — left as the Windows default
@@ -94,6 +98,7 @@ public sealed class CursorSettings
         OutlineColor = other.OutlineColor;
         OutlineThickness = other.OutlineThickness;
         CornerRadius = other.CornerRadius;
+        ClickFeedback = other.ClickFeedback;
         DisabledCursors = new List<string>(other.DisabledCursors);
         Steps = other.Steps;
         Hz = other.Hz;
