@@ -4,6 +4,17 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
+## 0.7.0 - 2026-06-13
+
+### Added
+- **Showtime mode in Preferences**: a hands-free demo for recording. After a 3-2-1
+  lead-in (time to start your capture) it forces each test cursor on screen in turn
+  (1.5s each), looping until you click **Stop** or close the dialog — so the whole set
+  can be recorded reacting to mouse movement without clicking through the *Test cursor*
+  combo by hand. Move the mouse while it runs so the motion-driven animations play; the
+  dropdown follows along (disabled) to label the live cursor, and the button doubles as
+  Stop.
+
 ## 0.6.1 - 2026-06-03
 
 ### Added
