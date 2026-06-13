@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.Net.Http;
 using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Velopack;
 using Velopack.Sources;
 
@@ -19,12 +22,50 @@ public sealed class UpdateService
 {
     private const string RepoUrl = "https://github.com/dawidope/WormsCursor";
 
+    // GitHub REST endpoint for the repo's releases (derived from RepoUrl). Each release's
+    // body is the CHANGELOG section the release workflow extracted, so this feeds the
+    // in-app "What's new" dialog with already-per-version, dated notes.
+    private static readonly string ApiReleasesUrl =
+        RepoUrl.Replace("https://github.com/", "https://api.github.com/repos/") + "/releases";
+
+    // One shared client; GitHub requires a User-Agent and rejects requests without one.
+    private static readonly HttpClient Http = CreateHttp();
+
     private readonly UpdateManager _manager;
 
     public UpdateService()
     {
         var source = new GithubSource(RepoUrl, accessToken: null, prerelease: false);
         _manager = new UpdateManager(source);
+    }
+
+    private static HttpClient CreateHttp()
+    {
+        var c = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
+        c.DefaultRequestHeaders.UserAgent.ParseAdd("WormsCursor");
+        c.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+        return c;
+    }
+
+    /// <summary>
+    /// Fetches the repo's published releases (newest first) for the in-app changelog. Drafts
+    /// are dropped; each entry's <see cref="ReleaseNote.Body"/> is the release notes markdown.
+    /// Throws on network / rate-limit / parse failure — the caller falls back to the Releases
+    /// page. Anonymous GitHub API is rate-limited (~60/h per IP), ample for occasional use.
+    /// </summary>
+    public async Task<IReadOnlyList<ReleaseNote>> FetchReleaseNotesAsync()
+    {
+        var json = await Http.GetStringAsync(ApiReleasesUrl).ConfigureAwait(false);
+        var releases = JsonSerializer.Deserialize<List<GithubRelease>>(json) ?? new();
+        return releases
+            .Where(r => !r.Draft)
+            .Select(r => new ReleaseNote(
+                Version: (r.TagName ?? r.Name ?? string.Empty).TrimStart('v', 'V'),
+                Title: r.Name ?? r.TagName ?? "(untitled)",
+                Published: r.PublishedAt,
+                Body: (r.Body ?? string.Empty).Trim(),
+                Prerelease: r.Prerelease))
+            .ToList();
     }
 
     // True for both flavors that ship from CI (Setup.exe install or Velopack
@@ -104,3 +145,17 @@ public sealed record UpdateCheckResult(
     string? AvailableVersion,
     UpdateInfo? VelopackInfo,
     string? ErrorMessage = null);
+
+/// <summary>One published release for the in-app changelog.</summary>
+public sealed record ReleaseNote(string Version, string Title, DateTimeOffset? Published, string Body, bool Prerelease);
+
+/// <summary>Subset of the GitHub release JSON we read.</summary>
+internal sealed class GithubRelease
+{
+    [JsonPropertyName("tag_name")] public string? TagName { get; set; }
+    [JsonPropertyName("name")] public string? Name { get; set; }
+    [JsonPropertyName("body")] public string? Body { get; set; }
+    [JsonPropertyName("draft")] public bool Draft { get; set; }
+    [JsonPropertyName("prerelease")] public bool Prerelease { get; set; }
+    [JsonPropertyName("published_at")] public DateTimeOffset? PublishedAt { get; set; }
+}

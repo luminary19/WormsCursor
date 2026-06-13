@@ -83,6 +83,30 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _engine.Start();
         SyncClickFeedbackHook();
+        MaybeShowWhatsNew();
+    }
+
+    // First launch after an update: show the new version's "What's new" notes once. Compares
+    // the installed version against the last one we recorded and stores the current version so
+    // it pops only once. Skipped for dev builds and for a brand-new install (no prior version).
+    void MaybeShowWhatsNew()
+    {
+        if (!_updates.IsVelopackInstalled) return; // dev build out of bin\ — don't pop
+        string current = _updates.CurrentVersionText;
+        string lastSeen = _settings.LastSeenVersion;
+        if (string.Equals(lastSeen, current, StringComparison.OrdinalIgnoreCase)) return;
+
+        _settings.LastSeenVersion = current; // record now, so it pops only once even if the dialog fails
+        SettingsStore.Save(_settings);
+
+        if (string.IsNullOrEmpty(lastSeen)) return; // nothing recorded yet (first run): just remember, don't pop
+
+        // We're still in the ctor (before Application.Run); defer until the message loop pumps.
+        _marshal.BeginInvoke(new Action(() =>
+        {
+            using var dlg = new ChangelogForm(_updates, current);
+            dlg.ShowDialog();
+        }));
     }
 
     void OnToggleEnabled(object? sender, EventArgs e)

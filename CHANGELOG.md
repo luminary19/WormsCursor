@@ -4,6 +4,16 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
+## Unreleased
+
+### Added
+- **"What's new" changelog in the app**: a *What's new* link in Preferences opens a dialog
+  that lists the published releases (newest first) and shows the selected version's notes,
+  fetched from the GitHub Releases API (each release body is its CHANGELOG section). The
+  notes get light markdown formatting; if the fetch fails (offline / rate-limited / dev
+  build) it falls back to a *View on GitHub* button. After an update, the new version's
+  notes pop up once automatically.
+
 ## 0.7.1 - 2026-06-13
 
 ### Added

@@ -58,6 +58,12 @@ public sealed class CursorSettings
         if (!enabled) DisabledCursors.Add(kind.ToString());
     }
 
+    // ---------- app state (persisted, not shown in the UI) ----------
+
+    /// <summary>The app version whose "What's new" notes have already been shown, so the
+    /// post-update changelog pops only once. Empty until first recorded.</summary>
+    public string LastSeenVersion { get; set; } = "";
+
     // ---------- behaviour (engine tuning; not in the UI yet) ----------
 
     public int Steps { get; set; } = 360;

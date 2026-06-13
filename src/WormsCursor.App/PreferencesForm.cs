@@ -70,6 +70,7 @@ public sealed class PreferencesForm : Form
     readonly Button _defaultsBtn, _applyBtn, _okBtn, _cancelBtn;
     readonly Label _version;
     readonly LinkLabel _link;
+    readonly LinkLabel _whatsNew;
     readonly Action<TestCursor> _setTest;
     readonly Action<CursorSettings> _apply;
     readonly UpdateService _updates;
@@ -227,6 +228,8 @@ public sealed class PreferencesForm : Form
         _updateStatus = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = string.Empty };
         _link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor" };
         _link.LinkClicked += (_, _) => OpenUrl(RepoUrl);
+        _whatsNew = new LinkLabel { AutoSize = true, Text = "What's new" };
+        _whatsNew.LinkClicked += (_, _) => { using var dlg = new ChangelogForm(_updates); dlg.ShowDialog(this); };
 
         foreach (Control c in new Control[]
         {
@@ -234,7 +237,7 @@ public sealed class PreferencesForm : Form
             _sizeCap, _sizeBar, _sizeVal, _thickCap, _thickBar, _thickVal, _radiusCap, _radiusBar, _radiusVal,
             _fillCap, _fillBtn, _outlineCap, _outlineBtn, _clickFxChk, _testCap, _testCombo, _showtimeBtn,
             _defaultsBtn, _applyBtn, _okBtn, _cancelBtn,
-            _version, _updateBtn, _updateStatus, _link,
+            _version, _updateBtn, _updateStatus, _link, _whatsNew,
         })
             _body.Controls.Add(c);
 
@@ -336,6 +339,7 @@ public sealed class PreferencesForm : Form
         int footerY = btnY + 30 + 14;
         _version.Location = new Point(M, footerY);
         _link.Location = new Point(_version.Right + 14, footerY);
+        _whatsNew.Location = new Point(_link.Right + 14, footerY);
 
         // Fixed line height (~20): autosize PreferredHeight is unreliable before the form gets
         // a handle, which would clip the footer off the bottom.
