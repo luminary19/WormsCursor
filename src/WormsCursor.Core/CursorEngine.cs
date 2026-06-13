@@ -194,6 +194,9 @@ public sealed class CursorEngine : IDisposable
             float hopY = 0f, vHop = 0f;
             const float hopK = 180f, hopC = 9f;
             float hopKick = sz * 1.6f;                     // initial upward speed (px/s) -> ~0.12*sz peak
+            float hopX = 0f, vHopX = 0f; int hopDir = 1;   // side shiver: alternates each key so the beam trembles, not just hops
+            const float hopXK = 320f, hopXC = 11f;         // snappier than the vertical hop -> reads as a shiver
+            float hopXKick = sz * 1.0f;                    // ~0.055*sz peak, smaller than the up-hop
 
             // Composites a busy frame and turns it into a cursor (hotspot = canvas centre).
             // App-starting: the bob swings off the arrow's tail (pendulum). Wait: no arrow
@@ -228,7 +231,7 @@ public sealed class CursorEngine : IDisposable
             // The text / I-beam cursor: rigid bottom, jelly top (ibOffX/ibOffY), hotspot centre.
             IntPtr Ibeam()
             {
-                using var bmp = ProgressRenderer.ComposeIbeam(_settings, ibOffX, ibOffY, hopY);
+                using var bmp = ProgressRenderer.ComposeIbeam(_settings, ibOffX, ibOffY, hopY, hopX);
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
@@ -374,9 +377,13 @@ public sealed class CursorEngine : IDisposable
                 // I-beam typing hop: consume a queued keystroke into an upward impulse, then
                 // spring the offset back to 0 (underdamped -> it bounces). Cheap scalar math
                 // every tick; Ibeam() reads hopY when it next re-renders the on-screen beam.
-                if (_ibeamKick) { _ibeamKick = false; if (clickFx) vHop = -hopKick; }
-                vHop += (-hopY * hopK - vHop * hopC) * dt;
-                hopY += vHop * dt;
+                if (_ibeamKick)
+                {
+                    _ibeamKick = false;
+                    if (clickFx) { vHop = -hopKick; vHopX = hopDir * hopXKick; hopDir = -hopDir; } // up + alternating side kick
+                }
+                vHop  += (-hopY * hopK  - vHop  * hopC)  * dt; hopY += vHop  * dt;
+                vHopX += (-hopX * hopXK - vHopX * hopXC) * dt; hopX += vHopX * dt;
 
                 // --- 4) apply cursors ---
                 var test = _test;

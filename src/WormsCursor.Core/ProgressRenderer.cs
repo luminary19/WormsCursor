@@ -225,9 +225,10 @@ public static class ProgressRenderer
     /// (anchored at the hotspot) and the top sways by <paramref name="topOffX"/>/<paramref
     /// name="topOffY"/> — the engine drives that with an underdamped spring so the top wobbles
     /// like jelly when the cursor moves and settles afterwards. Bottom serif stays level; the
-    /// top serif tilts with the bent tip. <paramref name="bounceY"/> shifts the whole glyph
-    /// vertically (negative = up) for the typing "hop"; the hotspot stays at the canvas centre.</summary>
-    public static Bitmap ComposeIbeam(CursorSettings s, float topOffX, float topOffY, float bounceY = 0f)
+    /// top serif tilts with the bent tip. <paramref name="bounceX"/>/<paramref name="bounceY"/>
+    /// shift the whole glyph (the typing "hop" up plus a small side-to-side shiver); the hotspot
+    /// stays at the canvas centre.</summary>
+    public static Bitmap ComposeIbeam(CursorSettings s, float topOffX, float topOffY, float bounceY = 0f, float bounceX = 0f)
     {
         var l = Layout(s);
         int sz = Math.Max(8, s.Size);
@@ -235,7 +236,7 @@ public static class ProgressRenderer
         using var g = Graphics.FromImage(bmp);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        if (bounceY != 0f) g.TranslateTransform(0f, bounceY); // typing hop: lift the beam, hotspot unchanged
+        if (bounceX != 0f || bounceY != 0f) g.TranslateTransform(bounceX, bounceY); // typing hop + shiver; hotspot unchanged
 
         float cx = l.HotX, cy = l.HotY;
         var fill = Parse(s.FillColor, Color.White);
