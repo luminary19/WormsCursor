@@ -68,10 +68,9 @@ dotnet run --project src/WormsCursor.App     # run the tray app (dev)
 
 Pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml` (Velopack pack → GitHub
 Release). Use the **`release` skill** (`.claude/skills/release/`) for the step-by-step
-(version bump + CHANGELOG roll + tag + push); `tools/RELEASING.md` is the human reference
-(Velopack details, local packing, auto-update wiring). `CHANGELOG.md` follows Keep a
-Changelog with one section per tag; the release notes are extracted from the matching
-section.
+(version bump + CHANGELOG roll + tag + push). `CHANGELOG.md` follows Keep a Changelog with
+one section per tag; the release notes are extracted from the matching section. Auto-update
+wiring lives in `Services/UpdateService.cs`.
 
 ## Conventions & notes
 
@@ -80,7 +79,7 @@ section.
   **mirror the sibling PowerLink project**; comments call this out.
 - Settings live in `%LocalAppData%\WormsCursor\` (not next to the exe) so updates don't
   wipe them. JSON load is tolerant; additive fields don't need a schema bump.
-- `tools/`: `generate-icon.py` (tray/app icon), `pack.ps1` (local Velopack pack),
-  `RestoreCursor.ps1` (manual cursor-restore fallback), `RELEASING.md`.
+- `tools/`: `generate-icon.py` (tray/app icon) and `RestoreCursor.ps1` (manual
+  cursor-restore fallback).
 - Known issue: animated cursors can flicker on mixed-DPI multi-monitor setups (see the
   CHANGELOG); a proper fix needs an owner-drawn overlay instead of `SetSystemCursor`.

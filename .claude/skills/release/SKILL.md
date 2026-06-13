@@ -99,7 +99,7 @@ Triggered on `push` of tags matching `v*`:
 
 ## See also
 
-`tools/RELEASING.md` — the human-facing release doc: Velopack/`vpk` prerequisites, **local**
-packing for testing the payload (`tools/pack.ps1 -Version X.Y.Z [-DownloadPrior]`), the exact
-artifact set auto-update needs, and how the updater is wired (`UpdateService`,
-`VelopackApp.Build().Run()`). This skill is the quick path; that doc is the reference.
+- `.github/workflows/release.yml` — the workflow this skill triggers (publish → `vpk pack`
+  with a delta vs the prior stable release → GitHub release; notes from the CHANGELOG section).
+- `src/WormsCursor.App/Services/UpdateService.cs` + `Program.cs` (`VelopackApp.Build().Run()`)
+  — how the in-app updater consumes those releases; it no-ops for dev builds run from `bin\`.

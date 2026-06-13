@@ -111,8 +111,6 @@ WormsCursor.sln
 │      └─ Program.cs                    Dark + transparent sheets of every themed cursor
 └─ tools/
    ├─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the arrow glyph
-   ├─ pack.ps1               Build a Velopack release locally (Setup.exe + Portable.zip)
-   ├─ RELEASING.md           How to cut a release
    └─ RestoreCursor.ps1      Emergency restore of default cursors
 ```
 
@@ -166,10 +164,8 @@ dotnet publish src/WormsCursor.App -c Release -r win-x64 --self-contained true -
 Installers and standalone builds are produced by [Velopack](https://velopack.io):
 pushing a `v*` tag runs the release workflow (`.github/workflows/release.yml`), which
 publishes a **`Setup.exe`** installer, a **`Portable.zip`** standalone, and delta
-packages to the repo's GitHub Releases. To build one locally see
-[`tools/RELEASING.md`](tools/RELEASING.md) (`pwsh tools/pack.ps1 -Version x.y.z`). The
-app auto-updates from these releases (tray → **Check for updates…**, or the button in
-Preferences).
+packages to the repo's GitHub Releases. The app auto-updates from these releases
+(tray → **Check for updates…**, or the button in Preferences).
 
 ## License
 

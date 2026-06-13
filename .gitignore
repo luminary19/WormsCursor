@@ -3,7 +3,7 @@
 [Oo]bj/
 [Pp]ublish/
 artifacts/
-# Velopack release output (tools/pack.ps1, release.yml)
+# Velopack release output (release.yml)
 velopack-output/
 
 # Visual Studio / Rider
