@@ -66,6 +66,7 @@ public sealed class PreferencesForm : Form
     readonly ComboBox _testCombo;
     readonly Button _showtimeBtn;
     readonly CheckBox _clickFxChk;
+    readonly CheckBox _ibeamFxChk;
     readonly Label _tip;
     readonly Button _defaultsBtn, _applyBtn, _okBtn, _cancelBtn;
     readonly Label _version;
@@ -178,10 +179,15 @@ public sealed class PreferencesForm : Form
         _outlineBtn.Click += (_, _) => PickColor(_outlineBtn, c => _working.OutlineColor = ToHex(c));
         _outlineCap = MakeCaption("Outline colour");
 
-        // Click feedback: pointer "squash & pop" on click + an I-beam hop while typing.
+        // Click feedback: pointer + crosshair "squash & pop" on click.
         _clickFxChk = new CheckBox { Text = "Click feedback", AutoSize = false, Checked = _working.ClickFeedback };
         _clickFxChk.CheckedChanged += (_, _) => _working.ClickFeedback = _clickFxChk.Checked;
-        _checkTip.SetToolTip(_clickFxChk, "Pointer squash & pop on click; the I-beam hops as you type.");
+        _checkTip.SetToolTip(_clickFxChk, "Pointer & crosshair squash & pop while a mouse button is held.");
+
+        // I-beam typing bounce: the text cursor hops/shivers as you type (separate toggle).
+        _ibeamFxChk = new CheckBox { Text = "I-beam typing bounce", AutoSize = false, Checked = _working.IbeamFeedback };
+        _ibeamFxChk.CheckedChanged += (_, _) => _working.IbeamFeedback = _ibeamFxChk.Checked;
+        _checkTip.SetToolTip(_ibeamFxChk, "The text I-beam hops and shivers slightly as you type.");
 
         // Test cursor: forces the chosen cursor on screen so you can see the busy /
         // progress animation on demand (it normally only shows when the OS decides).
@@ -235,7 +241,7 @@ public sealed class PreferencesForm : Form
         {
             _tip,
             _sizeCap, _sizeBar, _sizeVal, _thickCap, _thickBar, _thickVal, _radiusCap, _radiusBar, _radiusVal,
-            _fillCap, _fillBtn, _outlineCap, _outlineBtn, _clickFxChk, _testCap, _testCombo, _showtimeBtn,
+            _fillCap, _fillBtn, _outlineCap, _outlineBtn, _clickFxChk, _ibeamFxChk, _testCap, _testCombo, _showtimeBtn,
             _defaultsBtn, _applyBtn, _okBtn, _cancelBtn,
             _version, _updateBtn, _updateStatus, _link, _whatsNew,
         })
@@ -312,8 +318,10 @@ public sealed class PreferencesForm : Form
         ry = PlaceField(_fillCap, _fillBtn, rightX, ry, colW, 28);
         ry = PlaceField(_outlineCap, _outlineBtn, rightX, ry, colW, 28);
 
-        // click-feedback toggle — a compact row above the test controls
+        // feedback toggles — two compact rows above the test controls
         _clickFxChk.SetBounds(rightX, ry, colW, 22);
+        ry += 24;
+        _ibeamFxChk.SetBounds(rightX, ry, colW, 22);
         ry += 30;
 
         // test row: caption, then the combo and the Showtime button sharing the column width
@@ -694,6 +702,7 @@ public sealed class PreferencesForm : Form
         StyleSwatch(_outlineBtn, ParseOr(_working.OutlineColor, Color.Black));
         foreach (var cb in _cursorChecks) cb.Checked = true; // Defaults = every cursor themed again
         _clickFxChk.Checked = _working.ClickFeedback;         // Defaults = click feedback on
+        _ibeamFxChk.Checked = _working.IbeamFeedback;         // Defaults = I-beam bounce on
         OnEdited();
     }
 

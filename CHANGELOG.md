@@ -4,6 +4,15 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
+## Unreleased
+
+### Changed
+- **The I-beam typing bounce has its own on/off toggle.** "Click feedback" now covers just
+  the pointer + crosshair squash & pop; the text I-beam's hop/shiver is a separate checkbox so
+  it can be turned off on its own. Typing feedback is also calmer — a gentler hop and a small
+  rate limit between keystrokes — so typing fast no longer "recoils" like a machine gun. The
+  keyboard hook behind it is now installed only while the I-beam toggle is on.
+
 ## 0.7.2 - 2026-06-13
 
 ### Added

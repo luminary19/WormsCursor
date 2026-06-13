@@ -26,7 +26,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     bool _preferencesOpen;
 
     // Typing-hop keyboard hook (click feedback). Non-null only while it's installed; lives on
-    // the UI thread so the low-level hook has a message loop. See SyncClickFeedbackHook.
+    // the UI thread so the low-level hook has a message loop. See SyncTypingHook.
     LowLevelKeyboardHook? _keyHook;
 
     public TrayApplicationContext()
@@ -82,7 +82,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         CursorEngine.RestoreDefaultCursors();
 
         _engine.Start();
-        SyncClickFeedbackHook();
+        SyncTypingHook();
         MaybeShowWhatsNew();
     }
 
@@ -114,15 +114,16 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (_engine.IsRunning) _engine.Stop();
         else _engine.Start();
         _enabledItem.Checked = _engine.IsRunning;
-        SyncClickFeedbackHook();
+        SyncTypingHook();
     }
 
-    // Installs the typing-hop keyboard hook only while click feedback is ON and the engine is
-    // running, and tears it down otherwise — so we don't hold a global hook when the feature is
-    // off or the cursor theming is disabled. Must run on the UI thread (it has the message loop).
-    void SyncClickFeedbackHook()
+    // Installs the typing-hop keyboard hook only while I-beam feedback is ON and the engine is
+    // running, and tears it down otherwise — so we don't hold a global hook when that feature is
+    // off. Must run on the UI thread (it has the message loop). The hook exists solely to nudge
+    // the I-beam; the mouse squash & pop polls and needs no hook.
+    void SyncTypingHook()
     {
-        bool want = _engine.IsRunning && _settings.ClickFeedback;
+        bool want = _engine.IsRunning && _settings.IbeamFeedback;
         if (want && _keyHook is null)
         {
             _keyHook = new LowLevelKeyboardHook();
@@ -198,7 +199,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _engine.Stop();
         if (wasRunning) _engine.Start();
         _enabledItem.Checked = _engine.IsRunning;
-        SyncClickFeedbackHook(); // ClickFeedback may have been toggled
+        SyncTypingHook(); // ClickFeedback / IbeamFeedback may have been toggled
     }
 
     // Tray-driven update check. Velopack has no UI of its own, so we surface

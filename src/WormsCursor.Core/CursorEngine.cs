@@ -190,13 +190,18 @@ public sealed class CursorEngine : IDisposable
             int lastPopIdx = -1, lastPopScaleQ = -1;       // skip re-rendering an unchanged scaled frame
 
             // --- I-beam typing hop: a keystroke (fed in via NudgeIbeam from the app's keyboard
-            //     hook) gives the beam an upward impulse that springs back; read by Ibeam(). ---
+            //     hook) gives the beam an upward + alternating-sideways impulse that springs back;
+            //     read by Ibeam(). A refractory caps the kick rate so holding a key / very fast
+            //     typing doesn't "recoil" like a machine gun. Toggled separately from click feedback. ---
+            bool ibeamFx = _settings.IbeamFeedback;
             float hopY = 0f, vHop = 0f;
-            const float hopK = 180f, hopC = 9f;
-            float hopKick = sz * 1.6f;                     // initial upward speed (px/s) -> ~0.12*sz peak
-            float hopX = 0f, vHopX = 0f; int hopDir = 1;   // side shiver: alternates each key so the beam trembles, not just hops
-            const float hopXK = 320f, hopXC = 11f;         // snappier than the vertical hop -> reads as a shiver
-            float hopXKick = sz * 1.0f;                    // ~0.055*sz peak, smaller than the up-hop
+            const float hopK = 190f, hopC = 11f;
+            float hopKick = sz * 1.15f;                    // gentler up-hop (was 1.6)
+            float hopX = 0f, vHopX = 0f; int hopDir = 1;   // side shiver: alternates each key -> a little tremble
+            const float hopXK = 300f, hopXC = 13f;
+            float hopXKick = sz * 0.6f;                    // smaller sideways shiver (was 1.0)
+            int lastKickTick = -100;
+            const int kickRefractory = 8;                  // min ticks between kicks (~55ms at 144Hz)
 
             // Composites a busy frame and turns it into a cursor (hotspot = canvas centre).
             // App-starting: the bob swings off the arrow's tail (pendulum). Wait: no arrow
@@ -382,10 +387,18 @@ public sealed class CursorEngine : IDisposable
                 if (_ibeamKick)
                 {
                     _ibeamKick = false;
-                    if (clickFx) { vHop = -hopKick; vHopX = hopDir * hopXKick; hopDir = -hopDir; } // up + alternating side kick
+                    if (ibeamFx && tick - lastKickTick >= kickRefractory) // throttle so fast typing doesn't recoil
+                    {
+                        vHop = -hopKick; vHopX = hopDir * hopXKick; hopDir = -hopDir; // up + alternating side kick
+                        lastKickTick = tick;
+                    }
                 }
-                vHop  += (-hopY * hopK  - vHop  * hopC)  * dt; hopY += vHop  * dt;
-                vHopX += (-hopX * hopXK - vHopX * hopXC) * dt; hopX += vHopX * dt;
+                if (ibeamFx)
+                {
+                    vHop  += (-hopY * hopK  - vHop  * hopC)  * dt; hopY += vHop  * dt;
+                    vHopX += (-hopX * hopXK - vHopX * hopXC) * dt; hopX += vHopX * dt;
+                }
+                else { hopY = 0f; vHop = 0f; hopX = 0f; vHopX = 0f; }
 
                 // --- 4) apply cursors ---
                 var test = _test;
