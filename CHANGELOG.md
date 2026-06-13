@@ -4,7 +4,7 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
-## Unreleased
+## 0.7.3 - 2026-06-13
 
 ### Changed
 - **The I-beam typing bounce has its own on/off toggle.** "Click feedback" now covers just
