@@ -4,7 +4,7 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
-## Unreleased
+## 0.7.1 - 2026-06-13
 
 ### Added
 - **Per-cursor on/off in Preferences**: every tile in the cursor preview now has a
