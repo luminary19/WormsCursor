@@ -31,6 +31,29 @@ public sealed class CursorSettings
     /// <see cref="Size"/>. 0 = sharp corners.</summary>
     public double CornerRadius { get; set; } = 0.0;
 
+    // ---------- which cursors are themed (preferences UI) ----------
+
+    /// <summary>Cursor kinds the user has switched OFF — left as the Windows default
+    /// instead of themed. Stored by name (the <see cref="TestCursor"/> value, e.g.
+    /// "Wait"); any kind NOT listed is enabled, so every cursor is themed by default and
+    /// a newly-added cursor lights up automatically. Additive/tolerant JSON.</summary>
+    public List<string> DisabledCursors { get; set; } = new();
+
+    /// <summary>True if <paramref name="kind"/> should be themed (the default).
+    /// <see cref="TestCursor.Off"/> isn't a themed cursor, so it always reads enabled.</summary>
+    public bool IsCursorEnabled(TestCursor kind)
+        => kind == TestCursor.Off
+            || !DisabledCursors.Contains(kind.ToString(), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Turn theming of <paramref name="kind"/> on/off (no-op for
+    /// <see cref="TestCursor.Off"/>); keeps the list duplicate-free.</summary>
+    public void SetCursorEnabled(TestCursor kind, bool enabled)
+    {
+        if (kind == TestCursor.Off) return;
+        DisabledCursors.RemoveAll(s => string.Equals(s, kind.ToString(), StringComparison.OrdinalIgnoreCase));
+        if (!enabled) DisabledCursors.Add(kind.ToString());
+    }
+
     // ---------- behaviour (engine tuning; not in the UI yet) ----------
 
     public int Steps { get; set; } = 360;
@@ -54,7 +77,12 @@ public sealed class CursorSettings
         AimSmooth = Math.Clamp(AimSmooth, 0.05, 1.0);
     }
 
-    public CursorSettings Clone() => (CursorSettings)MemberwiseClone();
+    public CursorSettings Clone()
+    {
+        var copy = (CursorSettings)MemberwiseClone();
+        copy.DisabledCursors = new List<string>(DisabledCursors); // own list, so dialog edits don't alias the live settings
+        return copy;
+    }
 
     /// <summary>Copy all values from <paramref name="other"/> into this instance (so a
     /// reference held by the engine sees the change without being replaced).</summary>
@@ -66,6 +94,7 @@ public sealed class CursorSettings
         OutlineColor = other.OutlineColor;
         OutlineThickness = other.OutlineThickness;
         CornerRadius = other.CornerRadius;
+        DisabledCursors = new List<string>(other.DisabledCursors);
         Steps = other.Steps;
         Hz = other.Hz;
         AimDist = other.AimDist;

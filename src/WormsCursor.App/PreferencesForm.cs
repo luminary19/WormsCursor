@@ -34,6 +34,8 @@ public sealed class PreferencesForm : Form
     readonly Panel _body;        // every control below the preview, moved/resized as one block
     readonly System.Windows.Forms.Timer _previewDebounce; // coalesces rapid slider edits into one render
     readonly System.Windows.Forms.Timer _showtime;        // hands-free demo: forces each test cursor in turn
+    readonly CheckBox[] _cursorChecks;   // one per preview tile: ticked = themed, unticked = Windows default
+    readonly ToolTip _checkTip = new();  // explains the tile checkboxes on hover
     int _bodyHeight;             // _body content height (computed once when built)
     int _cellW = 1, _cellH = 1, _rows = 1; // preview grid metrics (set by LayoutPreview)
     int _hoverIndex = -1;        // preview tile under the mouse (-1 = none): its cursor is "borrowed" onto the live pointer
@@ -53,9 +55,9 @@ public sealed class PreferencesForm : Form
         TestCursor.No,
     };
 
-    // Cursors shown in the showtime cycle, in order — currently the full preview set. To leave
-    // one out of the demo, drop it here (e.g. `k => k != TestCursor.Wait` skips the plain spinner).
-    static readonly TestCursor[] ShowtimeKinds = Array.FindAll(PreviewKinds, _ => true);
+    // Cursors shown in the Showtime cycle, in PreviewKinds order — captured when it starts so it
+    // only cycles the ENABLED cursors (an unticked tile is skipped, just like in normal use).
+    TestCursor[] _showtimeKinds = Array.Empty<TestCursor>();
 
     readonly TrackBar _sizeBar, _thickBar, _radiusBar;
     readonly Label _sizeVal, _thickVal, _radiusVal;
@@ -107,6 +109,29 @@ public sealed class PreferencesForm : Form
         _preview.MouseLeave += PreviewMouseLeave;
         Controls.Add(_preview);
 
+        // A small checkbox per preview tile: ticked = WormsCursor themes that cursor, unticked
+        // leaves it as the Windows default. All ticked by default. They're children of the
+        // preview panel so they ride its scroll; LayoutWindow positions them over each tile's
+        // top-left corner. Toggling only edits the working copy — it takes effect on Apply/OK,
+        // like every other edit here.
+        _checkTip.ShowAlways = true;
+        _cursorChecks = new CheckBox[PreviewKinds.Length];
+        for (int i = 0; i < PreviewKinds.Length; i++)
+        {
+            var kind = PreviewKinds[i];
+            var cb = new CheckBox
+            {
+                AutoSize = false,
+                Size = new Size(16, 16),
+                Checked = _working.IsCursorEnabled(kind),
+                BackColor = _preview.BackColor, // blend into the grey backdrop (no light plate)
+            };
+            _checkTip.SetToolTip(cb, "Theme this cursor (untick to keep the Windows default)");
+            cb.CheckedChanged += (_, _) => { _working.SetCursorEnabled(kind, cb.Checked); _preview.Invalidate(); };
+            _cursorChecks[i] = cb;
+            _preview.Controls.Add(cb);
+        }
+
         // Everything below the preview lives in _body, so the preview can grow (real-size, never
         // scaled) and just push the controls down / widen the window as a single block.
         _body = new Panel { Left = 0, Width = W };
@@ -123,7 +148,7 @@ public sealed class PreferencesForm : Form
         // and short rather than a tall single stack.
 
         // Full-width tip above the two columns.
-        _tip = MakeCaption("Tip: hover a cursor tile above to try it live on your pointer.");
+        _tip = MakeCaption("Tip: hover a tile to try it live; untick a cursor to keep the Windows default.");
         _tip.ForeColor = SystemColors.GrayText;
 
         // --- left column: the three numeric sliders ---
@@ -411,6 +436,19 @@ public sealed class PreferencesForm : Form
         _preview.SetBounds(previewX, M, panelW, panelH);
         _body.SetBounds(0, M + panelH + PreviewGap, clientW, _bodyHeight);
         ClientSize = new Size(clientW, _body.Bottom);
+
+        PositionCursorChecks();
+    }
+
+    // Places each tile's enable checkbox over its top-left corner. Locations are in the grid's
+    // content coordinates, so the boxes ride the preview's scroll exactly like the painted tiles.
+    void PositionCursorChecks()
+    {
+        for (int i = 0; i < _cursorChecks.Length; i++)
+        {
+            int col = i % PreviewCols, row = i / PreviewCols;
+            _cursorChecks[i].Location = new Point(col * _cellW + 4, row * _cellH + 4);
+        }
     }
 
     void UpdateLabels()
@@ -470,8 +508,22 @@ public sealed class PreferencesForm : Form
             if (bmp is null) continue;
             int cx = col * _cellW + _cellW / 2;
             int cy = row * _cellH + _cellH / 2;
-            g.DrawImageUnscaled(bmp, cx - bmp.Width / 2, cy - bmp.Height / 2); // real size, never scaled
+            int dx = cx - bmp.Width / 2, dy = cy - bmp.Height / 2;
+            if (_working.IsCursorEnabled(PreviewKinds[i]))
+                g.DrawImageUnscaled(bmp, dx, dy);             // enabled: real size, never scaled
+            else
+                g.DrawImage(bmp, new Rectangle(dx, dy, bmp.Width, bmp.Height),
+                            0, 0, bmp.Width, bmp.Height, GraphicsUnit.Pixel, DimAttr); // disabled: faded, reads as "off"
         }
+    }
+
+    // Draws a disabled tile's cursor at ~25% opacity so an unticked cursor visibly reads as "off".
+    static readonly ImageAttributes DimAttr = MakeDimAttr();
+    static ImageAttributes MakeDimAttr()
+    {
+        var attr = new ImageAttributes();
+        attr.SetColorMatrix(new ColorMatrix { Matrix33 = 0.25f }); // scale alpha to 25%
+        return attr;
     }
 
     // Hovering a tile "borrows" that cursor onto the real pointer (live preview); moving
@@ -503,6 +555,10 @@ public sealed class PreferencesForm : Form
     void ToggleShowtime()
     {
         if (_showtimeRunning) { StopShowtime(); return; }
+
+        // Cycle only the enabled cursors (an unticked tile is left out of the demo).
+        _showtimeKinds = Array.FindAll(PreviewKinds, k => _working.IsCursorEnabled(k));
+        if (_showtimeKinds.Length == 0) return; // everything unticked — nothing to show
 
         _preShowtimeIndex = _testCombo.SelectedIndex; // restore the prior selection on Stop
         _showtimeRunning = true;
@@ -538,16 +594,16 @@ public sealed class PreferencesForm : Form
             _showtimeStep = 0;
             _showtime.Interval = ShowtimeStepMs;      // lead-in done — slow to the per-cursor dwell
         }
-        else if (++_showtimeStep >= ShowtimeKinds.Length)
+        else if (++_showtimeStep >= _showtimeKinds.Length)
         {
             if (!_showtimeLoops) { StopShowtime(); return; }
             _showtimeStep = 0;                        // loop back to the first cursor
         }
 
-        var kind = ShowtimeKinds[_showtimeStep];
+        var kind = _showtimeKinds[_showtimeStep];
         SetTestComboSilently(Array.IndexOf(PreviewKinds, kind) + 1); // mirror into the combo so its name shows
         _setTest(kind);
-        _showtimeBtn.Text = $"■ Stop ({_showtimeStep + 1}/{ShowtimeKinds.Length})";
+        _showtimeBtn.Text = $"■ Stop ({_showtimeStep + 1}/{_showtimeKinds.Length})";
     }
 
     // Moves the combo selection for display only — showtime drives the cursor itself, so the
@@ -622,6 +678,7 @@ public sealed class PreferencesForm : Form
         _radiusBar.Value = Math.Clamp((int)Math.Round(_working.CornerRadius * 10), _radiusBar.Minimum, _radiusBar.Maximum);
         StyleSwatch(_fillBtn, ParseOr(_working.FillColor, Color.White));
         StyleSwatch(_outlineBtn, ParseOr(_working.OutlineColor, Color.Black));
+        foreach (var cb in _cursorChecks) cb.Checked = true; // Defaults = every cursor themed again
         OnEdited();
     }
 
@@ -695,6 +752,7 @@ public sealed class PreferencesForm : Form
         {
             _previewDebounce?.Dispose();
             _showtime?.Dispose();
+            _checkTip?.Dispose();
             foreach (var b in _previews) b?.Dispose();
         }
         base.Dispose(disposing);

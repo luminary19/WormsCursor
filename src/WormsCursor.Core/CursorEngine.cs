@@ -104,6 +104,24 @@ public sealed class CursorEngine : IDisposable
             var l = ProgressRenderer.Layout(_settings);
             int ciSize = Marshal.SizeOf<CURSORINFO>();
 
+            // Per-cursor enable flags: a cursor switched OFF in Preferences is left as the
+            // Windows default — we simply never SetSystemCursor its slot (nor re-theme it on
+            // screen). Read once: settings are immutable for a run (Apply stops+restarts the
+            // engine). Arrow governs OCR_NORMAL + OCR_UP (alternate-select shares the arrow).
+            bool onArrow = _settings.IsCursorEnabled(TestCursor.Arrow);
+            bool onHand  = _settings.IsCursorEnabled(TestCursor.Hand);
+            bool onWait  = _settings.IsCursorEnabled(TestCursor.Wait);
+            bool onApp   = _settings.IsCursorEnabled(TestCursor.AppStarting);
+            bool onHelp  = _settings.IsCursorEnabled(TestCursor.Help);
+            bool onCross = _settings.IsCursorEnabled(TestCursor.Cross);
+            bool onIbeam = _settings.IsCursorEnabled(TestCursor.Ibeam);
+            bool onWE    = _settings.IsCursorEnabled(TestCursor.SizeWE);
+            bool onNS    = _settings.IsCursorEnabled(TestCursor.SizeNS);
+            bool onD1    = _settings.IsCursorEnabled(TestCursor.SizeNWSE);
+            bool onD2    = _settings.IsCursorEnabled(TestCursor.SizeNESW);
+            bool onMove  = _settings.IsCursorEnabled(TestCursor.SizeAll);
+            bool onNo    = _settings.IsCursorEnabled(TestCursor.No);
+
             GetCursorPos(out POINT prev);
 
             double accDx = 0, accDy = 0;     // travel accumulated since the last recompute
@@ -332,26 +350,29 @@ public sealed class CursorEngine : IDisposable
                     if (normalDirty || idx != curIdx)
                     {
                         curIdx = idx; normalDirty = false;
-                        SetSystemCursor(CopyIcon(arrowFrames[idx]), OCR_NORMAL);
-                        SetSystemCursor(CopyIcon(handFrames[idx]), OCR_HAND);
-                        SetSystemCursor(CopyIcon(arrowFrames[idx]), OCR_UP); // alternate-select = same arrow
+                        if (onArrow)
+                        {
+                            SetSystemCursor(CopyIcon(arrowFrames[idx]), OCR_NORMAL);
+                            SetSystemCursor(CopyIcon(arrowFrames[idx]), OCR_UP); // alternate-select = same arrow
+                        }
+                        if (onHand) SetSystemCursor(CopyIcon(handFrames[idx]), OCR_HAND);
                     }
                     // Theme the busy slots once, then re-render them ONLY while a busy
                     // cursor is actually on screen (GetCursorInfo) — so an idle tray app
                     // doesn't burn CPU animating a cursor nobody is looking at.
                     if (!busyInit)
                     {
-                        SetSystemCursor(Busy(false), OCR_WAIT);
-                        SetSystemCursor(Busy(true), OCR_APPSTARTING);
-                        SetSystemCursor(Help(), OCR_HELP);
-                        SetSystemCursor(Cross(), OCR_CROSS);
-                        SetSystemCursor(Ibeam(), OCR_IBEAM);
-                        SetSystemCursor(ResizeWE(), OCR_SIZEWE);
-                        SetSystemCursor(ResizeNS(), OCR_SIZENS);
-                        SetSystemCursor(ResizeD1(), OCR_SIZENWSE);
-                        SetSystemCursor(ResizeD2(), OCR_SIZENESW);
-                        SetSystemCursor(Move(), OCR_SIZEALL);
-                        SetSystemCursor(No(), OCR_NO);
+                        if (onWait)  SetSystemCursor(Busy(false), OCR_WAIT);
+                        if (onApp)   SetSystemCursor(Busy(true), OCR_APPSTARTING);
+                        if (onHelp)  SetSystemCursor(Help(), OCR_HELP);
+                        if (onCross) SetSystemCursor(Cross(), OCR_CROSS);
+                        if (onIbeam) SetSystemCursor(Ibeam(), OCR_IBEAM);
+                        if (onWE)    SetSystemCursor(ResizeWE(), OCR_SIZEWE);
+                        if (onNS)    SetSystemCursor(ResizeNS(), OCR_SIZENS);
+                        if (onD1)    SetSystemCursor(ResizeD1(), OCR_SIZENWSE);
+                        if (onD2)    SetSystemCursor(ResizeD2(), OCR_SIZENESW);
+                        if (onMove)  SetSystemCursor(Move(), OCR_SIZEALL);
+                        if (onNo)    SetSystemCursor(No(), OCR_NO);
                         busyInit = true;
                     }
                     else if (fgRender)
@@ -367,17 +388,19 @@ public sealed class CursorEngine : IDisposable
                         if (GetCursorInfo(ref ci) && (ci.flags & CURSOR_SHOWING) != 0)
                         {
                             IntPtr cur = ci.hCursor;
-                            if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_WAIT)) SetSystemCursor(Busy(false), OCR_WAIT);
-                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_APPSTARTING)) SetSystemCursor(Busy(true), OCR_APPSTARTING);
-                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_HELP)) SetSystemCursor(Help(), OCR_HELP);
-                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_CROSS)) SetSystemCursor(Cross(), OCR_CROSS);
-                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_IBEAM)) SetSystemCursor(Ibeam(), OCR_IBEAM);
-                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEWE)) SetSystemCursor(ResizeWE(), OCR_SIZEWE);
-                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENS)) SetSystemCursor(ResizeNS(), OCR_SIZENS);
-                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENWSE)) SetSystemCursor(ResizeD1(), OCR_SIZENWSE);
-                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENESW)) SetSystemCursor(ResizeD2(), OCR_SIZENESW);
-                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEALL)) SetSystemCursor(Move(), OCR_SIZEALL);
-                            else if (cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_NO)) SetSystemCursor(No(), OCR_NO);
+                            // Each branch is gated by its enable flag: a disabled slot still shows the
+                            // Windows default (we never themed it), so there's nothing to re-render.
+                            if (onWait && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_WAIT)) SetSystemCursor(Busy(false), OCR_WAIT);
+                            else if (onApp && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_APPSTARTING)) SetSystemCursor(Busy(true), OCR_APPSTARTING);
+                            else if (onHelp && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_HELP)) SetSystemCursor(Help(), OCR_HELP);
+                            else if (onCross && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_CROSS)) SetSystemCursor(Cross(), OCR_CROSS);
+                            else if (onIbeam && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_IBEAM)) SetSystemCursor(Ibeam(), OCR_IBEAM);
+                            else if (onWE && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEWE)) SetSystemCursor(ResizeWE(), OCR_SIZEWE);
+                            else if (onNS && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENS)) SetSystemCursor(ResizeNS(), OCR_SIZENS);
+                            else if (onD1 && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENWSE)) SetSystemCursor(ResizeD1(), OCR_SIZENWSE);
+                            else if (onD2 && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENESW)) SetSystemCursor(ResizeD2(), OCR_SIZENESW);
+                            else if (onMove && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEALL)) SetSystemCursor(Move(), OCR_SIZEALL);
+                            else if (onNo && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_NO)) SetSystemCursor(No(), OCR_NO);
                         }
                     }
                 }
