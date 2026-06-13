@@ -30,9 +30,8 @@ public sealed class ChangelogForm : Form
         MinimizeBox = false;
         MinimumSize = new Size(420, 340);
         ClientSize = new Size(540, 520);
-        BackColor = Color.White;
 
-        var notesHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(14, 12, 10, 8), BackColor = Color.White };
+        var notesHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12, 10, 8, 8) };
         _notes = new RichTextBox
         {
             Dock = DockStyle.Fill,
@@ -51,7 +50,6 @@ public sealed class ChangelogForm : Form
             FlowDirection = FlowDirection.RightToLeft,
             Padding = new Padding(10),
             Height = 52,
-            BackColor = Color.White,
         };
         var close = new Button { Text = "Close", DialogResult = DialogResult.OK, Size = new Size(92, 30) };
         var github = new Button { Text = "View on GitHub", Size = new Size(132, 30) };
