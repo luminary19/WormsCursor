@@ -12,9 +12,11 @@ GitHub releases. The release workflow pulls the matching section into each relea
   default instead of theming it — WormsCursor simply stops touching that slot. Disabled
   tiles are shown faded so it's clear what's off. **Showtime** cycles only the enabled
   cursors, and the setting persists with the rest of your preferences.
-- **Click feedback** (Preferences, on by default): the pointer does a quick "squash &
-  pop" while a mouse button is held — a tactile press-and-release — and the text I-beam
-  hops and shivers slightly side-to-side as you type. One checkbox toggles it. Mouse
+- **Click feedback** (Preferences, on by default): the pointer and the crosshair do a
+  quick "squash & pop" while a mouse button is held — a tactile press-and-release — and
+  the text I-beam hops and shivers slightly side-to-side as you type. The effects also
+  play in the Preferences demo (Test cursor / hover-to-try / Showtime). One checkbox
+  toggles it. Mouse
   state is polled (no mouse hook); the
   typing hop uses a low-level keyboard hook that reads only *that* a key fired (never
   which — nothing is logged), installed only while the feature is on.

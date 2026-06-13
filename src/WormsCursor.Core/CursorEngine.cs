@@ -222,10 +222,12 @@ public sealed class CursorEngine : IDisposable
 
             // The crosshair: a precision reticle, hotspot dead centre. No arrow, no
             // direction-follow — just the breathing/recoiling gap and the spinning ring.
+            // Click feedback pulses the whole reticle about its centre (the precision point
+            // stays put); pop == 1 at rest is a cheap pass-through.
             IntPtr Cross()
             {
                 using var bmp = ProgressRenderer.ComposeCross(_settings, crossGap, ringDeg);
-                return MakeCursor(bmp, l.HotX, l.HotY);
+                return ScaledCursor(bmp, l.HotX, l.HotY, clickFx ? popScale : 1f);
             }
 
             // The text / I-beam cursor: rigid bottom, jelly top (ibOffX/ibOffY), hotspot centre.
@@ -469,12 +471,29 @@ public sealed class CursorEngine : IDisposable
                         }
                     }
                 }
-                else if (test == TestCursor.Arrow || test == TestCursor.Hand) // static
+                else if (test == TestCursor.Arrow || test == TestCursor.Hand) // static (pops on click, for the demo)
                 {
-                    if (idx != curIdx || normalDirty)
+                    var frames = test == TestCursor.Hand ? handFrames : arrowFrames;
+                    bool popActive = clickFx && (btnDown || MathF.Abs(popScale - 1f) > 0.004f || MathF.Abs(vPop) > 0.02f);
+                    if (popActive)
+                    {
+                        int popScaleQ = (int)MathF.Round(popScale * 200f);
+                        if (fgRender && (idx != lastPopIdx || popScaleQ != lastPopScaleQ))
+                        {
+                            lastPopIdx = idx; lastPopScaleQ = popScaleQ;
+                            double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
+                            var baseBmp = test == TestCursor.Hand ? _handBase! : _arrowBase!;
+                            double baseAng = test == TestCursor.Hand ? HandShape.BaseAngleDeg : 0.0;
+                            IntPtr h = RotatedScaled(baseBmp, baseAng, deg, popScale);
+                            SetSystemCursor(CopyIcon(h), OCR_HAND);   // copy for the extra slots first…
+                            SetSystemCursor(CopyIcon(h), OCR_UP);
+                            SetSystemCursor(h, OCR_NORMAL);           // …then hand off h itself (SetSystemCursor destroys it)
+                        }
+                        curIdx = -1; normalDirty = true;              // crisp re-apply once the pop settles
+                    }
+                    else if (idx != curIdx || normalDirty)
                     {
                         curIdx = idx; normalDirty = false;
-                        var frames = test == TestCursor.Hand ? handFrames : arrowFrames;
                         SetSystemCursor(CopyIcon(frames[idx]), OCR_NORMAL);
                         SetSystemCursor(CopyIcon(frames[idx]), OCR_HAND);
                         SetSystemCursor(CopyIcon(frames[idx]), OCR_UP);
@@ -573,6 +592,24 @@ public sealed class CursorEngine : IDisposable
             g.DrawImage(baseBmp, 0, 0);
         }
         return MakeCursor(rot, pivot, pivot);
+    }
+
+    // Scales a composed bitmap about its hotspot (no rotation) into a same-size cursor — used to
+    // pulse the crosshair on click. scale ~= 1 is the cheap pass-through (no redraw).
+    static IntPtr ScaledCursor(Bitmap src, int hotX, int hotY, float scale)
+    {
+        if (MathF.Abs(scale - 1f) < 0.001f) return MakeCursor(src, hotX, hotY);
+        using var dst = new Bitmap(src.Width, src.Height);
+        using (var g = Graphics.FromImage(dst))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.TranslateTransform(hotX, hotY);
+            g.ScaleTransform(scale, scale);
+            g.TranslateTransform(-hotX, -hotY);
+            g.DrawImage(src, 0, 0);
+        }
+        return MakeCursor(dst, hotX, hotY);
     }
 
     void DestroyCursors()
