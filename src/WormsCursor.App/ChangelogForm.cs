@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using WormsCursor.App.Services;
 
 namespace WormsCursor.App;
@@ -111,32 +112,71 @@ public sealed class ChangelogForm : Form
         _notes.ScrollToCaret();
     }
 
-    // Light markdown: ### headers (bold), "- " bullets with a hanging indent, inline **bold**.
+    // Light markdown with soft-wrap: ### headers (bold), "- " bullets (hanging indent), inline
+    // **bold**. The CHANGELOG hard-wraps lines mid-sentence; like GitHub, we treat a single
+    // newline as a space and only break on a blank line or a new bullet/header, so each bullet
+    // renders as ONE wrapped paragraph (the RichTextBox does the wrapping) instead of many lines.
     void RenderBody(string body, Font baseFont, Font h3, Font bold)
     {
+        string? bullet = null;          // text of the bullet item being accumulated (null = none)
+        var para = new StringBuilder(); // text of a plain paragraph being accumulated
+
+        void FlushParagraph()
+        {
+            if (para.Length == 0) return;
+            SetParagraph(0, 0);
+            AppendInline(para.ToString(), baseFont, bold);
+            _notes.AppendText("\n");
+            para.Clear();
+        }
+        void FlushBullet()
+        {
+            if (bullet is null) return;
+            SetParagraph(16, 14);
+            AppendRun("•  ", baseFont, Subtle);
+            AppendInline(bullet, baseFont, bold);
+            _notes.AppendText("\n");
+            bullet = null;
+        }
+        void FlushBlock() { FlushBullet(); FlushParagraph(); }
+
         foreach (var raw in body.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
         {
-            string line = raw.TrimEnd();
-            SetParagraph(0, 0);
-            if (line.Length == 0) { _notes.AppendText("\n"); continue; }
+            string line = raw.Trim();
+            if (line.Length == 0) { FlushBlock(); continue; } // blank line ends the current block
 
-            if (line.StartsWith("### ")) { AppendRun(line[4..], h3, Ink); _notes.AppendText("\n"); continue; }
-            if (line.StartsWith("## "))  { AppendRun(line[3..], h3, Ink); _notes.AppendText("\n"); continue; }
-            if (line.StartsWith("# "))   { AppendRun(line[2..], h3, Ink); _notes.AppendText("\n"); continue; }
-
-            if (line.StartsWith("- ") || line.StartsWith("* "))
+            if (line.StartsWith("# "))
             {
-                SetParagraph(16, 14);
-                AppendRun("•  ", baseFont, Subtle);
-                AppendInline(line[2..], baseFont, bold);
+                FlushBlock();
+                int sp = line.IndexOf(' ');
+                SetParagraph(0, 0);
+                AppendRun(line[(sp + 1)..], h3, Ink);
                 _notes.AppendText("\n");
+            }
+            else if (line.StartsWith("## ") || line.StartsWith("### "))
+            {
+                FlushBlock();
+                int sp = line.IndexOf(' ');
+                SetParagraph(0, 0);
+                AppendRun(line[(sp + 1)..], h3, Ink);
+                _notes.AppendText("\n");
+            }
+            else if (line.StartsWith("- ") || line.StartsWith("* "))
+            {
+                FlushBlock();          // a new bullet ends the previous block
+                bullet = line[2..];
+            }
+            else if (bullet != null)
+            {
+                bullet += " " + line;  // continuation of the current bullet (soft wrap)
             }
             else
             {
-                AppendInline(line, baseFont, bold);
-                _notes.AppendText("\n");
+                if (para.Length > 0) para.Append(' ');
+                para.Append(line);     // continuation of a plain paragraph
             }
         }
+        FlushBlock();
     }
 
     void AppendInline(string text, Font normal, Font bold)
