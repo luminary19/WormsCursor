@@ -318,11 +318,12 @@ public sealed class PreferencesForm : Form
         ry = PlaceField(_fillCap, _fillBtn, rightX, ry, colW, 28);
         ry = PlaceField(_outlineCap, _outlineBtn, rightX, ry, colW, 28);
 
-        // feedback toggles — two compact rows above the test controls
+        // feedback toggles — two rows with extra breathing room above, between and below
+        ry += 12;
         _clickFxChk.SetBounds(rightX, ry, colW, 22);
-        ry += 24;
+        ry += 32;
         _ibeamFxChk.SetBounds(rightX, ry, colW, 22);
-        ry += 30;
+        ry += 40;
 
         // test row: caption, then the combo and the Showtime button sharing the column width
         _testCap.Location = new Point(rightX, ry);
