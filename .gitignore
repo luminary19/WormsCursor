@@ -25,5 +25,7 @@ Thumbs.db
 desktop.ini
 .DS_Store
 
-# Claude Code
-.claude/
+# Claude Code: ignore local/transient state, but track the shared, version-controlled
+# skills (settings.local.json, command history, etc. stay ignored).
+.claude/*
+!.claude/skills/
