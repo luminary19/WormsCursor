@@ -23,7 +23,6 @@ public sealed class PreferencesForm : Form
     const int PreviewCols = 7;   // fixed preview columns: 13 cursors -> 2 tidy rows (matches the README sheet)
     const int CellPad = 14;      // breathing room around each cursor (drawn 1:1, never scaled)
     const int ColGap = 28;       // gap between the two control columns below the preview
-    const int RowH = 58;         // height of one control row (caption + control + gap)
     const int ShowtimeLeadIn = 3; // seconds counted down before Showtime forces the first cursor
     const int ShowtimeStepMs = 1500; // dwell on each cursor once cycling starts
 
@@ -190,13 +189,14 @@ public sealed class PreferencesForm : Form
         _outlineBtn.Click += (_, _) => PickColor(_outlineBtn, c => _working.OutlineColor = ToHex(c));
         _outlineCap = MakeCaption("Outline colour");
 
-        // Click feedback: pointer + crosshair "squash & pop" on click.
-        _clickFxChk = new CheckBox { Text = "Click feedback", AutoSize = false, Checked = _working.ClickFeedback };
+        // Click feedback: pointer + crosshair "squash & pop" on click. AutoSize so the label can't
+        // clip when the system font / "Make text bigger" is enlarged.
+        _clickFxChk = new CheckBox { Text = "Click feedback", AutoSize = true, Checked = _working.ClickFeedback };
         _clickFxChk.CheckedChanged += (_, _) => _working.ClickFeedback = _clickFxChk.Checked;
         _checkTip.SetToolTip(_clickFxChk, "Pointer & crosshair squash & pop while a mouse button is held.");
 
         // I-beam typing bounce: the text cursor hops/shivers as you type (separate toggle).
-        _ibeamFxChk = new CheckBox { Text = "I-beam typing bounce", AutoSize = false, Checked = _working.IbeamFeedback };
+        _ibeamFxChk = new CheckBox { Text = "I-beam typing bounce", AutoSize = true, Checked = _working.IbeamFeedback };
         _ibeamFxChk.CheckedChanged += (_, _) => _working.IbeamFeedback = _ibeamFxChk.Checked;
         _checkTip.SetToolTip(_ibeamFxChk, "The text I-beam hops and shivers slightly as you type.");
 
@@ -229,18 +229,18 @@ public sealed class PreferencesForm : Form
         // --- action buttons: Defaults + Check-for-updates (left) | Apply OK Cancel (right) ---
         // Apply commits edits to the live cursor without closing, so you can tweak
         // size/colour and watch the test cursor update.
-        _defaultsBtn = new Button { Text = "Defaults", Size = new Size(90, 30) };
+        _defaultsBtn = MakeButton("Defaults");
         _defaultsBtn.Click += (_, _) => ResetDefaults();
-        _cancelBtn = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(84, 30) };
-        _okBtn = new Button { Text = "OK", DialogResult = DialogResult.OK, Size = new Size(84, 30) };
-        _applyBtn = new Button { Text = "Apply", Size = new Size(84, 30) };
+        _cancelBtn = MakeButton("Cancel"); _cancelBtn.DialogResult = DialogResult.Cancel;
+        _okBtn = MakeButton("OK"); _okBtn.DialogResult = DialogResult.OK;
+        _applyBtn = MakeButton("Apply");
         _applyBtn.Click += (_, _) => _apply(_working);
         AcceptButton = _okBtn;
         CancelButton = _cancelBtn;
 
         // --- footer: version + the repo link on one line ---
         _version = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "v" + AppVersion() };
-        _updateBtn = new Button { Text = "Check for updates", Size = new Size(140, 30) };
+        _updateBtn = MakeButton("Check for updates");
         _updateBtn.Click += OnCheckUpdates;
         _updateStatus = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = string.Empty };
         _link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor" };
@@ -249,10 +249,10 @@ public sealed class PreferencesForm : Form
         _whatsNew.LinkClicked += (_, _) => { using var dlg = new ChangelogForm(_updates); dlg.ShowDialog(this); };
 
         // --- app-level row: autostart (immediate) + the agent-notifications dialog ---
-        _autostartChk = new CheckBox { Text = "Start with Windows", AutoSize = false, Checked = ReadAutostart() };
+        _autostartChk = new CheckBox { Text = "Start with Windows", AutoSize = true, Checked = ReadAutostart() };
         _autostartChk.CheckedChanged += (_, _) => ToggleAutostart();
         _checkTip.SetToolTip(_autostartChk, "Launch WormsCursor automatically when you sign in.");
-        _agentBtn = new Button { Text = "Agent settings…", Size = new Size(150, 30) };
+        _agentBtn = MakeButton("Agent settings…", minWidth: 130);
         _agentBtn.Click += (_, _) => _openAgentSettings();
         _checkTip.SetToolTip(_agentBtn, "Show an AI agent's logo on the cursor while it waits for you, and register tools.");
 
@@ -313,6 +313,18 @@ public sealed class PreferencesForm : Form
 
     static Label MakeCaption(string text) => new() { Text = text, AutoSize = true };
 
+    // A push-button that grows to fit its label + the current font (so the text never clips when the
+    // system font / "Make text bigger" is enlarged), with a minimum width so short labels still read
+    // as buttons. All such buttons end up the same height, so a row of them lines up.
+    static Button MakeButton(string text, int minWidth = 88) => new()
+    {
+        Text = text,
+        AutoSize = true,
+        AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        Padding = new Padding(12, 5, 12, 5),
+        MinimumSize = new Size(minWidth, 0),
+    };
+
     // Positions every control inside _body for a given body width: two columns of three
     // rows each (sliders left, colours + test on the right) keep the dialog wide-and-short,
     // with the action buttons and footer spanning the full width below. Row heights don't
@@ -325,7 +337,7 @@ public sealed class PreferencesForm : Form
 
         int top = 8;
         _tip.Location = new Point(M, top);
-        top += 28;
+        top = _tip.Bottom + 12; // flow from the tip's real height so a bigger font can't crowd it
 
         // left column — the numeric sliders
         int ly = top;
@@ -346,46 +358,51 @@ public sealed class PreferencesForm : Form
         int outlineX = rightX + swatchW + swatchGap;
         _fillCap.Location = new Point(rightX, ry);
         _outlineCap.Location = new Point(outlineX, ry);
-        _fillBtn.SetBounds(rightX, ry + 22, swatchW, fieldH);
-        _outlineBtn.SetBounds(outlineX, ry + 22, swatchW, fieldH);
-        ry += RowH;
+        int swatchTop = Math.Max(_fillCap.Bottom, _outlineCap.Bottom) + 4; // flow below the captions
+        _fillBtn.SetBounds(rightX, swatchTop, swatchW, fieldH);
+        _outlineBtn.SetBounds(outlineX, swatchTop, swatchW, fieldH);
+        ry = swatchTop + fieldH + 14;
 
-        // feedback toggles — two rows with extra breathing room above, between and below
-        ry += 12;
-        _clickFxChk.SetBounds(rightX, ry, colW, 22);
-        ry += 32;
-        _ibeamFxChk.SetBounds(rightX, ry, colW, 22);
-        ry += 40;
+        // feedback toggles — two AutoSize rows with breathing room above, between and below; flow
+        // from each control's real height so an enlarged font can't clip or overlap them
+        _clickFxChk.Location = new Point(rightX, ry);
+        ry = _clickFxChk.Bottom + 10;
+        _ibeamFxChk.Location = new Point(rightX, ry);
+        ry = _ibeamFxChk.Bottom + 18;
 
-        // test row: caption, then the combo and the Showtime button sharing the column width at the
-        // same height and baseline
+        // test row: caption, then the combo and the Showtime button on one baseline. Showtime is
+        // sized to its preferred width (+ slack for the "■ Stop (n/n)" label) so it never clips.
         _testCap.Location = new Point(rightX, ry);
-        const int stW = 104, stGap = 6;
+        int fieldTop = _testCap.Bottom + 4;
+        const int stGap = 6;
+        int stW = _showtimeBtn.PreferredSize.Width + 12;
         int comboW = colW - stW - stGap;
-        _testCombo.SetBounds(rightX, ry + 22, comboW, fieldH);
-        _showtimeBtn.SetBounds(rightX + comboW + stGap, ry + 22, stW, fieldH);
-        ry += RowH;
+        _testCombo.SetBounds(rightX, fieldTop, comboW, fieldH);
+        _showtimeBtn.SetBounds(rightX + comboW + stGap, fieldTop, stW, fieldH);
+        ry = fieldTop + fieldH;
 
         // app-level row spanning the full width, below both columns: autostart on the left, the
         // agent-notifications dialog button on the right. Visually separate from the appearance
         // controls because these don't go through the Apply/Cancel working-copy.
         int appY = Math.Max(ly, ry) + 8;
-        _autostartChk.SetBounds(M, appY + 4, 220, 22); // 22-tall checkbox vertically centred on the 30 row
         _agentBtn.SetBounds(width - M - _agentBtn.Width, appY, _agentBtn.Width, _agentBtn.Height);
+        // AutoSize checkbox, vertically centred on the (taller) Agent-settings button beside it
+        _autostartChk.Location = new Point(M, appY + Math.Max(0, (_agentBtn.Height - _autostartChk.Height) / 2));
 
         // action buttons — Defaults + Check-for-updates on the left, Apply|OK|Cancel clustered
         // at the right. The wide window leaves a comfortable gap in the middle, so the update
         // status text sits right beside its button again.
         int btnY = appY + 40;
+        int btnH = _okBtn.Height; // AutoSize buttons all share this height, so the row lines up
         _defaultsBtn.Location = new Point(M, btnY);
-        _updateBtn.Location = new Point(_defaultsBtn.Right + 8, btnY); // same 30-tall row as every other button
-        _updateStatus.Location = new Point(_updateBtn.Right + 12, btnY + 8);
+        _updateBtn.Location = new Point(_defaultsBtn.Right + 8, btnY);
+        _updateStatus.Location = new Point(_updateBtn.Right + 12, btnY + Math.Max(0, (btnH - _updateStatus.Height) / 2));
         _cancelBtn.Location = new Point(width - M - _cancelBtn.Width, btnY);
         _okBtn.Location = new Point(_cancelBtn.Left - 8 - _okBtn.Width, btnY);
         _applyBtn.Location = new Point(_okBtn.Left - 8 - _applyBtn.Width, btnY);
 
         // footer — version + repo link on a single line below the buttons
-        int footerY = btnY + 30 + 14;
+        int footerY = btnY + btnH + 14;
         _version.Location = new Point(M, footerY);
         _link.Location = new Point(_version.Right + 14, footerY);
         _whatsNew.Location = new Point(_link.Right + 14, footerY);
@@ -395,14 +412,18 @@ public sealed class PreferencesForm : Form
         _bodyHeight = footerY + 20 + M;
     }
 
-    // One slider row: caption, then a full-column-width bar with a right-aligned value label.
+    // One slider row: AutoSize caption, then a full-column-width bar with a right-aligned value
+    // label. Everything flows from the caption's real height and the value is sized to the font, so
+    // an enlarged system font can't clip the caption into the bar or chop the value's descenders.
     static int PlaceSlider(Label cap, TrackBar bar, Label val, int x, int y, int colW)
     {
-        const int valW = 56;
+        const int valW = 64, barH = 28;
         cap.Location = new Point(x, y);
-        bar.SetBounds(x, y + 22, colW - valW - 6, 28);
-        val.SetBounds(x + colW - valW, y + 27, valW, 18);
-        return y + RowH;
+        int barTop = cap.Bottom + 4;
+        bar.SetBounds(x, barTop, colW - valW - 6, barH);
+        int valH = val.Font.Height;
+        val.SetBounds(x + colW - valW, barTop + (barH - valH) / 2, valW, valH);
+        return barTop + barH + 12;
     }
 
     static TestCursor MapTest(int index) => index switch

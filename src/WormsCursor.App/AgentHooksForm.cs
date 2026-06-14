@@ -40,181 +40,165 @@ public sealed class AgentHooksForm : Form
         ShowInTaskbar = false;
         Font = SystemFonts.MessageBoxFont;
 
+        // The whole dialog flows top-to-bottom and every text control is AutoSize, so nothing clips
+        // when the system font / "Make text bigger" is enlarged, and rows self-align to their tallest
+        // control. `pad` is the outer margin; `innerW` the content column; `y` the running cursor.
+        const int pad = 14, innerW = 508, indent = 16;
+        int rightEdge = pad + innerW;
+        int y = pad;
+
         var intro = new Label
         {
-            AutoSize = false,
-            Location = new Point(12, 12),
-            Size = new Size(512, 36),
+            AutoSize = true,
+            MaximumSize = new Size(innerW, 0), // wrap to the column, grow as tall as needed
+            Location = new Point(pad, y),
             Text = "When an AI agent is waiting for you, the cursor hangs that tool's logo — with a "
                  + "“+N” tag when several wait. Register the tools below so they tell WormsCursor what "
                  + "they're doing.",
         };
         Controls.Add(intro);
+        y = intro.Bottom + 14;
 
         // --- display section ---
         _enabledChk = new CheckBox
         {
-            AutoSize = false,
-            Location = new Point(12, 56),
-            Size = new Size(400, 22),
+            AutoSize = true,
+            Location = new Point(pad, y),
             Text = "Show the agent logo on the cursor while agents are waiting",
             Checked = charmsEnabled,
         };
         _enabledChk.CheckedChanged += (_, _) => Apply();
         Controls.Add(_enabledChk);
+        y = _enabledChk.Bottom + 12;
 
         // How long a logo lingers before it's swept (in case an agent never sends a closing event).
-        // Shown in minutes; stored as seconds. The engine's sweep clears the logo within a few seconds
-        // of this elapsing.
-        var timeoutLabel = new Label
-        {
-            AutoSize = false,
-            Location = new Point(30, 82),
-            Size = new Size(150, 22),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Text = "Clear a stuck logo after:",
-        };
-        Controls.Add(timeoutLabel);
+        // Shown in minutes; stored as seconds.
+        var timeoutLabel = new Label { AutoSize = true, Text = "Clear a stuck logo after:" };
         _timeoutNum = new NumericUpDown
         {
-            Location = new Point(184, 80),
-            Size = new Size(60, 23),
-            Minimum = 0.5m,
-            Maximum = 30m,
-            Increment = 0.5m,
-            DecimalPlaces = 1,
+            Width = 64,
+            Minimum = 0.5m, Maximum = 30m, Increment = 0.5m, DecimalPlaces = 1,
             Value = Math.Clamp(timeoutSeconds / 60m, 0.5m, 30m),
         };
+        var minutesLabel = new Label { AutoSize = true, Text = "minutes" };
+        Controls.Add(timeoutLabel); Controls.Add(_timeoutNum); Controls.Add(minutesLabel);
+        y = Row(y, pad + indent, 8, timeoutLabel, _timeoutNum, minutesLabel) + 12;
         _timeoutNum.ValueChanged += (_, _) => Apply();
-        Controls.Add(_timeoutNum);
-        var minutesLabel = new Label
-        {
-            AutoSize = false,
-            Location = new Point(248, 82),
-            Size = new Size(80, 22),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Text = "minutes",
-        };
-        Controls.Add(minutesLabel);
 
-        // Live preview: fake a waiting-agent count on the real cursor so you can see the logos
-        // (and the "+N" tag) without wiring up an actual agent. "Clear" ends it; closing the
-        // dialog ends it too, so a test never leaves phantom logos stuck on the cursor.
-        var previewLabel = new Label
-        {
-            AutoSize = false,
-            Location = new Point(30, 110),
-            Size = new Size(150, 22),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Text = "Preview on cursor:",
-        };
-        Controls.Add(previewLabel);
-        _previewNum = new NumericUpDown
-        {
-            Location = new Point(184, 108),
-            Size = new Size(48, 23),
-            Minimum = 1,
-            Maximum = 9,
-            Value = 2,
-        };
-        Controls.Add(_previewNum);
-        _previewShow = new Button
-        {
-            Location = new Point(240, 107),
-            Size = new Size(110, 26),
-            Text = "Show logos",
-        };
+        // Live preview: fake a waiting-agent count on the real cursor so you can see the logo (and the
+        // "+N" tag) without wiring up an actual agent. "Clear" ends it; closing the dialog ends it too.
+        var previewLabel = new Label { AutoSize = true, Text = "Preview on cursor:" };
+        _previewNum = new NumericUpDown { Width = 52, Minimum = 1, Maximum = 9, Value = 2 };
+        _previewShow = MakeButton("Show logos");
         _previewShow.Click += (_, _) => ShowPreview();
-        Controls.Add(_previewShow);
-        _previewClear = new Button
-        {
-            Location = new Point(356, 107),
-            Size = new Size(90, 26),
-            Text = "Clear",
-            Enabled = false,
-        };
+        _previewClear = MakeButton("Clear");
+        _previewClear.Enabled = false;
         _previewClear.Click += (_, _) => EndPreview();
-        Controls.Add(_previewClear);
-        // Attached after _previewClear exists so the lambda can read it without a null warning.
-        // While a preview is live, nudging the count re-renders it at the new number.
+        Controls.Add(previewLabel); Controls.Add(_previewNum); Controls.Add(_previewShow); Controls.Add(_previewClear);
+        y = Row(y, pad + indent, 8, previewLabel, _previewNum, _previewShow, _previewClear) + 16;
+        // Attached after _previewClear exists so the lambda can read it; nudging the count while a
+        // preview is live re-renders it at the new number.
         _previewNum.ValueChanged += (_, _) => { if (_previewClear.Enabled) ShowPreview(); };
 
         var divider = new Label
         {
             AutoSize = false,
             BorderStyle = BorderStyle.Fixed3D,
-            Location = new Point(12, 144),
-            Size = new Size(512, 2),
+            Location = new Point(pad, y),
+            Size = new Size(innerW, 2),
         };
         Controls.Add(divider);
+        y = divider.Bottom + 14;
 
         var toolsHeader = new Label
         {
-            AutoSize = false,
-            Location = new Point(12, 154),
-            Size = new Size(512, 20),
+            AutoSize = true,
+            Location = new Point(pad, y),
             Font = new Font(Font, FontStyle.Bold),
             Text = "Registered tools",
         };
         Controls.Add(toolsHeader);
+        y = toolsHeader.Bottom + 10;
 
-        // --- registration rows ---
-        int y = 180;
+        // --- registration rows: name (left), status (middle), Register/Unregister (right) ---
         foreach (var tool in AgentHookRegistrar.Tools)
         {
             var name = new Label
             {
-                AutoSize = false,
-                Location = new Point(12, y),
-                Size = new Size(168, 36),
+                AutoSize = true,
+                MaximumSize = new Size(180, 0),
                 Text = tool.DisplayName + "\n" + tool.ConfigHint,
             };
-            var status = new Label
-            {
-                AutoSize = false,
-                Location = new Point(188, y + 8),
-                Size = new Size(176, 20),
-                TextAlign = ContentAlignment.MiddleLeft,
-            };
-            var action = new Button
-            {
-                Location = new Point(372, y + 4),
-                Size = new Size(150, 28),
-            };
+            var status = new Label { AutoSize = true };
+            var action = MakeButton(""); // text + width set by Refresh below, before we position it
             var captured = tool;
             action.Click += (_, _) => OnAction(captured);
+            Controls.Add(name); Controls.Add(status); Controls.Add(action);
+            var row = (tool, status, action);
+            _rows.Add(row);
+            Refresh(row); // populate text + size first, so right-alignment uses the real button width
 
-            Controls.Add(name);
-            Controls.Add(status);
-            Controls.Add(action);
-            _rows.Add((tool, status, action));
-            y += 44;
+            int rowH = Math.Max(Math.Max(name.Height, status.Height), action.Height);
+            name.Location = new Point(pad, y + (rowH - name.Height) / 2);
+            status.Location = new Point(pad + 186, y + (rowH - status.Height) / 2);
+            action.Location = new Point(rightEdge - action.Width, y + (rowH - action.Height) / 2);
+            y += rowH + 12;
         }
 
         var hint = new Label
         {
-            AutoSize = false,
-            Location = new Point(12, y + 2),
-            Size = new Size(512, 20),
+            AutoSize = true,
+            MaximumSize = new Size(innerW, 0),
             ForeColor = SystemColors.GrayText,
+            Location = new Point(pad, y),
             Text = "Registering takes effect for new agent sessions; each config is backed up (.bak) first.",
         };
         Controls.Add(hint);
+        y = hint.Bottom + 16;
 
         var close = new Button
         {
             Text = "Close",
             DialogResult = DialogResult.OK,
-            Size = new Size(90, 28),
-            Location = new Point(434, y + 30),
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(14, 4, 14, 4),
         };
         Controls.Add(close);
+        close.Location = new Point(rightEdge - close.Width, y);
         AcceptButton = close;
         CancelButton = close;
+        y = close.Bottom + pad;
 
-        ClientSize = new Size(536, y + 70);
+        ClientSize = new Size(rightEdge + pad, y);
         SyncEnabled();
-        RefreshAll();
+    }
+
+    // A push-button that grows to fit its label + the system font (never clips), with a sensible
+    // minimum width so short labels still look like buttons.
+    static Button MakeButton(string text) => new()
+    {
+        Text = text,
+        AutoSize = true,
+        AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        Padding = new Padding(12, 3, 12, 3),
+        MinimumSize = new Size(84, 0),
+    };
+
+    // Lays controls left-to-right from x=left, `gap` px apart, vertically centring each on the
+    // tallest. Returns the row's bottom Y. Heights come from the controls themselves, so the row
+    // grows with the font instead of clipping.
+    static int Row(int top, int left, int gap, params Control[] controls)
+    {
+        int h = 0;
+        foreach (var c in controls) h = Math.Max(h, c.Height);
+        int x = left;
+        foreach (var c in controls)
+        {
+            c.Location = new Point(x, top + (h - c.Height) / 2);
+            x += c.Width + gap;
+        }
+        return top + h;
     }
 
     void Apply()
@@ -257,11 +241,6 @@ public sealed class AgentHooksForm : Form
         // Never leave a fake count on the cursor after the dialog is gone.
         if (_previewClear.Enabled) _preview(null);
         base.OnFormClosed(e);
-    }
-
-    void RefreshAll()
-    {
-        foreach (var row in _rows) Refresh(row);
     }
 
     static void Refresh((HookTool tool, Label status, Button action) row)
