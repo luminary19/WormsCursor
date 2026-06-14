@@ -54,32 +54,54 @@ static class AgentLogos
     public static bool IsKnown(string tool) => _byTool.ContainsKey(tool ?? "");
 
     /// <summary>Draws the <paramref name="tool"/> logo to fit inside <paramref name="box"/> (centred,
-    /// aspect-preserved), filled in its brand colour. Unknown tools get a filled dot in
-    /// <paramref name="fallback"/>. Leaves no transform behind.</summary>
-    public static void Draw(Graphics g, string tool, RectangleF box, Color fallback)
+    /// aspect-preserved), filled in its brand colour with a thin contrast rim (<paramref name="edge"/>
+    /// px wide, auto light/dark vs. the brand colour) so the bare logo reads on any background —
+    /// the same outline-under/fill-over look the rest of the cursor set uses. Unknown tools get a
+    /// filled dot. Leaves no transform behind.</summary>
+    public static void Draw(Graphics g, string tool, RectangleF box, float edge)
     {
+        var saved = g.Save();
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
         if (!_byTool.TryGetValue(tool ?? "", out var logo))
         {
-            using var fb = new SolidBrush(fallback);
             float d = Math.Min(box.Width, box.Height) * 0.7f;
-            g.FillEllipse(fb, box.X + (box.Width - d) / 2, box.Y + (box.Height - d) / 2, d, d);
+            var dot = new RectangleF(box.X + (box.Width - d) / 2, box.Y + (box.Height - d) / 2, d, d);
+            using (var rim = new Pen(RimFor(Color.Gray), edge))
+                g.DrawEllipse(rim, dot);
+            using (var fb = new SolidBrush(Color.Gray))
+                g.FillEllipse(fb, dot);
+            g.Restore(saved);
             return;
         }
 
         var b = logo.Bounds;
-        if (b.Width <= 0 || b.Height <= 0) return;
+        if (b.Width <= 0 || b.Height <= 0) { g.Restore(saved); return; }
         float scale = Math.Min(box.Width / b.Width, box.Height / b.Height);
         float w = b.Width * scale, h = b.Height * scale;
 
-        var saved = g.Save();
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
         // Map the logo's native bounds into the centred, scaled target box.
         g.TranslateTransform(box.X + (box.Width - w) / 2f, box.Y + (box.Height - h) / 2f);
         g.ScaleTransform(scale, scale);
         g.TranslateTransform(-b.X, -b.Y);
+
+        // Contrast rim under, brand fill over. The pen is in native units (it gets scaled with the
+        // graphics), so 2*edge/scale lands a ~edge-px rim on screen. LineJoin.Round keeps the pixel
+        // critter's corners from spiking.
+        float penW = 2f * edge / scale;
+        using (var rim = new Pen(RimFor(logo.Color), penW) { LineJoin = LineJoin.Round })
+            g.DrawPath(rim, logo.Path);
         using (var brush = new SolidBrush(logo.Color))
             g.FillPath(brush, logo.Path);
         g.Restore(saved);
+    }
+
+    // A light rim for dark logos, a dark rim for light ones — whichever gives contrast on the
+    // opposite background (a near-black logo needs a light edge to show on a dark screen, etc.).
+    static Color RimFor(Color fill)
+    {
+        float lum = 0.299f * fill.R + 0.587f * fill.G + 0.114f * fill.B;
+        return lum < 110 ? Color.FromArgb(240, 240, 240) : Color.FromArgb(36, 36, 36);
     }
 }

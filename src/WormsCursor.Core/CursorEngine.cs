@@ -167,15 +167,9 @@ public sealed class CursorEngine : IDisposable
             float maxLen = sz * 0.42f;                // taut-string max length from the tail
             float phaseStep = 1.6f * MathF.PI * 2f * dt;            // ~1.6 rev/s
 
-            // --- agent-notifier charms: a SECOND pendulum, anchored at the HOTSPOT (the cursor
-            //     position) not the arrow's tail, so the worm-charms dangle below the pointer on
-            //     EVERY themed cursor — even the ones with no arrow (crosshair, resize, …). Same
-            //     springy string under gravity, in world coords, so the cluster swings and settles. ---
-            float cbx = 0, cby = 0, cvbx = 0, cvby = 0; bool charmInit = false;
-            float charmCX = 0, charmCY = 0, charmDeg = 0; // bob centre (canvas px) + string angle, read by ApplyCharms
-            float charmDrop = sz * 0.46f;             // charms hang lower than the busy ring so they clear the cursor glyph
-            float charmGravity = charmDrop * pendK;   // equilibrium charmDrop below the hotspot
-            float charmMaxLen = sz * 0.62f;           // taut-string max from the hotspot
+            // --- agent-notifier charms: the waiting tools' logos hang on the SAME pendulum as the
+            //     busy ring / help "?" (ringCX/ringCY + helpAngleDeg), in the exact same spot and
+            //     with the exact same swing — see ApplyCharms. No separate physics. ---
 
             // --- crosshair state: a breathing gap + recoil spring + a slowly spinning ring ---
             float tsec = 0;                           // master clock for breathing / ring rotation
@@ -281,16 +275,18 @@ public sealed class CursorEngine : IDisposable
             // The "unavailable" cursor: a red circle-with-slash whose ring wobbles like jelly.
             IntPtr No() { using var b = ProgressRenderer.ComposeNo(_settings, noE, noAng); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
 
-            // Composites the dangling worm-charms onto a finished cursor bitmap when one or more
-            // agents await the user — uniform across every themed cursor. Zero cost when the
-            // feature is off or nothing is waiting (the common case).
+            // Composites the waiting tools' logos onto a finished cursor bitmap when one or more
+            // agents await the user — uniform across every themed cursor. They hang on the busy
+            // ring / help "?" pendulum (ringCX/ringCY) and tilt with it: helpAngleDeg is 180 at rest
+            // (its "?" hangs upside-down), so swinging the logo by helpAngleDeg-180 leaves it upright
+            // at rest and tilting by the same amount as the "?". Zero cost when off / nothing waiting.
             void ApplyCharms(Bitmap bmp)
             {
                 var tools = _waitingTools;
                 if (tools.Length == 0 || !_settings.AgentNotifierEnabled) return;
                 using var g = Graphics.FromImage(bmp);
-                NotifierRenderer.DrawCharms(g, _settings, tools, l.HotX, l.HotY,
-                                            charmCX, charmCY, charmDeg, _settings.AgentNotifierCap);
+                NotifierRenderer.DrawCharms(g, _settings, tools, ringCX, ringCY,
+                                            helpAngleDeg - 180f, _settings.AgentNotifierCap);
             }
 
             // The pointer (arrow/hand) rendered live for the click-pop and/or with the dangling
@@ -391,29 +387,6 @@ public sealed class CursorEngine : IDisposable
                     // string angle (anchor -> bob); +90 so the "?" hangs upside-down at rest
                     // (straight-down string) and tilts as the bob swings to the sides.
                     helpAngleDeg = (float)(Math.Atan2(by - ay, bx - ax) * 180.0 / Math.PI) + 90f;
-                }
-
-                // agent charms: the same pendulum, anchored at the hotspot (cursor pos) so the
-                // worm cluster hangs below the pointer on every cursor kind. charmDeg is the sway
-                // (0 = straight down, worms upright) read by ApplyCharms via NotifierRenderer.
-                {
-                    float ax = p.x, ay = p.y;
-                    if (!charmInit) { cbx = ax; cby = ay + charmDrop; cvbx = cvby = 0; charmInit = true; }
-                    cvbx += ((ax - cbx) * pendK - cvbx * pendC) * dt;
-                    cvby += ((ay - cby) * pendK + charmGravity - cvby * pendC) * dt;
-                    cbx += cvbx * dt; cby += cvby * dt;
-                    float csx = cbx - ax, csy = cby - ay;
-                    float clen = MathF.Sqrt(csx * csx + csy * csy);
-                    if (clen > charmMaxLen)
-                    {
-                        float nx = csx / clen, ny = csy / clen;
-                        cbx = ax + nx * charmMaxLen; cby = ay + ny * charmMaxLen;
-                        float vd = cvbx * nx + cvby * ny;
-                        if (vd > 0) { cvbx -= vd * nx; cvby -= vd * ny; }
-                    }
-                    charmCX = Math.Clamp(l.HotX + (cbx - p.x), 0, l.Canvas);
-                    charmCY = Math.Clamp(l.HotY + (cby - p.y), 0, l.Canvas);
-                    charmDeg = (float)(Math.Atan2(cby - ay, cbx - ax) * 180.0 / Math.PI) - 90f;
                 }
 
                 // crosshair: advance the clock (breathing + ring spin) and the recoil

@@ -1,9 +1,10 @@
 # Agent Notifier — design
 
 > Feature branch: `feat/agent-notifier`. Status: MVP built (pipe + `hook` verb, `AgentActivity`,
-> dangling per-tool **logo** charms — Claude Code / Codex — that hang and swing below the cursor,
-> register/unregister/status UI + a live preview). Not yet live-tested against a real agent
-> session, and per-event pulses (turn-complete pop / error tint) are still TODO.
+> per-tool **logo** charms — Claude Code / Codex — that hang on the same pendulum as the busy ring /
+> help "?" (same spot, same swing), register/unregister/status UI + a live preview). Not yet
+> live-tested against a real agent session; per-agent free (non-overlapping) physics for multiples
+> and per-event pulses (turn-complete pop / error tint) are still TODO.
 
 ## What & why
 
@@ -107,27 +108,30 @@ A thread-safe tracker of which agent sessions currently **need the user**.
 `engine.SetWaitingCount(n)` and forwards pulses. On engine restart the tray re-pushes the
 current count.
 
-### 4. Rendering — dangling logo charms (Core)
+### 4. Rendering — bare logo charms on the ring/help pendulum (Core)
 
-`NotifierRenderer.DrawCharms(g, settings, tools, anchorX, anchorY, bobX, bobY, stringDeg, cap)`:
-draws one charm per waiting agent — a small rounded **tile bearing that tool's own logo** (so you
-can tell *which* tool needs you) — hanging from the pendulum bob, fanned on short sub-strings, with
-a visible thread from the cursor hotspot down to the hub so it reads as genuinely suspended. The
-tools list (one tool id per waiting agent) comes from `AgentActivity.WaitingTools`. Count encoding:
-one tile per agent up to `cap` (~3 visible); beyond the cap, a round **count badge** on the last
-tile's corner shows the true total (drawing "+N" below would fall off the cursor's small canvas).
+`NotifierRenderer.DrawCharms(g, settings, tools, bobX, bobY, swingDeg, cap)`: draws each waiting
+tool's **bare logo** (no tile, no string) centred on the bob and tilted by `swingDeg`. The key
+decision: it hangs on the **exact same pendulum and at the exact same spot as the busy ring / help
+"?"**, with the exact same swing — as if the logo were simply painted onto those elements, an extra
+thing hanging there. The tools list (one tool id per waiting agent) comes from
+`AgentActivity.WaitingTools`. Count encoding: one logo per agent up to `cap`; beyond it a small
+frameless "+N". Multiple agents currently fan from the same bob and share its swing; giving each its
+own free, non-overlapping pendulum is a planned follow-up.
 
 Logos are baked from each tool's SVG into vector geometry by `SvgPath` (a tiny path-data parser,
 mirroring `HandShape`) and held by `AgentLogos` (`claude-code` → the orange pixel critter,
-`codex` → the OpenAI knot); they scale crisply to any cursor size. Unknown/future tools fall back
-to a filled dot. Per-event accents (`turn_complete` pop, `error` red) remain TODO.
+`codex` → the OpenAI knot); they scale crisply to any cursor size and get a thin auto-contrast rim
+(light vs. dark brand colour) so a bare logo still reads on any background — the same
+outline-under/fill-over trick the rest of the cursor set uses. Unknown/future tools fall back to a
+dot. Per-event accents (`turn_complete` pop, `error` red) remain TODO.
 
 Engine integration (`CursorEngine`):
 - add `volatile string[] _waitingTools` + `SetWaitingAgents(IReadOnlyList<string>)` (mirrors the
   `_ibeamKick` pattern) — one tool id per waiting agent, so each charm knows its logo.
-- a **second pendulum** anchored at the hotspot (distinct from the busy ring's tail anchor so the
-  charms coexist with the ring on the busy cursor), hanging lower (`charmDrop ≈ 0.46·sz`) so the
-  cluster clears the cursor glyph and reads as hanging *below* it.
+- **no separate physics**: `ApplyCharms` reuses the busy-ring/help bob (`ringCX/ringCY`) and its
+  angle, drawing the logos with `swingDeg = helpAngleDeg - 180` (helpAngleDeg is 180 at rest — its
+  "?" hangs upside-down — so the logo is upright at rest and tilts by the same amount as the "?").
 - a single `ApplyCharms(Bitmap bmp)` helper composites the charms onto each cursor bitmap right
   before `MakeCursor`, gated on `_waitingTools.Length > 0` — uniform across all kinds.
 - **Arrow path**: when agents wait, route the arrow through the live-render branch each `fgRender`
