@@ -74,16 +74,20 @@ One JSON object per line:
   "sessionId": "abc123", "project": "/abs/path", "message": "Permission needed", "ts": "ISO-8601" }
 ```
 
-`event` ∈ `thinking_started | awaiting_user | turn_complete | tool_use | error`.
+`event` ∈ `thinking_started | awaiting_user | turn_complete | tool_use | error | session_end`.
 Per-tool mapping (verified against live docs):
 
 | normalised        | Claude Code                                   | Codex                 | Cursor                |
 |-------------------|-----------------------------------------------|-----------------------|-----------------------|
-| `thinking_started`| `UserPromptSubmit`                            | — (none)              | `sessionStart`/`preToolUse` |
+| `thinking_started`| `UserPromptSubmit` / `SessionStart`           | — (none)              | `sessionStart`/`preToolUse` |
 | `awaiting_user`   | `Notification` (`notification_type` = `permission_prompt`/`idle_prompt`) | — (none) | `beforeShellExecution` |
 | `turn_complete`   | `Stop`                                        | `agent-turn-complete` | `stop`                |
 | `tool_use`        | `PreToolUse`/`PostToolUse`                     | —                     | `preToolUse`/`postToolUse` |
 | `error`           | `StopFailure`/`PostToolUseFailure`            | —                     | `postToolUseFailure`  |
+| `session_end`     | `SessionEnd` (/exit, Ctrl+C, /clear, logout)  | —                     | —                     |
+
+Claude has **no** hook for "user started typing" or window focus, so `SessionEnd` (on exit) and
+`UserPromptSubmit`/`SessionStart` (on return) are the signals that clear a waiting indicator.
 
 Claude Code stdin gives `hook_event_name`, `session_id`, `cwd`, `notification_type`, `message`.
 Codex argv JSON gives `type`, `thread-id`, `cwd`, `last-assistant-message`. Codex has **only**
@@ -96,7 +100,8 @@ A thread-safe tracker of which agent sessions currently **need the user**.
 - key = `tool + ":" + sessionId` (sessionId may be null → key by tool+project).
 - **needs-you set.** Add on `awaiting_user`, `turn_complete`, `error` (agent finished / is
   blocked → ball is in your court). Remove on `thinking_started` and `tool_use` (the agent is
-  actively working again → you must have responded).
+  actively working again → you must have responded). `session_end` drops the session entirely (the
+  agent exited, so there's nothing left to wait on — the logo clears at once, not at the TTL).
 - `WaitingCount` = size of the set. This is the number the cursor shows.
 - **Pulses**: a transient one-shot per event for animation accents — `turn_complete` → a worm
   "pop", `error` → red tint. Exposed as an `event Action<AgentPulse>`.

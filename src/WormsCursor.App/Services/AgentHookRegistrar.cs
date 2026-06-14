@@ -31,9 +31,11 @@ public sealed record HookTool(string Id, string DisplayName, string ConfigPath, 
 public static class AgentHookRegistrar
 {
     // The events we register with Claude Code. We deliberately skip the high-frequency
-    // Pre/PostToolUse (they'd spawn a hook process per tool call); the "waiting" state clears on
-    // the next Stop / UserPromptSubmit instead.
-    static readonly string[] ClaudeEvents = { "UserPromptSubmit", "Notification", "Stop", "StopFailure" };
+    // Pre/PostToolUse (they'd spawn a hook process per tool call). UserPromptSubmit + SessionStart
+    // clear the "waiting" state when you come back; SessionEnd drops the session when you exit, so
+    // its logo doesn't linger until the TTL.
+    static readonly string[] ClaudeEvents =
+        { "UserPromptSubmit", "Notification", "Stop", "StopFailure", "SessionStart", "SessionEnd" };
 
     // Relaxed encoder so the exe-path quotes serialise as \" (not ") and the file stays
     // readable — it's a config a human may open. Still valid JSON.

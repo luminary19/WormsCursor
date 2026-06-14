@@ -14,7 +14,8 @@ public sealed class AgentEventMessage
     /// <summary>Originating tool: <c>claude-code</c>, <c>codex</c>, <c>cursor</c>, …</summary>
     public string Tool { get; set; } = "";
 
-    /// <summary>Normalised event: <c>thinking_started | awaiting_user | turn_complete | tool_use | error</c>.</summary>
+    /// <summary>Normalised event: <c>thinking_started | awaiting_user | turn_complete | tool_use |
+    /// error | session_end</c>.</summary>
     public string Event { get; set; } = "";
 
     /// <summary>The tool's original event name, for logging/debugging (e.g. Claude's <c>Stop</c>).</summary>
@@ -53,6 +54,7 @@ public sealed class AgentEventMessage
             case "turn_complete": kind = AgentEventKind.TurnComplete; return true;
             case "tool_use": kind = AgentEventKind.ToolUse; return true;
             case "error": kind = AgentEventKind.Error; return true;
+            case "session_end": kind = AgentEventKind.SessionEnded; return true;
             default: kind = default; return false;
         }
     }

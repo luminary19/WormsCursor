@@ -17,6 +17,9 @@ public enum AgentEventKind
     ToolUse,
     /// <summary>The turn ended on an error (Claude <c>StopFailure</c>). Sets "needs you", red pulse.</summary>
     Error,
+    /// <summary>The session ended (Claude <c>SessionEnd</c> — /exit, Ctrl+C, /clear, logout). Drops
+    /// the session entirely so its logo disappears at once instead of lingering until the TTL.</summary>
+    SessionEnded,
 }
 
 /// <summary>A one-shot animation accent emitted when a session transitions on a notable event
@@ -32,8 +35,9 @@ public readonly record struct AgentPulse(string Tool, string Key, AgentEventKind
 /// "Needs you" is set by <see cref="AgentEventKind.AwaitingUser"/>, <see cref="AgentEventKind.TurnComplete"/>
 /// and <see cref="AgentEventKind.Error"/> (the agent is blocked or done — your move), and cleared by
 /// <see cref="AgentEventKind.ThinkingStarted"/> / <see cref="AgentEventKind.ToolUse"/> (it's working again,
-/// so you must have responded). Sessions with no event for <see cref="_ttl"/> are swept so a session
-/// that never sends a closing event can't wedge the count.
+/// so you must have responded), and the session is dropped outright by <see cref="AgentEventKind.SessionEnded"/>
+/// (the agent exited). Sessions with no event for <see cref="_ttl"/> are also swept, so one that never
+/// sends a closing event can't wedge the count.
 /// </summary>
 public sealed class AgentActivity
 {
@@ -83,17 +87,24 @@ public sealed class AgentActivity
         {
             SweepLocked(nowUtc);
             before = CountNeedsYou();
-            if (!_sessions.TryGetValue(key, out var e)) { e = new Entry(); _sessions[key] = e; }
-            e.Tool = tool;
-            e.LastUtc = nowUtc;
-            e.NeedsYou = kind switch
+            if (kind == AgentEventKind.SessionEnded)
             {
-                AgentEventKind.AwaitingUser or AgentEventKind.TurnComplete or AgentEventKind.Error => true,
-                _ => false, // ThinkingStarted / ToolUse: the agent is working again
-            };
+                _sessions.Remove(key); // the session is gone — forget it, don't wait on it
+            }
+            else
+            {
+                if (!_sessions.TryGetValue(key, out var e)) { e = new Entry(); _sessions[key] = e; }
+                e.Tool = tool;
+                e.LastUtc = nowUtc;
+                e.NeedsYou = kind switch
+                {
+                    AgentEventKind.AwaitingUser or AgentEventKind.TurnComplete or AgentEventKind.Error => true,
+                    _ => false, // ThinkingStarted / ToolUse: the agent is working again
+                };
+                if (kind is AgentEventKind.TurnComplete or AgentEventKind.Error)
+                    pulse = new AgentPulse(tool, key, kind);
+            }
             after = CountNeedsYou();
-            if (kind is AgentEventKind.TurnComplete or AgentEventKind.Error)
-                pulse = new AgentPulse(tool, key, kind);
         }
         if (pulse is { } p) Pulse?.Invoke(p);
         if (after != before) WaitingCountChanged?.Invoke(after);

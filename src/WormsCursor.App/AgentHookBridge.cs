@@ -110,7 +110,10 @@ static class AgentHookBridge
 
     static string? NormalizeClaude(string? hookEvent, string? notificationType) => hookEvent switch
     {
-        "UserPromptSubmit" => "thinking_started",
+        // You submitted a prompt, or (re)opened the session → you're back, the agent isn't waiting.
+        "UserPromptSubmit" or "SessionStart" => "thinking_started",
+        // The session ended (/exit, Ctrl+C, /clear, logout) → drop it so its logo doesn't linger.
+        "SessionEnd" => "session_end",
         // Only the notifications that mean "the agent is blocked on you" become awaiting_user.
         "Notification" => notificationType is "permission_prompt" or "idle_prompt" or "elicitation_dialog"
             ? "awaiting_user" : null,
