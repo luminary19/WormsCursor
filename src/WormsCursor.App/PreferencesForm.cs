@@ -252,7 +252,7 @@ public sealed class PreferencesForm : Form
         _autostartChk = new CheckBox { Text = "Start with Windows", AutoSize = false, Checked = ReadAutostart() };
         _autostartChk.CheckedChanged += (_, _) => ToggleAutostart();
         _checkTip.SetToolTip(_autostartChk, "Launch WormsCursor automatically when you sign in.");
-        _agentBtn = new Button { Text = "Agent settings…", Size = new Size(150, 28) };
+        _agentBtn = new Button { Text = "Agent settings…", Size = new Size(150, 30) };
         _agentBtn.Click += (_, _) => _openAgentSettings();
         _checkTip.SetToolTip(_agentBtn, "Show an AI agent's logo on the cursor while it waits for you, and register tools.");
 
@@ -333,10 +333,22 @@ public sealed class PreferencesForm : Form
         ly = PlaceSlider(_thickCap, _thickBar, _thickVal, leftX, ly, colW);
         ly = PlaceSlider(_radiusCap, _radiusBar, _radiusVal, leftX, ly, colW);
 
-        // right column — colours + the test combo
+        // Every inline field in the right column (the two colour swatches, the test combo, and the
+        // Showtime button) shares the combo's natural, font-driven height so they line up flush —
+        // the combo is a DropDownList, whose height is fixed by the font, so it sets the bar.
+        int fieldH = _testCombo.PreferredHeight;
+
+        // right column — the two colours share one row as two sub-columns (they're narrow, so
+        // stacking them wasted vertical space), then the feedback toggles + the test combo
         int ry = top;
-        ry = PlaceField(_fillCap, _fillBtn, rightX, ry, colW, 28);
-        ry = PlaceField(_outlineCap, _outlineBtn, rightX, ry, colW, 28);
+        const int swatchGap = 12;
+        int swatchW = (colW - swatchGap) / 2;
+        int outlineX = rightX + swatchW + swatchGap;
+        _fillCap.Location = new Point(rightX, ry);
+        _outlineCap.Location = new Point(outlineX, ry);
+        _fillBtn.SetBounds(rightX, ry + 22, swatchW, fieldH);
+        _outlineBtn.SetBounds(outlineX, ry + 22, swatchW, fieldH);
+        ry += RowH;
 
         // feedback toggles — two rows with extra breathing room above, between and below
         ry += 12;
@@ -345,20 +357,21 @@ public sealed class PreferencesForm : Form
         _ibeamFxChk.SetBounds(rightX, ry, colW, 22);
         ry += 40;
 
-        // test row: caption, then the combo and the Showtime button sharing the column width
+        // test row: caption, then the combo and the Showtime button sharing the column width at the
+        // same height and baseline
         _testCap.Location = new Point(rightX, ry);
         const int stW = 104, stGap = 6;
         int comboW = colW - stW - stGap;
-        _testCombo.SetBounds(rightX, ry + 22, comboW, 24);
-        _showtimeBtn.SetBounds(rightX + comboW + stGap, ry + 20, stW, 27);
+        _testCombo.SetBounds(rightX, ry + 22, comboW, fieldH);
+        _showtimeBtn.SetBounds(rightX + comboW + stGap, ry + 22, stW, fieldH);
         ry += RowH;
 
         // app-level row spanning the full width, below both columns: autostart on the left, the
         // agent-notifications dialog button on the right. Visually separate from the appearance
         // controls because these don't go through the Apply/Cancel working-copy.
         int appY = Math.Max(ly, ry) + 8;
-        _autostartChk.SetBounds(M, appY + 4, 220, 22);
-        _agentBtn.SetBounds(width - M - _agentBtn.Width, appY, _agentBtn.Width, 28);
+        _autostartChk.SetBounds(M, appY + 4, 220, 22); // 22-tall checkbox vertically centred on the 30 row
+        _agentBtn.SetBounds(width - M - _agentBtn.Width, appY, _agentBtn.Width, _agentBtn.Height);
 
         // action buttons — Defaults + Check-for-updates on the left, Apply|OK|Cancel clustered
         // at the right. The wide window leaves a comfortable gap in the middle, so the update
@@ -389,14 +402,6 @@ public sealed class PreferencesForm : Form
         cap.Location = new Point(x, y);
         bar.SetBounds(x, y + 22, colW - valW - 6, 28);
         val.SetBounds(x + colW - valW, y + 27, valW, 18);
-        return y + RowH;
-    }
-
-    // One captioned control filling the column width (colour button / combo).
-    static int PlaceField(Label cap, Control field, int x, int y, int colW, int h)
-    {
-        cap.Location = new Point(x, y);
-        field.SetBounds(x, y + 22, colW, h);
         return y + RowH;
     }
 
