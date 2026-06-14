@@ -240,7 +240,7 @@ public sealed class PreferencesForm : Form
 
         // --- footer: version + the repo link on one line ---
         _version = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "v" + AppVersion() };
-        _updateBtn = new Button { Text = "Check for updates", Size = new Size(140, 26) };
+        _updateBtn = new Button { Text = "Check for updates", Size = new Size(140, 30) };
         _updateBtn.Click += OnCheckUpdates;
         _updateStatus = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = string.Empty };
         _link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor" };
@@ -365,7 +365,7 @@ public sealed class PreferencesForm : Form
         // status text sits right beside its button again.
         int btnY = appY + 40;
         _defaultsBtn.Location = new Point(M, btnY);
-        _updateBtn.Location = new Point(_defaultsBtn.Right + 8, btnY + 2); // 26-tall button centred on the 30-tall row
+        _updateBtn.Location = new Point(_defaultsBtn.Right + 8, btnY); // same 30-tall row as every other button
         _updateStatus.Location = new Point(_updateBtn.Right + 12, btnY + 8);
         _cancelBtn.Location = new Point(width - M - _cancelBtn.Width, btnY);
         _okBtn.Location = new Point(_cancelBtn.Left - 8 - _okBtn.Width, btnY);
