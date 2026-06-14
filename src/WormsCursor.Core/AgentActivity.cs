@@ -37,7 +37,7 @@ public readonly record struct AgentPulse(string Tool, string Key, AgentEventKind
 /// </summary>
 public sealed class AgentActivity
 {
-    sealed class Entry { public bool NeedsYou; public DateTime LastUtc; }
+    sealed class Entry { public bool NeedsYou; public DateTime LastUtc; public string Tool = ""; }
 
     readonly object _gate = new();
     readonly Dictionary<string, Entry> _sessions = new();
@@ -54,6 +54,22 @@ public sealed class AgentActivity
     /// <summary>How many distinct agent sessions currently need the user.</summary>
     public int WaitingCount { get { lock (_gate) return CountNeedsYou(); } }
 
+    /// <summary>The tool id of each session that currently needs the user (one entry per waiting
+    /// agent, e.g. <c>["claude-code", "codex"]</c>) — the engine hangs one logo charm per entry.
+    /// A snapshot taken under the lock, safe to hand to another thread.</summary>
+    public IReadOnlyList<string> WaitingTools
+    {
+        get
+        {
+            lock (_gate)
+            {
+                var list = new List<string>();
+                foreach (var e in _sessions.Values) if (e.NeedsYou) list.Add(e.Tool);
+                return list;
+            }
+        }
+    }
+
     /// <summary>Apply one normalised event for a session. <paramref name="sessionId"/> may be null
     /// (we then key by tool+project). <paramref name="nowUtc"/> is injected so callers/tests stay
     /// deterministic. Safe to call from any thread.</summary>
@@ -68,6 +84,7 @@ public sealed class AgentActivity
             SweepLocked(nowUtc);
             before = CountNeedsYou();
             if (!_sessions.TryGetValue(key, out var e)) { e = new Entry(); _sessions[key] = e; }
+            e.Tool = tool;
             e.LastUtc = nowUtc;
             e.NeedsYou = kind switch
             {

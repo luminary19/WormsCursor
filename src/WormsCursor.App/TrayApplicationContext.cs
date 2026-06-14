@@ -125,7 +125,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     void OnWaitingCountChanged(int count)
     {
-        _engine.SetWaitingCount(count);
+        _engine.SetWaitingAgents(_agents.WaitingTools);
         _tray.Text = count > 0
             ? $"WormsCursor — {count} agent{(count == 1 ? "" : "s")} waiting"
             : "WormsCursor";
@@ -210,9 +210,17 @@ public sealed class TrayApplicationContext : ApplicationContext
     }
 
     // Drives the live cursor for the "Preview on cursor" test in the dialog: a non-null value fakes
-    // that many waiting agents; null ends the preview and restores the real count (so a real agent
-    // event arriving mid-preview, or just closing the dialog, leaves the genuine count on screen).
-    void PreviewWaitingCount(int? testCount) => _engine.SetWaitingCount(testCount ?? _agents.WaitingCount);
+    // that many waiting agents (cycling the supported tools so you see each logo); null ends the
+    // preview and restores the real set (so a real agent event arriving mid-preview, or just closing
+    // the dialog, leaves the genuine charms on screen).
+    static readonly string[] PreviewTools = { "claude-code", "codex" };
+    void PreviewWaitingCount(int? testCount)
+    {
+        if (testCount is not int n) { _engine.SetWaitingAgents(_agents.WaitingTools); return; }
+        var tools = new string[Math.Max(0, n)];
+        for (int i = 0; i < tools.Length; i++) tools[i] = PreviewTools[i % PreviewTools.Length];
+        _engine.SetWaitingAgents(tools);
+    }
 
     // The engine reads AgentNotifierEnabled / AgentNotifierCap live each tick (see ApplyCharms), so
     // a display change takes effect immediately — no engine restart needed, just persist it.
@@ -270,7 +278,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _engine.Stop();
         if (wasRunning) _engine.Start();
         _enabledItem.Checked = _engine.IsRunning;
-        _engine.SetWaitingCount(_agents.WaitingCount); // a fresh engine starts at 0 — re-push the live count
+        _engine.SetWaitingAgents(_agents.WaitingTools); // a fresh engine starts empty — re-push the live set
         SyncTypingHook(); // ClickFeedback / IbeamFeedback may have been toggled
     }
 

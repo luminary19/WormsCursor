@@ -30,7 +30,7 @@ public sealed class CursorEngine : IDisposable
     Bitmap? _arrowBase;                       // kept for compositing the busy cursor + click-pop scaling
     Bitmap? _handBase;                        // kept for click-pop scaling of the hand
     volatile bool _ibeamKick;                 // a keystroke arrived (set by NudgeIbeam) -> hop the I-beam
-    volatile int _waitingCount;               // how many agents currently await the user (dangling charms)
+    volatile string[] _waitingTools = Array.Empty<string>(); // one tool id per waiting agent (dangling charms)
     volatile TestCursor _test = TestCursor.Off;
     Thread? _thread;
     volatile bool _running;
@@ -51,11 +51,17 @@ public sealed class CursorEngine : IDisposable
     /// actually showing.</summary>
     public void NudgeIbeam() => _ibeamKick = true;
 
-    /// <summary>Set how many agent sessions currently await the user; the loop hangs that many
-    /// charms off the cursor's pendulum (0 = none, cheap pre-rendered frames resume). Thread-safe;
-    /// just stores a volatile, consumed on the next tick. Survives nothing — the tray re-pushes the
-    /// current count after an engine restart.</summary>
-    public void SetWaitingCount(int count) => _waitingCount = Math.Max(0, count);
+    /// <summary>Set which agent sessions currently await the user — one tool id (e.g. "claude-code",
+    /// "codex") per waiting agent. The loop hangs one logo charm per entry off the cursor's pendulum
+    /// (empty = none, cheap pre-rendered frames resume). Thread-safe: copies into a fresh array and
+    /// stores it as a volatile, consumed on the next tick. The tray re-pushes after an engine restart.</summary>
+    public void SetWaitingAgents(IReadOnlyList<string>? tools)
+    {
+        if (tools is null || tools.Count == 0) { _waitingTools = Array.Empty<string>(); return; }
+        var arr = new string[tools.Count];
+        for (int i = 0; i < arr.Length; i++) arr[i] = tools[i];
+        _waitingTools = arr;
+    }
 
     /// <summary>Builds the rotated cursors and starts the background tracking loop.</summary>
     public void Start()
@@ -167,6 +173,9 @@ public sealed class CursorEngine : IDisposable
             //     springy string under gravity, in world coords, so the cluster swings and settles. ---
             float cbx = 0, cby = 0, cvbx = 0, cvby = 0; bool charmInit = false;
             float charmCX = 0, charmCY = 0, charmDeg = 0; // bob centre (canvas px) + string angle, read by ApplyCharms
+            float charmDrop = sz * 0.46f;             // charms hang lower than the busy ring so they clear the cursor glyph
+            float charmGravity = charmDrop * pendK;   // equilibrium charmDrop below the hotspot
+            float charmMaxLen = sz * 0.62f;           // taut-string max from the hotspot
 
             // --- crosshair state: a breathing gap + recoil spring + a slowly spinning ring ---
             float tsec = 0;                           // master clock for breathing / ring rotation
@@ -277,10 +286,11 @@ public sealed class CursorEngine : IDisposable
             // feature is off or nothing is waiting (the common case).
             void ApplyCharms(Bitmap bmp)
             {
-                int waiting = _waitingCount;
-                if (waiting <= 0 || !_settings.AgentNotifierEnabled) return;
+                var tools = _waitingTools;
+                if (tools.Length == 0 || !_settings.AgentNotifierEnabled) return;
                 using var g = Graphics.FromImage(bmp);
-                NotifierRenderer.DrawCharms(g, _settings, waiting, charmCX, charmCY, charmDeg, _settings.AgentNotifierCap);
+                NotifierRenderer.DrawCharms(g, _settings, tools, l.HotX, l.HotY,
+                                            charmCX, charmCY, charmDeg, _settings.AgentNotifierCap);
             }
 
             // The pointer (arrow/hand) rendered live for the click-pop and/or with the dangling
@@ -388,16 +398,16 @@ public sealed class CursorEngine : IDisposable
                 // (0 = straight down, worms upright) read by ApplyCharms via NotifierRenderer.
                 {
                     float ax = p.x, ay = p.y;
-                    if (!charmInit) { cbx = ax; cby = ay + restDrop; cvbx = cvby = 0; charmInit = true; }
+                    if (!charmInit) { cbx = ax; cby = ay + charmDrop; cvbx = cvby = 0; charmInit = true; }
                     cvbx += ((ax - cbx) * pendK - cvbx * pendC) * dt;
-                    cvby += ((ay - cby) * pendK + gravity - cvby * pendC) * dt;
+                    cvby += ((ay - cby) * pendK + charmGravity - cvby * pendC) * dt;
                     cbx += cvbx * dt; cby += cvby * dt;
                     float csx = cbx - ax, csy = cby - ay;
                     float clen = MathF.Sqrt(csx * csx + csy * csy);
-                    if (clen > maxLen)
+                    if (clen > charmMaxLen)
                     {
                         float nx = csx / clen, ny = csy / clen;
-                        cbx = ax + nx * maxLen; cby = ay + ny * maxLen;
+                        cbx = ax + nx * charmMaxLen; cby = ay + ny * charmMaxLen;
                         float vd = cvbx * nx + cvby * ny;
                         if (vd > 0) { cvbx -= vd * nx; cvby -= vd * ny; }
                     }
@@ -487,7 +497,7 @@ public sealed class CursorEngine : IDisposable
                     // render the pointer live (~60fps): scaled-about-hotspot for the pop, and/or with
                     // the worm-charms (which swing, so re-render every frame). Otherwise fall back to
                     // the crisp pre-rendered direction frames — zero cost on an idle tray.
-                    bool charmsActive = _settings.AgentNotifierEnabled && _waitingCount > 0;
+                    bool charmsActive = _settings.AgentNotifierEnabled && _waitingTools.Length > 0;
                     bool popActive = clickFx && (btnDown || MathF.Abs(popScale - 1f) > 0.004f || MathF.Abs(vPop) > 0.02f);
                     if (popActive || charmsActive)
                     {

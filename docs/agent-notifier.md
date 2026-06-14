@@ -1,9 +1,9 @@
 # Agent Notifier — design
 
 > Feature branch: `feat/agent-notifier`. Status: MVP built (pipe + `hook` verb, `AgentActivity`,
-> dangling worm-charms, register/unregister/status UI for Claude Code + Codex). Not yet
-> live-tested against a real agent session, and per-event pulses (turn-complete pop / error tint)
-> are still TODO.
+> dangling per-tool **logo** charms — Claude Code / Codex — that hang and swing below the cursor,
+> register/unregister/status UI + a live preview). Not yet live-tested against a real agent
+> session, and per-event pulses (turn-complete pop / error tint) are still TODO.
 
 ## What & why
 
@@ -107,26 +107,32 @@ A thread-safe tracker of which agent sessions currently **need the user**.
 `engine.SetWaitingCount(n)` and forwards pulses. On engine restart the tray re-pushes the
 current count.
 
-### 4. Rendering — dangling worm-charms (Core)
+### 4. Rendering — dangling logo charms (Core)
 
-New `NotifierRenderer.ComposeCharms(g, layout, settings, count, bobX, bobY, stringDeg, accent)`:
-draws up to N little worm-bob charms hanging at the pendulum bob, fanned on short sub-strings,
-swinging with `stringDeg`. Count encoding: 1 charm per waiting agent up to a cap (~3 visible);
-beyond the cap a small numeral on the lowest bob ("3+"). Reuses the fill/outline style, the
-`No`-cursor red for the `error` accent, and a pop spring (same shape as click-pop) for the
-`turn_complete` accent.
+`NotifierRenderer.DrawCharms(g, settings, tools, anchorX, anchorY, bobX, bobY, stringDeg, cap)`:
+draws one charm per waiting agent — a small rounded **tile bearing that tool's own logo** (so you
+can tell *which* tool needs you) — hanging from the pendulum bob, fanned on short sub-strings, with
+a visible thread from the cursor hotspot down to the hub so it reads as genuinely suspended. The
+tools list (one tool id per waiting agent) comes from `AgentActivity.WaitingTools`. Count encoding:
+one tile per agent up to `cap` (~3 visible); beyond the cap, a round **count badge** on the last
+tile's corner shows the true total (drawing "+N" below would fall off the cursor's small canvas).
+
+Logos are baked from each tool's SVG into vector geometry by `SvgPath` (a tiny path-data parser,
+mirroring `HandShape`) and held by `AgentLogos` (`claude-code` → the orange pixel critter,
+`codex` → the OpenAI knot); they scale crisply to any cursor size. Unknown/future tools fall back
+to a filled dot. Per-event accents (`turn_complete` pop, `error` red) remain TODO.
 
 Engine integration (`CursorEngine`):
-- add `volatile int _waitingCount` + `SetWaitingCount(int)` (mirrors the `_ibeamKick` pattern)
-  and a small pulse queue.
-- a second pendulum bob (or reuse `ringCX/ringCY/helpAngleDeg`) so the charms coexist with the
-  busy ring on the busy cursor.
+- add `volatile string[] _waitingTools` + `SetWaitingAgents(IReadOnlyList<string>)` (mirrors the
+  `_ibeamKick` pattern) — one tool id per waiting agent, so each charm knows its logo.
+- a **second pendulum** anchored at the hotspot (distinct from the busy ring's tail anchor so the
+  charms coexist with the ring on the busy cursor), hanging lower (`charmDrop ≈ 0.46·sz`) so the
+  cluster clears the cursor glyph and reads as hanging *below* it.
 - a single `ApplyCharms(Bitmap bmp)` helper composites the charms onto each cursor bitmap right
-  before `MakeCursor`, gated on `_waitingCount > 0` — uniform across all kinds.
-- **Arrow path**: when `_waitingCount > 0`, route the arrow through the live-render branch each
-  `fgRender` tick (the existing `popActive` branch, generalised) instead of the cheap
-  pre-baked frames; composite charms there. `count == 0` → unchanged cheap frames (idle tray
-  still burns no CPU).
+  before `MakeCursor`, gated on `_waitingTools.Length > 0` — uniform across all kinds.
+- **Arrow path**: when agents wait, route the arrow through the live-render branch each `fgRender`
+  tick (the existing `popActive` branch, generalised) instead of the cheap pre-baked frames;
+  composite charms there. Empty → unchanged cheap frames (idle tray still burns no CPU).
 
 ### 5. Settings / UI
 
