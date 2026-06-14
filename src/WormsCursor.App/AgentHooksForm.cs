@@ -3,9 +3,9 @@ using WormsCursor.App.Services;
 namespace WormsCursor.App;
 
 /// <summary>
-/// The "Agent notifications" settings panel. Two parts: a display section (turn the dangling
-/// worm-charms on/off, choose how many worms before a "+N" tag, and a live preview that fakes
-/// a waiting-agent count on the real cursor), and a per-tool registration list showing whether
+/// The "Agent notifications" settings panel. Two parts: a display section (turn the hanging agent
+/// logos on/off, choose how many logos before a "+N" tag, and a live preview that fakes a
+/// waiting-agent count on the real cursor), and a per-tool registration list showing whether
 /// WormsCursor is hooked into each AI tool, with Register / Unregister.
 /// Registration edits the tool's own config (backed up first); status is re-read after each action.
 /// Display changes are pushed straight to the live engine via <paramref name="applyDisplay"/>;
@@ -43,7 +43,7 @@ public sealed class AgentHooksForm : Form
             AutoSize = false,
             Location = new Point(12, 12),
             Size = new Size(512, 36),
-            Text = "When an AI agent is waiting for you, the cursor sprouts a dangling worm per "
+            Text = "When an AI agent is waiting for you, the cursor hangs that tool's logo — one per "
                  + "waiting agent. Register the tools below so they tell WormsCursor what they're doing.",
         };
         Controls.Add(intro);
@@ -54,7 +54,7 @@ public sealed class AgentHooksForm : Form
             AutoSize = false,
             Location = new Point(12, 56),
             Size = new Size(400, 22),
-            Text = "Show dangling worm-charms while agents are waiting",
+            Text = "Show agent logos on the cursor while agents are waiting",
             Checked = charmsEnabled,
         };
         _enabledChk.CheckedChanged += (_, _) => Apply();
@@ -66,7 +66,7 @@ public sealed class AgentHooksForm : Form
             Location = new Point(30, 82),
             Size = new Size(210, 22),
             TextAlign = ContentAlignment.MiddleLeft,
-            Text = "Worms shown before a “+N” tag:",
+            Text = "Logos shown before a “+N” tag:",
         };
         Controls.Add(capLabel);
         _capNum = new NumericUpDown
@@ -80,9 +80,9 @@ public sealed class AgentHooksForm : Form
         _capNum.ValueChanged += (_, _) => Apply();
         Controls.Add(_capNum);
 
-        // Live preview: fake a waiting-agent count on the real cursor so you can see the worms
+        // Live preview: fake a waiting-agent count on the real cursor so you can see the logos
         // (and the "+N" tag) without wiring up an actual agent. "Clear" ends it; closing the
-        // dialog ends it too, so a test never leaves phantom worms stuck on the cursor.
+        // dialog ends it too, so a test never leaves phantom logos stuck on the cursor.
         var previewLabel = new Label
         {
             AutoSize = false,
@@ -105,7 +105,7 @@ public sealed class AgentHooksForm : Form
         {
             Location = new Point(240, 107),
             Size = new Size(110, 26),
-            Text = "Show worms",
+            Text = "Show logos",
         };
         _previewShow.Click += (_, _) => ShowPreview();
         Controls.Add(_previewShow);

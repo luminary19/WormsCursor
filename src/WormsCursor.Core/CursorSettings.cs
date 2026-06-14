@@ -41,12 +41,12 @@ public sealed class CursorSettings
 
     // ---------- agent notifier (preferences UI) ----------
 
-    /// <summary>Show dangling worm-charms on the cursor while AI agents are waiting for the user
-    /// (one worm per waiting agent). On by default; the indicator only appears once a hook is
+    /// <summary>Show the waiting tools' logos on the cursor while AI agents are waiting for the user
+    /// (one logo per waiting agent). On by default; the indicator only appears once a hook is
     /// registered and an agent reports an event.</summary>
     public bool AgentNotifierEnabled { get; set; } = true;
 
-    /// <summary>How many worm-charms to draw before the count switches to a "+N" tag (1–6).</summary>
+    /// <summary>How many agent logos to draw before the count switches to a "+N" tag (1–6).</summary>
     public int AgentNotifierCap { get; set; } = 3;
 
     // ---------- which cursors are themed (preferences UI) ----------

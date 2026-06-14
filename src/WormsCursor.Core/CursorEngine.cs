@@ -289,10 +289,10 @@ public sealed class CursorEngine : IDisposable
                                             helpAngleDeg - 180f, _settings.AgentNotifierCap);
             }
 
-            // The pointer (arrow/hand) rendered live for the click-pop and/or with the dangling
-            // charms. Without charms it returns the arrow-sized scaled frame (unchanged pop
-            // behaviour); with charms it draws onto the full 2x canvas so the worms have room to
-            // hang below the tip, hotspot still at the canvas centre.
+            // The pointer (arrow/hand) rendered live for the click-pop and/or with the hanging
+            // agent logos. Without charms it returns the arrow-sized scaled frame (unchanged pop
+            // behaviour); with charms it draws onto the full 2x canvas so the logos have room to
+            // hang off the tail, hotspot still at the canvas centre.
             IntPtr PointerLive(Bitmap baseBmp, double baseAngleDeg, double deg, float scale, bool withCharms)
             {
                 if (!withCharms) return RotatedScaled(baseBmp, baseAngleDeg, deg, scale);
@@ -466,9 +466,9 @@ public sealed class CursorEngine : IDisposable
 
                 if (test == TestCursor.Off)
                 {
-                    // While the click pop is in flight OR agents are waiting (dangling charms),
+                    // While the click pop is in flight OR agents are waiting (hanging logos),
                     // render the pointer live (~60fps): scaled-about-hotspot for the pop, and/or with
-                    // the worm-charms (which swing, so re-render every frame). Otherwise fall back to
+                    // the agent logos (which swing, so re-render every frame). Otherwise fall back to
                     // the crisp pre-rendered direction frames — zero cost on an idle tray.
                     bool charmsActive = _settings.AgentNotifierEnabled && _waitingTools.Length > 0;
                     bool popActive = clickFx && (btnDown || MathF.Abs(popScale - 1f) > 0.004f || MathF.Abs(vPop) > 0.02f);

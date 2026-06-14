@@ -20,7 +20,7 @@ public enum AgentEventKind
 }
 
 /// <summary>A one-shot animation accent emitted when a session transitions on a notable event
-/// (turn complete → a worm "pop"; error → a red tint). Distinct from the steady waiting count.</summary>
+/// (turn complete → a logo "pop"; error → a red tint). Distinct from the steady waiting count.</summary>
 public readonly record struct AgentPulse(string Tool, string Key, AgentEventKind Kind);
 
 /// <summary>
