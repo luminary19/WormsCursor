@@ -78,13 +78,24 @@ public sealed class PreferencesForm : Form
     readonly Button _updateBtn;
     readonly Label _updateStatus;
 
+    // App-level controls (not part of the appearance working-copy): autostart commits immediately
+    // to the registry; the agent button opens the notifications dialog the tray used to own.
+    readonly IAutostart _autostart;
+    readonly Action _openAgentSettings;
+    readonly CheckBox _autostartChk;
+    readonly Button _agentBtn;
+    bool _suppressAutostart; // guards the revert-on-failure write so it doesn't re-enter the handler
+
     public PreferencesForm(CursorSettings working, UpdateService updates,
-                           Action<TestCursor> setTestCursor, Action<CursorSettings> applyLive)
+                           Action<TestCursor> setTestCursor, Action<CursorSettings> applyLive,
+                           IAutostart autostart, Action openAgentSettings)
     {
         _working = working;
         _updates = updates;
         _setTest = setTestCursor;
         _apply = applyLive;
+        _autostart = autostart;
+        _openAgentSettings = openAgentSettings;
 
         // Auto-rescale the whole dialog when it crosses to a monitor with a different scale
         // (the process is PerMonitorV2, but WinForms only auto-scales a form on a DPI change
@@ -237,11 +248,20 @@ public sealed class PreferencesForm : Form
         _whatsNew = new LinkLabel { AutoSize = true, Text = "What's new" };
         _whatsNew.LinkClicked += (_, _) => { using var dlg = new ChangelogForm(_updates); dlg.ShowDialog(this); };
 
+        // --- app-level row: autostart (immediate) + the agent-notifications dialog ---
+        _autostartChk = new CheckBox { Text = "Start with Windows", AutoSize = false, Checked = ReadAutostart() };
+        _autostartChk.CheckedChanged += (_, _) => ToggleAutostart();
+        _checkTip.SetToolTip(_autostartChk, "Launch WormsCursor automatically when you sign in.");
+        _agentBtn = new Button { Text = "Agent settings…", Size = new Size(150, 28) };
+        _agentBtn.Click += (_, _) => _openAgentSettings();
+        _checkTip.SetToolTip(_agentBtn, "Show an AI agent's logo on the cursor while it waits for you, and register tools.");
+
         foreach (Control c in new Control[]
         {
             _tip,
             _sizeCap, _sizeBar, _sizeVal, _thickCap, _thickBar, _thickVal, _radiusCap, _radiusBar, _radiusVal,
             _fillCap, _fillBtn, _outlineCap, _outlineBtn, _clickFxChk, _ibeamFxChk, _testCap, _testCombo, _showtimeBtn,
+            _autostartChk, _agentBtn,
             _defaultsBtn, _applyBtn, _okBtn, _cancelBtn,
             _version, _updateBtn, _updateStatus, _link, _whatsNew,
         })
@@ -333,10 +353,17 @@ public sealed class PreferencesForm : Form
         _showtimeBtn.SetBounds(rightX + comboW + stGap, ry + 20, stW, 27);
         ry += RowH;
 
+        // app-level row spanning the full width, below both columns: autostart on the left, the
+        // agent-notifications dialog button on the right. Visually separate from the appearance
+        // controls because these don't go through the Apply/Cancel working-copy.
+        int appY = Math.Max(ly, ry) + 8;
+        _autostartChk.SetBounds(M, appY + 4, 220, 22);
+        _agentBtn.SetBounds(width - M - _agentBtn.Width, appY, _agentBtn.Width, 28);
+
         // action buttons — Defaults + Check-for-updates on the left, Apply|OK|Cancel clustered
         // at the right. The wide window leaves a comfortable gap in the middle, so the update
         // status text sits right beside its button again.
-        int btnY = Math.Max(ly, ry) + 6;
+        int btnY = appY + 40;
         _defaultsBtn.Location = new Point(M, btnY);
         _updateBtn.Location = new Point(_defaultsBtn.Right + 8, btnY + 2); // 26-tall button centred on the 30-tall row
         _updateStatus.Location = new Point(_updateBtn.Right + 12, btnY + 8);
@@ -747,6 +774,35 @@ public sealed class PreferencesForm : Form
     {
         _updateStatus.Text = text;
         _updateStatus.ForeColor = error ? Color.Firebrick : SystemColors.GrayText;
+    }
+
+    // Reads the current autostart state for the checkbox (best-effort: a registry hiccup just
+    // shows it unticked rather than failing the whole dialog).
+    bool ReadAutostart()
+    {
+        try { return _autostart.IsEnabled; }
+        catch { return false; }
+    }
+
+    // Commits the autostart change to the registry the moment the box is toggled (it's a system
+    // pref, not a cursor-appearance edit, so it doesn't ride Apply/Cancel). On failure we warn and
+    // snap the box back to the real state without re-entering this handler.
+    void ToggleAutostart()
+    {
+        if (_suppressAutostart) return;
+        try
+        {
+            if (_autostartChk.Checked) _autostart.Enable();
+            else _autostart.Disable();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "Couldn't change autostart: " + ex.Message, "WormsCursor",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            _suppressAutostart = true;
+            _autostartChk.Checked = ReadAutostart();
+            _suppressAutostart = false;
+        }
     }
 
     // ---------- small utilities ----------
