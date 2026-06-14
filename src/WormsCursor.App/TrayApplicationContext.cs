@@ -29,6 +29,13 @@ public sealed class TrayApplicationContext : ApplicationContext
     // the UI thread so the low-level hook has a message loop. See SyncTypingHook.
     LowLevelKeyboardHook? _keyHook;
 
+    // Agent notifier: tracks how many agents await the user (fed by the pipe), pushes the count
+    // into the engine, and reflects it in the tray tooltip. The pipe server + sweep timer live
+    // here (not in the engine), so they survive ApplySettings' engine stop/restart.
+    readonly AgentActivity _agents = new();
+    AgentPipeServer? _agentPipe;
+    System.Windows.Forms.Timer? _agentSweep;
+
     public TrayApplicationContext()
     {
         _ = _marshal.Handle; // realise the window handle on the UI thread for BeginInvoke
@@ -54,6 +61,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_startupItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Preferences…", null, OnPreferences);
+        menu.Items.Add("Agent notifications…", null, OnAgentHooks);
         menu.Items.Add(_updatesItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, OnExit);
@@ -83,7 +91,44 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _engine.Start();
         SyncTypingHook();
+        StartAgentNotifier();
         MaybeShowWhatsNew();
+    }
+
+    // Brings up the agent-notifier plumbing: the named-pipe server that `WormsCursor.exe hook`
+    // invocations write to, a periodic sweep that evicts stale sessions, and the wiring that turns
+    // a changed waiting count into an engine update + tray tooltip. Independent of the engine's
+    // lifetime so it keeps listening across ApplySettings restarts.
+    void StartAgentNotifier()
+    {
+        _agents.WaitingCountChanged += OnWaitingCountChanged;
+
+        _agentPipe = new AgentPipeServer(msg =>
+        {
+            // The pipe fires on its own thread; hop to the UI thread so AgentActivity's events
+            // (which touch the tray) stay single-threaded, like every other callback here.
+            if (_marshal.IsHandleCreated)
+                _marshal.BeginInvoke(new Action(() => HandleAgentEvent(msg)));
+        });
+        _agentPipe.Start();
+
+        _agentSweep = new System.Windows.Forms.Timer { Interval = 60_000 };
+        _agentSweep.Tick += (_, _) => _agents.Sweep(DateTime.UtcNow);
+        _agentSweep.Start();
+    }
+
+    void HandleAgentEvent(AgentEventMessage msg)
+    {
+        if (msg.TryGetKind(out var kind))
+            _agents.Report(msg.Tool, msg.SessionId, msg.Project, kind, DateTime.UtcNow);
+    }
+
+    void OnWaitingCountChanged(int count)
+    {
+        _engine.SetWaitingCount(count);
+        _tray.Text = count > 0
+            ? $"WormsCursor — {count} agent{(count == 1 ? "" : "s")} waiting"
+            : "WormsCursor";
     }
 
     // First launch after an update: show the new version's "What's new" notes once. Compares
@@ -152,6 +197,32 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     void OnPreferences(object? sender, EventArgs e) => OpenPreferences();
 
+    void OnAgentHooks(object? sender, EventArgs e) => OpenAgentHooks();
+
+    /// <summary>Shows the "Agent notifications" settings panel (hook registration + charm display).
+    /// Marshals onto the UI thread so it's safe to call from anywhere.</summary>
+    public void OpenAgentHooks()
+    {
+        if (_marshal.InvokeRequired) { _marshal.BeginInvoke(OpenAgentHooks); return; }
+        using var dlg = new AgentHooksForm(
+            _settings.AgentNotifierEnabled, _settings.AgentNotifierCap, ApplyAgentDisplay, PreviewWaitingCount);
+        dlg.ShowDialog();
+    }
+
+    // Drives the live cursor for the "Preview on cursor" test in the dialog: a non-null value fakes
+    // that many waiting agents; null ends the preview and restores the real count (so a real agent
+    // event arriving mid-preview, or just closing the dialog, leaves the genuine count on screen).
+    void PreviewWaitingCount(int? testCount) => _engine.SetWaitingCount(testCount ?? _agents.WaitingCount);
+
+    // The engine reads AgentNotifierEnabled / AgentNotifierCap live each tick (see ApplyCharms), so
+    // a display change takes effect immediately — no engine restart needed, just persist it.
+    void ApplyAgentDisplay(bool enabled, int cap)
+    {
+        _settings.AgentNotifierEnabled = enabled;
+        _settings.AgentNotifierCap = Math.Clamp(cap, 1, 6);
+        SettingsStore.Save(_settings);
+    }
+
     /// <summary>
     /// Shows the Preferences dialog and applies any changes. Safe to call from a
     /// background thread (e.g. the single-instance signal handler): it marshals onto
@@ -199,6 +270,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _engine.Stop();
         if (wasRunning) _engine.Start();
         _enabledItem.Checked = _engine.IsRunning;
+        _engine.SetWaitingCount(_agents.WaitingCount); // a fresh engine starts at 0 — re-push the live count
         SyncTypingHook(); // ClickFeedback / IbeamFeedback may have been toggled
     }
 
@@ -261,6 +333,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     void OnExit(object? sender, EventArgs e)
     {
         _tray.Visible = false;
+        _agentSweep?.Dispose();
+        _agentPipe?.Dispose();
         _keyHook?.Dispose();
         _engine.Dispose();
         ExitThread();
@@ -280,6 +354,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         if (disposing)
         {
+            _agentSweep?.Dispose();
+            _agentPipe?.Dispose();
             _keyHook?.Dispose();
             _tray.Dispose();
             _engine.Dispose();

@@ -30,6 +30,7 @@ public sealed class CursorEngine : IDisposable
     Bitmap? _arrowBase;                       // kept for compositing the busy cursor + click-pop scaling
     Bitmap? _handBase;                        // kept for click-pop scaling of the hand
     volatile bool _ibeamKick;                 // a keystroke arrived (set by NudgeIbeam) -> hop the I-beam
+    volatile int _waitingCount;               // how many agents currently await the user (dangling charms)
     volatile TestCursor _test = TestCursor.Off;
     Thread? _thread;
     volatile bool _running;
@@ -49,6 +50,12 @@ public sealed class CursorEngine : IDisposable
     /// consumed on the next loop tick. No-op unless click feedback is on and an I-beam is
     /// actually showing.</summary>
     public void NudgeIbeam() => _ibeamKick = true;
+
+    /// <summary>Set how many agent sessions currently await the user; the loop hangs that many
+    /// charms off the cursor's pendulum (0 = none, cheap pre-rendered frames resume). Thread-safe;
+    /// just stores a volatile, consumed on the next tick. Survives nothing — the tray re-pushes the
+    /// current count after an engine restart.</summary>
+    public void SetWaitingCount(int count) => _waitingCount = Math.Max(0, count);
 
     /// <summary>Builds the rotated cursors and starts the background tracking loop.</summary>
     public void Start()
@@ -154,6 +161,13 @@ public sealed class CursorEngine : IDisposable
             float maxLen = sz * 0.42f;                // taut-string max length from the tail
             float phaseStep = 1.6f * MathF.PI * 2f * dt;            // ~1.6 rev/s
 
+            // --- agent-notifier charms: a SECOND pendulum, anchored at the HOTSPOT (the cursor
+            //     position) not the arrow's tail, so the worm-charms dangle below the pointer on
+            //     EVERY themed cursor — even the ones with no arrow (crosshair, resize, …). Same
+            //     springy string under gravity, in world coords, so the cluster swings and settles. ---
+            float cbx = 0, cby = 0, cvbx = 0, cvby = 0; bool charmInit = false;
+            float charmCX = 0, charmCY = 0, charmDeg = 0; // bob centre (canvas px) + string angle, read by ApplyCharms
+
             // --- crosshair state: a breathing gap + recoil spring + a slowly spinning ring ---
             float tsec = 0;                           // master clock for breathing / ring rotation
             float recoil = 0, vrec = 0;               // extra gap that springs out when moving fast
@@ -213,6 +227,7 @@ public sealed class CursorEngine : IDisposable
                 float rx = withArrow ? ringCX : l.HotX;
                 float ry = withArrow ? ringCY : l.HotY;
                 using var bmp = ProgressRenderer.Compose(_settings, _arrowBase!, deg, rx, ry, phase, withArrow);
+                ApplyCharms(bmp);
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
@@ -222,6 +237,7 @@ public sealed class CursorEngine : IDisposable
             {
                 double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
                 using var bmp = ProgressRenderer.ComposeHelp(_settings, _arrowBase!, deg, ringCX, ringCY, helpAngleDeg);
+                ApplyCharms(bmp);
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
@@ -232,6 +248,7 @@ public sealed class CursorEngine : IDisposable
             IntPtr Cross()
             {
                 using var bmp = ProgressRenderer.ComposeCross(_settings, crossGap, ringDeg);
+                ApplyCharms(bmp);
                 return ScaledCursor(bmp, l.HotX, l.HotY, clickFx ? popScale : 1f);
             }
 
@@ -239,20 +256,56 @@ public sealed class CursorEngine : IDisposable
             IntPtr Ibeam()
             {
                 using var bmp = ProgressRenderer.ComposeIbeam(_settings, ibOffX, ibOffY, hopY, hopX);
+                ApplyCharms(bmp);
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
             // Resize cursors: a taffy double-arrow that necks/stretches along its axis (WE = ↔,
             // NS = ↕, D1 = ↘↖ / SIZENWSE, D2 = ↗↙ / SIZENESW). Move crosses a horizontal +
             // vertical taffy. Hotspot dead centre (the precision point Windows expects).
-            IntPtr ResizeWE() { using var b = ProgressRenderer.ComposeResize(_settings, 0f, rsWE); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr ResizeNS() { using var b = ProgressRenderer.ComposeResize(_settings, 90f, rsNS); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr ResizeD1() { using var b = ProgressRenderer.ComposeResize(_settings, 45f, rsD1); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr ResizeD2() { using var b = ProgressRenderer.ComposeResize(_settings, -45f, rsD2); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr Move() { using var b = ProgressRenderer.ComposeMove(_settings, rsWE, rsNS); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeWE() { using var b = ProgressRenderer.ComposeResize(_settings, 0f, rsWE); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeNS() { using var b = ProgressRenderer.ComposeResize(_settings, 90f, rsNS); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeD1() { using var b = ProgressRenderer.ComposeResize(_settings, 45f, rsD1); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeD2() { using var b = ProgressRenderer.ComposeResize(_settings, -45f, rsD2); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr Move() { using var b = ProgressRenderer.ComposeMove(_settings, rsWE, rsNS); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
 
             // The "unavailable" cursor: a red circle-with-slash whose ring wobbles like jelly.
-            IntPtr No() { using var b = ProgressRenderer.ComposeNo(_settings, noE, noAng); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr No() { using var b = ProgressRenderer.ComposeNo(_settings, noE, noAng); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
+
+            // Composites the dangling worm-charms onto a finished cursor bitmap when one or more
+            // agents await the user — uniform across every themed cursor. Zero cost when the
+            // feature is off or nothing is waiting (the common case).
+            void ApplyCharms(Bitmap bmp)
+            {
+                int waiting = _waitingCount;
+                if (waiting <= 0 || !_settings.AgentNotifierEnabled) return;
+                using var g = Graphics.FromImage(bmp);
+                NotifierRenderer.DrawCharms(g, _settings, waiting, charmCX, charmCY, charmDeg, _settings.AgentNotifierCap);
+            }
+
+            // The pointer (arrow/hand) rendered live for the click-pop and/or with the dangling
+            // charms. Without charms it returns the arrow-sized scaled frame (unchanged pop
+            // behaviour); with charms it draws onto the full 2x canvas so the worms have room to
+            // hang below the tip, hotspot still at the canvas centre.
+            IntPtr PointerLive(Bitmap baseBmp, double baseAngleDeg, double deg, float scale, bool withCharms)
+            {
+                if (!withCharms) return RotatedScaled(baseBmp, baseAngleDeg, deg, scale);
+                using var bmp = new Bitmap(l.Canvas, l.Canvas);
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    int a = baseBmp.Width;
+                    g.TranslateTransform(l.HotX, l.HotY);
+                    g.RotateTransform((float)(deg - baseAngleDeg));
+                    g.ScaleTransform(scale, scale);
+                    g.TranslateTransform(-a / 2f, -a / 2f);
+                    g.DrawImage(baseBmp, 0, 0);
+                }
+                ApplyCharms(bmp);
+                return MakeCursor(bmp, l.HotX, l.HotY);
+            }
 
             while (_running)
             {
@@ -328,6 +381,29 @@ public sealed class CursorEngine : IDisposable
                     // string angle (anchor -> bob); +90 so the "?" hangs upside-down at rest
                     // (straight-down string) and tilts as the bob swings to the sides.
                     helpAngleDeg = (float)(Math.Atan2(by - ay, bx - ax) * 180.0 / Math.PI) + 90f;
+                }
+
+                // agent charms: the same pendulum, anchored at the hotspot (cursor pos) so the
+                // worm cluster hangs below the pointer on every cursor kind. charmDeg is the sway
+                // (0 = straight down, worms upright) read by ApplyCharms via NotifierRenderer.
+                {
+                    float ax = p.x, ay = p.y;
+                    if (!charmInit) { cbx = ax; cby = ay + restDrop; cvbx = cvby = 0; charmInit = true; }
+                    cvbx += ((ax - cbx) * pendK - cvbx * pendC) * dt;
+                    cvby += ((ay - cby) * pendK + gravity - cvby * pendC) * dt;
+                    cbx += cvbx * dt; cby += cvby * dt;
+                    float csx = cbx - ax, csy = cby - ay;
+                    float clen = MathF.Sqrt(csx * csx + csy * csy);
+                    if (clen > maxLen)
+                    {
+                        float nx = csx / clen, ny = csy / clen;
+                        cbx = ax + nx * maxLen; cby = ay + ny * maxLen;
+                        float vd = cvbx * nx + cvby * ny;
+                        if (vd > 0) { cvbx -= vd * nx; cvby -= vd * ny; }
+                    }
+                    charmCX = Math.Clamp(l.HotX + (cbx - p.x), 0, l.Canvas);
+                    charmCY = Math.Clamp(l.HotY + (cby - p.y), 0, l.Canvas);
+                    charmDeg = (float)(Math.Atan2(cby - ay, cbx - ax) * 180.0 / Math.PI) - 90f;
                 }
 
                 // crosshair: advance the clock (breathing + ring spin) and the recoil
@@ -407,25 +483,29 @@ public sealed class CursorEngine : IDisposable
 
                 if (test == TestCursor.Off)
                 {
-                    // While the click pop is in flight, render the pointer scaled-about-hotspot
-                    // from the base bitmaps (~60fps, only when the frame actually changed); once
-                    // it settles, fall back to the crisp pre-rendered frames.
+                    // While the click pop is in flight OR agents are waiting (dangling charms),
+                    // render the pointer live (~60fps): scaled-about-hotspot for the pop, and/or with
+                    // the worm-charms (which swing, so re-render every frame). Otherwise fall back to
+                    // the crisp pre-rendered direction frames — zero cost on an idle tray.
+                    bool charmsActive = _settings.AgentNotifierEnabled && _waitingCount > 0;
                     bool popActive = clickFx && (btnDown || MathF.Abs(popScale - 1f) > 0.004f || MathF.Abs(vPop) > 0.02f);
-                    if (popActive)
+                    if (popActive || charmsActive)
                     {
                         int popScaleQ = (int)MathF.Round(popScale * 200f);
-                        if (fgRender && (idx != lastPopIdx || popScaleQ != lastPopScaleQ))
+                        // Charms must re-render every frame to swing; a bare pop only when it moved.
+                        if (fgRender && (charmsActive || idx != lastPopIdx || popScaleQ != lastPopScaleQ))
                         {
                             lastPopIdx = idx; lastPopScaleQ = popScaleQ;
                             double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
+                            float sc = clickFx ? popScale : 1f;
                             if (onArrow)
                             {
-                                SetSystemCursor(RotatedScaled(_arrowBase!, 0.0, deg, popScale), OCR_NORMAL);
-                                SetSystemCursor(RotatedScaled(_arrowBase!, 0.0, deg, popScale), OCR_UP);
+                                SetSystemCursor(PointerLive(_arrowBase!, 0.0, deg, sc, charmsActive), OCR_NORMAL);
+                                SetSystemCursor(PointerLive(_arrowBase!, 0.0, deg, sc, charmsActive), OCR_UP);
                             }
-                            if (onHand) SetSystemCursor(RotatedScaled(_handBase!, HandShape.BaseAngleDeg, deg, popScale), OCR_HAND);
+                            if (onHand) SetSystemCursor(PointerLive(_handBase!, HandShape.BaseAngleDeg, deg, sc, charmsActive), OCR_HAND);
                         }
-                        curIdx = -1; normalDirty = true; // force a crisp re-apply once the pop ends
+                        curIdx = -1; normalDirty = true; // force a crisp re-apply once pop/charms end
                     }
                     else if (normalDirty || idx != curIdx)
                     {
