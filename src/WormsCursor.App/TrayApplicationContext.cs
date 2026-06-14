@@ -213,7 +213,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     // that many waiting agents (cycling the supported tools so you see each logo); null ends the
     // preview and restores the real set (so a real agent event arriving mid-preview, or just closing
     // the dialog, leaves the genuine charms on screen).
-    static readonly string[] PreviewTools = { "claude-code", "codex" };
+    static readonly string[] PreviewTools = { "claude-code" }; // Codex hidden for now
     void PreviewWaitingCount(int? testCount)
     {
         if (testCount is not int n) { _engine.SetWaitingAgents(_agents.WaitingTools); return; }

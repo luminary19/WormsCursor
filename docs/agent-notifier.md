@@ -125,20 +125,26 @@ frameless "+N". Multiple agents currently fan from the same bob and share its sw
 own free, non-overlapping pendulum is a planned follow-up.
 
 Logos are baked from each tool's SVG into vector geometry by `SvgPath` (a tiny path-data parser,
-mirroring `HandShape`) and held by `AgentLogos` (`claude-code` → the orange pixel critter,
-`codex` → the OpenAI knot); they scale crisply to any cursor size and get a thin auto-contrast rim
-(light vs. dark brand colour) so a bare logo still reads on any background — the same
-outline-under/fill-over trick the rest of the cursor set uses. Unknown/future tools fall back to a
-dot. Per-event accents (`turn_complete` pop, `error` red) remain TODO.
+mirroring `HandShape`) and held by `AgentLogos` (`claude-code` → the orange pixel critter; the
+Codex/OpenAI knot is baked but hidden from the UI until it can be tested); they scale crisply to any
+cursor size and get a thin auto-contrast rim (light vs. dark brand colour) so a bare logo still
+reads on any background — the same outline-under/fill-over trick the rest of the cursor set uses.
+Unknown/future tools fall back to a dot. Per-event accents (`turn_complete` pop, `error` red) remain
+TODO.
 
 Engine integration (`CursorEngine`):
 - add `volatile string[] _waitingTools` + `SetWaitingAgents(IReadOnlyList<string>)` (mirrors the
   `_ibeamKick` pattern) — one tool id per waiting agent, so each charm knows its logo.
-- **no separate physics**: `ApplyCharms` reuses the busy-ring/help bob (`ringCX/ringCY`) and its
-  angle, drawing the logos with `swingDeg = helpAngleDeg - 180` (helpAngleDeg is 180 at rest — its
-  "?" hangs upside-down — so the logo is upright at rest and tilts by the same amount as the "?").
-- a single `ApplyCharms(Bitmap bmp)` helper composites the charms onto each cursor bitmap right
-  before `MakeCursor`, gated on `_waitingTools.Length > 0` — uniform across all kinds.
+- **two anchors, by cursor kind** (same world-space spring, different pivot):
+  - `CharmsTail` — the **arrow & hand rotate** to follow movement, so their logo hangs off the
+    *tail* (`ringCX/ringCY`, `swingDeg = helpAngleDeg - 180`) exactly like the "?". Used by the
+    arrow live-render path, the hand, the help cursor, and the app-starting (with-arrow) spinner.
+  - `CharmsBelow` — the cursors that **don't rotate** (I-beam, crosshair, resize, move, unavailable,
+    the no-arrow wait spinner) hang the logo straight *below the hotspot* on a second hotspot-anchored
+    pendulum (`belowCX/belowCY`, `belowDrop ≈ 0.42·sz`), so it never appears to orbit them — it just
+    hangs under and swings as the cursor translates.
+- `ApplyCharms(bmp, bobX, bobY, swingDeg)` composites the logos right before `MakeCursor`, gated on
+  `_waitingTools.Length > 0` — uniform across all kinds, only the anchor differs.
 - **Arrow path**: when agents wait, route the arrow through the live-render branch each `fgRender`
   tick (the existing `popActive` branch, generalised) instead of the cheap pre-baked frames;
   composite charms there. Empty → unchanged cheap frames (idle tray still burns no CPU).

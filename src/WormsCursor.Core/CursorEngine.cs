@@ -167,9 +167,18 @@ public sealed class CursorEngine : IDisposable
             float maxLen = sz * 0.42f;                // taut-string max length from the tail
             float phaseStep = 1.6f * MathF.PI * 2f * dt;            // ~1.6 rev/s
 
-            // --- agent-notifier charms: the waiting tools' logos hang on the SAME pendulum as the
-            //     busy ring / help "?" (ringCX/ringCY + helpAngleDeg), in the exact same spot and
-            //     with the exact same swing — see ApplyCharms. No separate physics. ---
+            // --- agent-notifier charms: the waiting tools' logos hang on a pendulum, same world-space
+            //     spring physics as the busy ring / help "?". The ANCHOR differs by cursor kind:
+            //     the arrow & hand rotate to follow movement, so their logo hangs off the tail
+            //     (ringCX/ringCY + helpAngleDeg) exactly like the "?"; the cursors that DON'T rotate
+            //     (I-beam, crosshair, resize, move, unavailable, the no-arrow wait spinner) instead
+            //     hang it straight BELOW the hotspot (belowCX/belowCY) so it doesn't appear to orbit
+            //     them. Both are read by ApplyCharms. ---
+            float lbx = 0, lby = 0, lvbx = 0, lvby = 0; bool belowInit = false;
+            float belowCX = 0, belowCY = 0, belowDeg = 0; // hotspot-anchored bob (canvas px) + swing
+            float belowDrop = sz * 0.42f;             // hangs below the hotspot, clear of the glyph
+            float belowGravity = belowDrop * pendK;
+            float belowMaxLen = sz * 0.60f;
 
             // --- crosshair state: a breathing gap + recoil spring + a slowly spinning ring ---
             float tsec = 0;                           // master clock for breathing / ring rotation
@@ -230,7 +239,7 @@ public sealed class CursorEngine : IDisposable
                 float rx = withArrow ? ringCX : l.HotX;
                 float ry = withArrow ? ringCY : l.HotY;
                 using var bmp = ProgressRenderer.Compose(_settings, _arrowBase!, deg, rx, ry, phase, withArrow);
-                ApplyCharms(bmp);
+                if (withArrow) CharmsTail(bmp); else CharmsBelow(bmp); // arrow rotates → tail; bare wait spinner → below
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
@@ -240,7 +249,7 @@ public sealed class CursorEngine : IDisposable
             {
                 double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
                 using var bmp = ProgressRenderer.ComposeHelp(_settings, _arrowBase!, deg, ringCX, ringCY, helpAngleDeg);
-                ApplyCharms(bmp);
+                CharmsTail(bmp); // has the arrow → hangs off the tail like the "?"
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
@@ -251,7 +260,7 @@ public sealed class CursorEngine : IDisposable
             IntPtr Cross()
             {
                 using var bmp = ProgressRenderer.ComposeCross(_settings, crossGap, ringDeg);
-                ApplyCharms(bmp);
+                CharmsBelow(bmp); // no rotation → hang straight below
                 return ScaledCursor(bmp, l.HotX, l.HotY, clickFx ? popScale : 1f);
             }
 
@@ -259,35 +268,37 @@ public sealed class CursorEngine : IDisposable
             IntPtr Ibeam()
             {
                 using var bmp = ProgressRenderer.ComposeIbeam(_settings, ibOffX, ibOffY, hopY, hopX);
-                ApplyCharms(bmp);
+                CharmsBelow(bmp); // no rotation → hang straight below
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
             // Resize cursors: a taffy double-arrow that necks/stretches along its axis (WE = ↔,
             // NS = ↕, D1 = ↘↖ / SIZENWSE, D2 = ↗↙ / SIZENESW). Move crosses a horizontal +
             // vertical taffy. Hotspot dead centre (the precision point Windows expects).
-            IntPtr ResizeWE() { using var b = ProgressRenderer.ComposeResize(_settings, 0f, rsWE); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr ResizeNS() { using var b = ProgressRenderer.ComposeResize(_settings, 90f, rsNS); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr ResizeD1() { using var b = ProgressRenderer.ComposeResize(_settings, 45f, rsD1); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr ResizeD2() { using var b = ProgressRenderer.ComposeResize(_settings, -45f, rsD2); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr Move() { using var b = ProgressRenderer.ComposeMove(_settings, rsWE, rsNS); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeWE() { using var b = ProgressRenderer.ComposeResize(_settings, 0f, rsWE); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeNS() { using var b = ProgressRenderer.ComposeResize(_settings, 90f, rsNS); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeD1() { using var b = ProgressRenderer.ComposeResize(_settings, 45f, rsD1); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeD2() { using var b = ProgressRenderer.ComposeResize(_settings, -45f, rsD2); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr Move() { using var b = ProgressRenderer.ComposeMove(_settings, rsWE, rsNS); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
 
             // The "unavailable" cursor: a red circle-with-slash whose ring wobbles like jelly.
-            IntPtr No() { using var b = ProgressRenderer.ComposeNo(_settings, noE, noAng); ApplyCharms(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr No() { using var b = ProgressRenderer.ComposeNo(_settings, noE, noAng); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
 
             // Composites the waiting tools' logos onto a finished cursor bitmap when one or more
-            // agents await the user — uniform across every themed cursor. They hang on the busy
-            // ring / help "?" pendulum (ringCX/ringCY) and tilt with it: helpAngleDeg is 180 at rest
-            // (its "?" hangs upside-down), so swinging the logo by helpAngleDeg-180 leaves it upright
-            // at rest and tilting by the same amount as the "?". Zero cost when off / nothing waiting.
-            void ApplyCharms(Bitmap bmp)
+            // agents await the user. Two anchors (see the pendulum decls): CharmsTail hangs them off
+            // the rotating tail like the "?" (helpAngleDeg is 180 at rest — its "?" hangs upside-down
+            // — so logo swing = helpAngleDeg-180 keeps the logo upright at rest), for the arrow & hand;
+            // CharmsBelow hangs them straight under the hotspot for cursors that don't rotate. Zero
+            // cost when off / nothing waiting.
+            void ApplyCharms(Bitmap bmp, float bobX, float bobY, float swingDeg)
             {
                 var tools = _waitingTools;
                 if (tools.Length == 0 || !_settings.AgentNotifierEnabled) return;
                 using var g = Graphics.FromImage(bmp);
-                NotifierRenderer.DrawCharms(g, _settings, tools, ringCX, ringCY,
-                                            helpAngleDeg - 180f, _settings.AgentNotifierCap);
+                NotifierRenderer.DrawCharms(g, _settings, tools, bobX, bobY, swingDeg, _settings.AgentNotifierCap);
             }
+            void CharmsTail(Bitmap bmp) => ApplyCharms(bmp, ringCX, ringCY, helpAngleDeg - 180f);
+            void CharmsBelow(Bitmap bmp) => ApplyCharms(bmp, belowCX, belowCY, belowDeg);
 
             // The pointer (arrow/hand) rendered live for the click-pop and/or with the hanging
             // agent logos. Without charms it returns the arrow-sized scaled frame (unchanged pop
@@ -309,7 +320,7 @@ public sealed class CursorEngine : IDisposable
                     g.TranslateTransform(-a / 2f, -a / 2f);
                     g.DrawImage(baseBmp, 0, 0);
                 }
-                ApplyCharms(bmp);
+                CharmsTail(bmp); // the pointer rotates → hang off the tail like the "?"
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
@@ -387,6 +398,29 @@ public sealed class CursorEngine : IDisposable
                     // string angle (anchor -> bob); +90 so the "?" hangs upside-down at rest
                     // (straight-down string) and tilts as the bob swings to the sides.
                     helpAngleDeg = (float)(Math.Atan2(by - ay, bx - ax) * 180.0 / Math.PI) + 90f;
+                }
+
+                // The "below" pendulum: same spring, but anchored at the HOTSPOT (not the rotating
+                // tail), so the logo on a non-rotating cursor hangs straight under it and swings only
+                // as the cursor translates — never orbiting. belowDeg is 0 (upright) at rest.
+                {
+                    float ax = p.x, ay = p.y;
+                    if (!belowInit) { lbx = ax; lby = ay + belowDrop; lvbx = lvby = 0; belowInit = true; }
+                    lvbx += ((ax - lbx) * pendK - lvbx * pendC) * dt;
+                    lvby += ((ay - lby) * pendK + belowGravity - lvby * pendC) * dt;
+                    lbx += lvbx * dt; lby += lvby * dt;
+                    float dxn = lbx - ax, dyn = lby - ay;
+                    float dlen = MathF.Sqrt(dxn * dxn + dyn * dyn);
+                    if (dlen > belowMaxLen)
+                    {
+                        float nx = dxn / dlen, ny = dyn / dlen;
+                        lbx = ax + nx * belowMaxLen; lby = ay + ny * belowMaxLen;
+                        float vd = lvbx * nx + lvby * ny;
+                        if (vd > 0) { lvbx -= vd * nx; lvby -= vd * ny; }
+                    }
+                    belowCX = Math.Clamp(l.HotX + (lbx - p.x), 0, l.Canvas);
+                    belowCY = Math.Clamp(l.HotY + (lby - p.y), 0, l.Canvas);
+                    belowDeg = (float)(Math.Atan2(lby - ay, lbx - ax) * 180.0 / Math.PI) - 90f;
                 }
 
                 // crosshair: advance the clock (breathing + ring spin) and the recoil

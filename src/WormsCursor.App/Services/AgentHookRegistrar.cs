@@ -55,10 +55,11 @@ public static class AgentHookRegistrar
     public static string ClaudePath => Path.Combine(Home, ".claude", "settings.json");
     public static string CodexPath => Path.Combine(Home, ".codex", "config.toml");
 
+    // Codex is hidden for now (untested end-to-end). Its Register/Unregister/State plumbing stays
+    // below, ready to re-list here once we can verify it. Only Claude Code is surfaced in the UI.
     public static IReadOnlyList<HookTool> Tools { get; } = new[]
     {
         new HookTool("claude-code", "Claude Code", ClaudePath, "~/.claude/settings.json"),
-        new HookTool("codex", "Codex CLI", CodexPath, "~/.codex/config.toml"),
     };
 
     public static HookState GetState(string toolId) => toolId switch
