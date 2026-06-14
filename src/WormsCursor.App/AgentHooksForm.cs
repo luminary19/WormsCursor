@@ -4,28 +4,30 @@ namespace WormsCursor.App;
 
 /// <summary>
 /// The "Agent notifications" settings panel. Two parts: a display section (turn the hanging agent
-/// logos on/off, choose how many logos before a "+N" tag, and a live preview that fakes a
+/// logo on/off, set how long a logo lingers before it's cleared, and a live preview that fakes a
 /// waiting-agent count on the real cursor), and a per-tool registration list showing whether
 /// WormsCursor is hooked into each AI tool, with Register / Unregister.
 /// Registration edits the tool's own config (backed up first); status is re-read after each action.
-/// Display changes are pushed straight to the live engine via <paramref name="applyDisplay"/>;
-/// the preview pushes a temporary count via <paramref name="preview"/> (null = end preview / restore).
-/// Default-styled WinForms.
+/// Display changes are pushed straight to the live engine via <paramref name="applyDisplay"/>
+/// (the bool is "enabled", the int is the linger timeout in seconds); the preview pushes a temporary
+/// count via <paramref name="preview"/> (null = end preview / restore). Default-styled WinForms.
 /// </summary>
 public sealed class AgentHooksForm : Form
 {
     readonly Action<bool, int> _applyDisplay;
     readonly Action<int?> _preview;
     readonly CheckBox _enabledChk;
-    readonly NumericUpDown _capNum;
+    readonly NumericUpDown _timeoutNum;
     readonly NumericUpDown _previewNum;
     readonly Button _previewShow;
     readonly Button _previewClear;
     readonly List<(HookTool tool, Label status, Button action)> _rows = new();
 
+    /// <param name="timeoutSeconds">How long a waiting logo lingers before being swept, in seconds.</param>
+    /// <param name="applyDisplay">Called with (enabled, timeoutSeconds) whenever a display setting changes.</param>
     /// <param name="preview">Shows a fake waiting count on the live cursor for testing; called with
     /// the count to preview, or <c>null</c> to end the preview and restore the real count.</param>
-    public AgentHooksForm(bool charmsEnabled, int charmCap, Action<bool, int> applyDisplay, Action<int?> preview)
+    public AgentHooksForm(bool charmsEnabled, int timeoutSeconds, Action<bool, int> applyDisplay, Action<int?> preview)
     {
         _applyDisplay = applyDisplay;
         _preview = preview;
@@ -43,8 +45,9 @@ public sealed class AgentHooksForm : Form
             AutoSize = false,
             Location = new Point(12, 12),
             Size = new Size(512, 36),
-            Text = "When an AI agent is waiting for you, the cursor hangs that tool's logo — one per "
-                 + "waiting agent. Register the tools below so they tell WormsCursor what they're doing.",
+            Text = "When an AI agent is waiting for you, the cursor hangs that tool's logo — with a "
+                 + "“+N” tag when several wait. Register the tools below so they tell WormsCursor what "
+                 + "they're doing.",
         };
         Controls.Add(intro);
 
@@ -54,31 +57,45 @@ public sealed class AgentHooksForm : Form
             AutoSize = false,
             Location = new Point(12, 56),
             Size = new Size(400, 22),
-            Text = "Show agent logos on the cursor while agents are waiting",
+            Text = "Show the agent logo on the cursor while agents are waiting",
             Checked = charmsEnabled,
         };
         _enabledChk.CheckedChanged += (_, _) => Apply();
         Controls.Add(_enabledChk);
 
-        var capLabel = new Label
+        // How long a logo lingers before it's swept (in case an agent never sends a closing event).
+        // Shown in minutes; stored as seconds. The engine's sweep clears the logo within a few seconds
+        // of this elapsing.
+        var timeoutLabel = new Label
         {
             AutoSize = false,
             Location = new Point(30, 82),
-            Size = new Size(210, 22),
+            Size = new Size(150, 22),
             TextAlign = ContentAlignment.MiddleLeft,
-            Text = "Logos shown before a “+N” tag:",
+            Text = "Clear a stuck logo after:",
         };
-        Controls.Add(capLabel);
-        _capNum = new NumericUpDown
+        Controls.Add(timeoutLabel);
+        _timeoutNum = new NumericUpDown
         {
-            Location = new Point(246, 80),
-            Size = new Size(48, 23),
-            Minimum = 1,
-            Maximum = 6,
-            Value = Math.Clamp(charmCap, 1, 6),
+            Location = new Point(184, 80),
+            Size = new Size(60, 23),
+            Minimum = 0.5m,
+            Maximum = 30m,
+            Increment = 0.5m,
+            DecimalPlaces = 1,
+            Value = Math.Clamp(timeoutSeconds / 60m, 0.5m, 30m),
         };
-        _capNum.ValueChanged += (_, _) => Apply();
-        Controls.Add(_capNum);
+        _timeoutNum.ValueChanged += (_, _) => Apply();
+        Controls.Add(_timeoutNum);
+        var minutesLabel = new Label
+        {
+            AutoSize = false,
+            Location = new Point(248, 82),
+            Size = new Size(80, 22),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "minutes",
+        };
+        Controls.Add(minutesLabel);
 
         // Live preview: fake a waiting-agent count on the real cursor so you can see the logos
         // (and the "+N" tag) without wiring up an actual agent. "Clear" ends it; closing the
@@ -196,16 +213,16 @@ public sealed class AgentHooksForm : Form
         CancelButton = close;
 
         ClientSize = new Size(536, y + 70);
-        SyncCapEnabled();
+        SyncEnabled();
         RefreshAll();
     }
 
     void Apply()
     {
-        SyncCapEnabled();
-        _applyDisplay(_enabledChk.Checked, (int)_capNum.Value);
-        // Keep an in-flight preview honest if the user just turned charms off, or re-render it
-        // with the new cap if they're still on.
+        SyncEnabled();
+        _applyDisplay(_enabledChk.Checked, (int)Math.Round(_timeoutNum.Value * 60m));
+        // Keep an in-flight preview honest if the user just turned charms off, or re-render it if
+        // they're still on.
         if (_previewClear.Enabled)
         {
             if (_enabledChk.Checked) ShowPreview();
@@ -213,10 +230,11 @@ public sealed class AgentHooksForm : Form
         }
     }
 
-    void SyncCapEnabled()
+    void SyncEnabled()
     {
+        // The timeout governs the sweep (and the tray count) regardless of whether the logo is drawn,
+        // so it stays enabled; only the on-cursor preview is gated on the logo being shown.
         bool on = _enabledChk.Checked;
-        _capNum.Enabled = on;
         _previewNum.Enabled = on;
         _previewShow.Enabled = on;
         // _previewClear stays enabled only while a preview is actually showing.

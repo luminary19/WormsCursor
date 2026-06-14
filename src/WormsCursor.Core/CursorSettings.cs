@@ -41,13 +41,14 @@ public sealed class CursorSettings
 
     // ---------- agent notifier (preferences UI) ----------
 
-    /// <summary>Show the waiting tools' logos on the cursor while AI agents are waiting for the user
-    /// (one logo per waiting agent). On by default; the indicator only appears once a hook is
-    /// registered and an agent reports an event.</summary>
+    /// <summary>Show a waiting tool's logo on the cursor while AI agents are waiting for the user
+    /// (always a single logo plus a "+N" count when several wait). On by default; the indicator only
+    /// appears once a hook is registered and an agent reports an event.</summary>
     public bool AgentNotifierEnabled { get; set; } = true;
 
-    /// <summary>How many agent logos to draw before the count switches to a "+N" tag (1–6).</summary>
-    public int AgentNotifierCap { get; set; } = 3;
+    /// <summary>How long a waiting agent's logo lingers before it's swept, in seconds, if the agent
+    /// never sends a closing event. Default 60s; clamped to 30s–30min.</summary>
+    public int AgentNotifierTimeoutSeconds { get; set; } = 60;
 
     // ---------- which cursors are themed (preferences UI) ----------
 
@@ -99,7 +100,7 @@ public sealed class CursorSettings
         Steps = Math.Clamp(Steps, 8, 720);
         Hz = Math.Clamp(Hz, 30, 240);
         AimSmooth = Math.Clamp(AimSmooth, 0.05, 1.0);
-        AgentNotifierCap = Math.Clamp(AgentNotifierCap, 1, 6);
+        AgentNotifierTimeoutSeconds = Math.Clamp(AgentNotifierTimeoutSeconds, 30, 1800);
     }
 
     public CursorSettings Clone()
@@ -122,7 +123,7 @@ public sealed class CursorSettings
         ClickFeedback = other.ClickFeedback;
         IbeamFeedback = other.IbeamFeedback;
         AgentNotifierEnabled = other.AgentNotifierEnabled;
-        AgentNotifierCap = other.AgentNotifierCap;
+        AgentNotifierTimeoutSeconds = other.AgentNotifierTimeoutSeconds;
         DisabledCursors = new List<string>(other.DisabledCursors);
         Steps = other.Steps;
         Hz = other.Hz;

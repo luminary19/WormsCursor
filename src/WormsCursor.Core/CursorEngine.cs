@@ -295,7 +295,7 @@ public sealed class CursorEngine : IDisposable
                 var tools = _waitingTools;
                 if (tools.Length == 0 || !_settings.AgentNotifierEnabled) return;
                 using var g = Graphics.FromImage(bmp);
-                NotifierRenderer.DrawCharms(g, _settings, tools, bobX, bobY, swingDeg, _settings.AgentNotifierCap);
+                NotifierRenderer.DrawCharms(g, _settings, tools, bobX, bobY, swingDeg);
             }
             void CharmsTail(Bitmap bmp) => ApplyCharms(bmp, ringCX, ringCY, helpAngleDeg - 180f);
             void CharmsBelow(Bitmap bmp) => ApplyCharms(bmp, belowCX, belowCY, belowDeg);

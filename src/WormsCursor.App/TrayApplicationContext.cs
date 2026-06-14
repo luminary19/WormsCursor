@@ -102,6 +102,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     void StartAgentNotifier()
     {
         _agents.WaitingCountChanged += OnWaitingCountChanged;
+        _agents.Ttl = TimeSpan.FromSeconds(_settings.AgentNotifierTimeoutSeconds);
 
         _agentPipe = new AgentPipeServer(msg =>
         {
@@ -112,7 +113,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         });
         _agentPipe.Start();
 
-        _agentSweep = new System.Windows.Forms.Timer { Interval = 60_000 };
+        // Sweep often (every 5 s) so the configurable timeout — as short as 30 s — clears a stuck
+        // logo promptly, not up to a minute late. The sweep just scans a tiny dictionary; it's cheap.
+        _agentSweep = new System.Windows.Forms.Timer { Interval = 5_000 };
         _agentSweep.Tick += (_, _) => _agents.Sweep(DateTime.UtcNow);
         _agentSweep.Start();
     }
@@ -205,7 +208,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         if (_marshal.InvokeRequired) { _marshal.BeginInvoke(OpenAgentHooks); return; }
         using var dlg = new AgentHooksForm(
-            _settings.AgentNotifierEnabled, _settings.AgentNotifierCap, ApplyAgentDisplay, PreviewWaitingCount);
+            _settings.AgentNotifierEnabled, _settings.AgentNotifierTimeoutSeconds, ApplyAgentDisplay, PreviewWaitingCount);
         dlg.ShowDialog();
     }
 
@@ -222,12 +225,15 @@ public sealed class TrayApplicationContext : ApplicationContext
         _engine.SetWaitingAgents(tools);
     }
 
-    // The engine reads AgentNotifierEnabled / AgentNotifierCap live each tick (see ApplyCharms), so
-    // a display change takes effect immediately — no engine restart needed, just persist it.
-    void ApplyAgentDisplay(bool enabled, int cap)
+    // The engine reads AgentNotifierEnabled live each tick (see ApplyCharms) and AgentActivity holds
+    // the linger timeout, so a display change takes effect immediately — no engine restart needed,
+    // just push the TTL and persist.
+    void ApplyAgentDisplay(bool enabled, int timeoutSeconds)
     {
         _settings.AgentNotifierEnabled = enabled;
-        _settings.AgentNotifierCap = Math.Clamp(cap, 1, 6);
+        _settings.AgentNotifierTimeoutSeconds = timeoutSeconds;
+        _settings.Normalize(); // clamp the timeout into range
+        _agents.Ttl = TimeSpan.FromSeconds(_settings.AgentNotifierTimeoutSeconds);
         SettingsStore.Save(_settings);
     }
 

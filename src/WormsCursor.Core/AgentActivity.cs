@@ -45,9 +45,17 @@ public sealed class AgentActivity
 
     readonly object _gate = new();
     readonly Dictionary<string, Entry> _sessions = new();
-    readonly TimeSpan _ttl;
+    TimeSpan _ttl;
 
-    public AgentActivity(TimeSpan? ttl = null) => _ttl = ttl ?? TimeSpan.FromMinutes(30);
+    public AgentActivity(TimeSpan? ttl = null) => _ttl = ttl ?? TimeSpan.FromMinutes(1);
+
+    /// <summary>The idle timeout after which a waiting session with no further events is swept out of
+    /// the count (so a logo can't linger forever). Settable live from the preferences UI.</summary>
+    public TimeSpan Ttl
+    {
+        get { lock (_gate) return _ttl; }
+        set { lock (_gate) _ttl = value; }
+    }
 
     /// <summary>Raised (outside the lock) whenever the waiting count changes, with the new value.</summary>
     public event Action<int>? WaitingCountChanged;

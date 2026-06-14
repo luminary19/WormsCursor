@@ -105,9 +105,11 @@ A thread-safe tracker of which agent sessions currently **need the user**.
 - `WaitingCount` = size of the set. This is the number the cursor shows.
 - **Pulses**: a transient one-shot per event for animation accents — `turn_complete` → a worm
   "pop", `error` → red tint. Exposed as an `event Action<AgentPulse>`.
-- **TTL sweep**: evict sessions with no event for ~30 min so a session that never sends a
-  closing event doesn't wedge the count. Codex (turn-complete-only, no clearing event) relies
-  on this TTL + clears on its next turn-complete; documented limitation, not a fake state.
+- **TTL sweep**: evict sessions with no event for the linger timeout (configurable,
+  `AgentNotifierTimeoutSeconds`, default **60 s**) so a session that never sends a closing event
+  doesn't wedge the count. The tray sweeps every 5 s so the timeout is honoured promptly. `Ttl` is
+  a live-settable property pushed from the prefs UI. Codex (turn-complete-only, no clearing event)
+  relies on this TTL + clears on its next turn-complete; documented limitation, not a fake state.
 
 `AgentActivity` lives in the tray context (survives engine restarts); on each change it calls
 `engine.SetWaitingCount(n)` and forwards pulses. On engine restart the tray re-pushes the
@@ -115,14 +117,14 @@ current count.
 
 ### 4. Rendering — bare logo charms on the ring/help pendulum (Core)
 
-`NotifierRenderer.DrawCharms(g, settings, tools, bobX, bobY, swingDeg, cap)`: draws each waiting
+`NotifierRenderer.DrawCharms(g, settings, tools, bobX, bobY, swingDeg)`: draws a single waiting
 tool's **bare logo** (no tile, no string) centred on the bob and tilted by `swingDeg`. The key
 decision: it hangs on the **exact same pendulum and at the exact same spot as the busy ring / help
 "?"**, with the exact same swing — as if the logo were simply painted onto those elements, an extra
 thing hanging there. The tools list (one tool id per waiting agent) comes from
-`AgentActivity.WaitingTools`. Count encoding: one logo per agent up to `cap`; beyond it a small
-frameless "+N". Multiple agents currently fan from the same bob and share its swing; giving each its
-own free, non-overlapping pendulum is a planned follow-up.
+`AgentActivity.WaitingTools`. Count encoding: **always exactly one logo** (the first waiting tool);
+when several wait, a small frameless **"+N"** superscript (N = the rest) sits at its top-right. There
+is deliberately never a fan of logos — it stays legible on the tiny cursor canvas.
 
 Logos are baked from each tool's SVG into vector geometry by `SvgPath` (a tiny path-data parser,
 mirroring `HandShape`) and held by `AgentLogos` (`claude-code` → the orange pixel critter; the
@@ -152,10 +154,10 @@ Engine integration (`CursorEngine`):
 ### 5. Settings / UI
 
 - `CursorSettings` (additive, tolerant-load convention): `AgentNotifierEnabled` (default true),
-  `AgentNotifierCap` (max charms before numeral, default 3), maybe `AgentNotifierAccent` color.
-  Add each to `CopyFrom`.
-- `PreferencesForm`: a small group in the right column near the feedback toggles — "Show
-  waiting-agent charms" + cap. (Same live-edit/working-copy pattern as existing toggles.)
+  `AgentNotifierTimeoutSeconds` (logo linger timeout, default 60, clamped 30–1800), maybe
+  `AgentNotifierAccent` color. Add each to `CopyFrom`/`Normalize`.
+- `AgentHooksForm`: the display section — "Show the agent logo" toggle + a "Clear a stuck logo
+  after:" minutes picker (stored as seconds). (Same live-edit/working-copy pattern as existing toggles.)
 - `TrayApplicationContext`: a **"Set up agent hooks…"** menu item between "Preferences…" and
   "Check for updates…", opening an installer dialog; owns + starts/stops the pipe server.
 - **Live preview** in that dialog: a "Preview on cursor" row (count picker + *Show worms* / *Clear*)
