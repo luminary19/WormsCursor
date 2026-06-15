@@ -384,15 +384,16 @@ public sealed class PreferencesForm : Form
         // app-level row spanning the full width, below both columns: autostart on the left, the
         // agent-notifications dialog button on the right. Visually separate from the appearance
         // controls because these don't go through the Apply/Cancel working-copy.
-        int appY = Math.Max(ly, ry) + 8;
+        int appY = Math.Max(ly, ry) + 14;
         _agentBtn.SetBounds(width - M - _agentBtn.Width, appY, _agentBtn.Width, _agentBtn.Height);
         // AutoSize checkbox, vertically centred on the (taller) Agent-settings button beside it
         _autostartChk.Location = new Point(M, appY + Math.Max(0, (_agentBtn.Height - _autostartChk.Height) / 2));
 
         // action buttons — Defaults + Check-for-updates on the left, Apply|OK|Cancel clustered
         // at the right. The wide window leaves a comfortable gap in the middle, so the update
-        // status text sits right beside its button again.
-        int btnY = appY + 40;
+        // status text sits right beside its button again. Flow from the app row's real bottom so
+        // there's a clear gap above them (a fixed offset crowded the Agent-settings button).
+        int btnY = Math.Max(_agentBtn.Bottom, _autostartChk.Bottom) + 18;
         int btnH = _okBtn.Height; // AutoSize buttons all share this height, so the row lines up
         _defaultsBtn.Location = new Point(M, btnY);
         _updateBtn.Location = new Point(_defaultsBtn.Right + 8, btnY);

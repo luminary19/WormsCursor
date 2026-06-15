@@ -43,7 +43,7 @@ public sealed class AgentHooksForm : Form
         // The whole dialog flows top-to-bottom and every text control is AutoSize, so nothing clips
         // when the system font / "Make text bigger" is enlarged, and rows self-align to their tallest
         // control. `pad` is the outer margin; `innerW` the content column; `y` the running cursor.
-        const int pad = 14, innerW = 508, indent = 16;
+        const int pad = 14, innerW = 560, indent = 16;
         int rightEdge = pad + innerW;
         int y = pad;
 
@@ -71,6 +71,11 @@ public sealed class AgentHooksForm : Form
         Controls.Add(_enabledChk);
         y = _enabledChk.Bottom + 12;
 
+        // The timeout and the preview count share ONE line: the two numeric boxes sit on the same
+        // row — the timeout group flush-left, the preview group flush-right (its box ends at the
+        // content's right edge). The preview's action buttons go right-aligned on the row just
+        // below, lined up under that box.
+
         // How long a logo lingers before it's swept (in case an agent never sends a closing event).
         // Shown in minutes; stored as seconds.
         var timeoutLabel = new Label { AutoSize = true, Text = "Clear a stuck logo after:" };
@@ -81,21 +86,33 @@ public sealed class AgentHooksForm : Form
             Value = Math.Clamp(timeoutSeconds / 60m, 0.5m, 30m),
         };
         var minutesLabel = new Label { AutoSize = true, Text = "minutes" };
-        Controls.Add(timeoutLabel); Controls.Add(_timeoutNum); Controls.Add(minutesLabel);
-        y = Row(y, pad + indent, 8, timeoutLabel, _timeoutNum, minutesLabel) + 12;
-        _timeoutNum.ValueChanged += (_, _) => Apply();
 
         // Live preview: fake a waiting-agent count on the real cursor so you can see the logo (and the
         // "+N" tag) without wiring up an actual agent. "Clear" ends it; closing the dialog ends it too.
-        var previewLabel = new Label { AutoSize = true, Text = "Preview on cursor:" };
+        var previewLabel = new Label { AutoSize = true, Text = "Preview:" };
         _previewNum = new NumericUpDown { Width = 52, Minimum = 1, Maximum = 9, Value = 2 };
         _previewShow = MakeButton("Show logos");
         _previewShow.Click += (_, _) => ShowPreview();
         _previewClear = MakeButton("Clear");
         _previewClear.Enabled = false;
         _previewClear.Click += (_, _) => EndPreview();
+        Controls.Add(timeoutLabel); Controls.Add(_timeoutNum); Controls.Add(minutesLabel);
         Controls.Add(previewLabel); Controls.Add(_previewNum); Controls.Add(_previewShow); Controls.Add(_previewClear);
-        y = Row(y, pad + indent, 8, previewLabel, _previewNum, _previewShow, _previewClear) + 16;
+
+        // Both numeric boxes on one line. rowH is the tallest control so an enlarged font centres
+        // rather than clips; the preview group is right-aligned so its box ends at rightEdge.
+        int numsRowH = Math.Max(Math.Max(_timeoutNum.Height, _previewNum.Height),
+                                Math.Max(timeoutLabel.Height, previewLabel.Height));
+        PlaceRow(pad + indent, y, numsRowH, 6, timeoutLabel, _timeoutNum, minutesLabel);
+        PlaceRow(rightEdge - GroupWidth(6, previewLabel, _previewNum), y, numsRowH, 6, previewLabel, _previewNum);
+        y += numsRowH + 10;
+
+        // Preview action buttons, right-aligned under the preview box.
+        int previewBtnH = Math.Max(_previewShow.Height, _previewClear.Height);
+        PlaceRow(rightEdge - GroupWidth(8, _previewShow, _previewClear), y, previewBtnH, 8, _previewShow, _previewClear);
+        y += previewBtnH + 16;
+
+        _timeoutNum.ValueChanged += (_, _) => Apply();
         // Attached after _previewClear exists so the lambda can read it; nudging the count while a
         // preview is live re-renders it at the new number.
         _previewNum.ValueChanged += (_, _) => { if (_previewClear.Enabled) ShowPreview(); };
@@ -185,20 +202,25 @@ public sealed class AgentHooksForm : Form
         MinimumSize = new Size(84, 0),
     };
 
-    // Lays controls left-to-right from x=left, `gap` px apart, vertically centring each on the
-    // tallest. Returns the row's bottom Y. Heights come from the controls themselves, so the row
-    // grows with the font instead of clipping.
-    static int Row(int top, int left, int gap, params Control[] controls)
+    // Lays controls left-to-right from x=left, `gap` px apart, each vertically centred within
+    // `rowH`. Heights come from the controls themselves, so an enlarged font centres instead of
+    // clipping. Pair with GroupWidth to right-align a group: PlaceRow(rightEdge - GroupWidth(...), …).
+    static void PlaceRow(int left, int top, int rowH, int gap, params Control[] controls)
     {
-        int h = 0;
-        foreach (var c in controls) h = Math.Max(h, c.Height);
         int x = left;
         foreach (var c in controls)
         {
-            c.Location = new Point(x, top + (h - c.Height) / 2);
+            c.Location = new Point(x, top + (rowH - c.Height) / 2);
             x += c.Width + gap;
         }
-        return top + h;
+    }
+
+    // Total width a horizontal group of controls occupies, `gap` px between each.
+    static int GroupWidth(int gap, params Control[] controls)
+    {
+        int w = 0;
+        for (int i = 0; i < controls.Length; i++) w += controls[i].Width + (i > 0 ? gap : 0);
+        return w;
     }
 
     void Apply()
