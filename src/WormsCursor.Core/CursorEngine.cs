@@ -29,6 +29,7 @@ public sealed class CursorEngine : IDisposable
     Managed[] _managed = Array.Empty<Managed>();
     Bitmap? _arrowBase;                       // kept for compositing the busy cursor + click-pop scaling
     Bitmap? _handBase;                        // kept for click-pop scaling of the hand
+    Dictionary<uint, IntPtr> _restFrames = new(); // pre-built "settled" frame per non-animated cursor (OCR id -> HCURSOR)
     volatile bool _ibeamKick;                 // a keystroke arrived (set by NudgeIbeam) -> hop the I-beam
     volatile string[] _waitingTools = Array.Empty<string>(); // one tool id per waiting agent (dangling charms)
     volatile TestCursor _test = TestCursor.Off;
@@ -221,6 +222,7 @@ public sealed class CursorEngine : IDisposable
             bool busyInit = false;
             var lastTest = TestCursor.Off;
             int tick = 0;
+            uint restApplied = 0;             // OCR id whose cached rest frame is currently applied (0 = none)
 
             // --- click squash&pop: the pointer scales down while a mouse button is held and
             //     springs back with a little overshoot on release (underdamped). Mouse-button
@@ -338,6 +340,20 @@ public sealed class CursorEngine : IDisposable
                 }
                 CharmsTail(bmp); // the pointer rotates → hang off the tail like the "?"
                 return MakeCursor(bmp, l.HotX, l.HotY);
+            }
+
+            // Swap in a pre-built rest frame for a settled cursor — but only once. While it stays
+            // settled on screen restApplied remembers the slot, so we then do NOTHING per frame (the
+            // whole point: an idle resize / I-beam / "no" cursor costs zero). SetSystemCursor is
+            // persistent, so the frame stays put until a spring reactivates and the live path resets it.
+            void ApplyRest(uint ocr)
+            {
+                if (restApplied == ocr) return;
+                if (_restFrames.TryGetValue(ocr, out var h) && h != IntPtr.Zero)
+                {
+                    SetSystemCursor(CopyIcon(h), ocr);
+                    restApplied = ocr;
+                }
             }
 
             while (_running)
@@ -582,19 +598,38 @@ public sealed class CursorEngine : IDisposable
                         if (GetCursorInfo(ref ci) && (ci.flags & CURSOR_SHOWING) != 0)
                         {
                             IntPtr cur = ci.hCursor;
+                            // The non-rotating, non-time-animated cursors return to ONE fixed rest pose
+                            // once their motion springs settle, so a settled on-screen frame is pixel-
+                            // identical to the pre-built rest frame — swap that in (ApplyRest: applied
+                            // once, then skipped) instead of re-compositing every frame. Charms (swinging
+                            // logos) force the live path. Thresholds: 0.004 for the normalised stretch /
+                            // jelly springs (same scale as the click-pop settle test above), sub-px +
+                            // low-velocity for the I-beam's pixel offsets. Wait/AppStarting/Cross animate
+                            // on a clock and so are never at rest — they stay live below.
+                            bool noCharms = !charmsActive;
+                            bool weRest   = noCharms && MathF.Abs(rsWE) < 0.004f && MathF.Abs(vWE) < 0.02f;
+                            bool nsRest   = noCharms && MathF.Abs(rsNS) < 0.004f && MathF.Abs(vNS) < 0.02f;
+                            bool d1Rest   = noCharms && MathF.Abs(rsD1) < 0.004f && MathF.Abs(vD1) < 0.02f;
+                            bool d2Rest   = noCharms && MathF.Abs(rsD2) < 0.004f && MathF.Abs(vD2) < 0.02f;
+                            bool moveRest = weRest && nsRest;
+                            bool noRest   = noCharms && MathF.Abs(noE) < 0.004f && MathF.Abs(vno) < 0.02f;
+                            bool ibeamRest = noCharms
+                                && MathF.Abs(ibOffX) < 0.15f && MathF.Abs(ibOffY) < 0.15f && MathF.Abs(vibX) < 0.6f && MathF.Abs(vibY) < 0.6f
+                                && MathF.Abs(hopY) < 0.15f && MathF.Abs(hopX) < 0.15f && MathF.Abs(vHop) < 0.6f && MathF.Abs(vHopX) < 0.6f;
+
                             // Each branch is gated by its enable flag: a disabled slot still shows the
                             // Windows default (we never themed it), so there's nothing to re-render.
                             if (onWait && cur == hcWait) SetSystemCursor(Busy(false), OCR_WAIT);
                             else if (onApp && cur == hcApp) SetSystemCursor(Busy(true), OCR_APPSTARTING);
                             else if (onHelp && cur == hcHelp) SetSystemCursor(Help(), OCR_HELP);
                             else if (onCross && cur == hcCross) SetSystemCursor(Cross(), OCR_CROSS);
-                            else if (onIbeam && cur == hcIbeam) SetSystemCursor(Ibeam(), OCR_IBEAM);
-                            else if (onWE && cur == hcWE) SetSystemCursor(ResizeWE(), OCR_SIZEWE);
-                            else if (onNS && cur == hcNS) SetSystemCursor(ResizeNS(), OCR_SIZENS);
-                            else if (onD1 && cur == hcD1) SetSystemCursor(ResizeD1(), OCR_SIZENWSE);
-                            else if (onD2 && cur == hcD2) SetSystemCursor(ResizeD2(), OCR_SIZENESW);
-                            else if (onMove && cur == hcMove) SetSystemCursor(Move(), OCR_SIZEALL);
-                            else if (onNo && cur == hcNo) SetSystemCursor(No(), OCR_NO);
+                            else if (onIbeam && cur == hcIbeam) { if (ibeamRest) ApplyRest(OCR_IBEAM); else { SetSystemCursor(Ibeam(), OCR_IBEAM); restApplied = 0; } }
+                            else if (onWE && cur == hcWE)       { if (weRest)   ApplyRest(OCR_SIZEWE);   else { SetSystemCursor(ResizeWE(), OCR_SIZEWE);   restApplied = 0; } }
+                            else if (onNS && cur == hcNS)       { if (nsRest)   ApplyRest(OCR_SIZENS);   else { SetSystemCursor(ResizeNS(), OCR_SIZENS);   restApplied = 0; } }
+                            else if (onD1 && cur == hcD1)       { if (d1Rest)   ApplyRest(OCR_SIZENWSE); else { SetSystemCursor(ResizeD1(), OCR_SIZENWSE); restApplied = 0; } }
+                            else if (onD2 && cur == hcD2)       { if (d2Rest)   ApplyRest(OCR_SIZENESW); else { SetSystemCursor(ResizeD2(), OCR_SIZENESW); restApplied = 0; } }
+                            else if (onMove && cur == hcMove)   { if (moveRest) ApplyRest(OCR_SIZEALL);  else { SetSystemCursor(Move(), OCR_SIZEALL);       restApplied = 0; } }
+                            else if (onNo && cur == hcNo)       { if (noRest)   ApplyRest(OCR_NO);       else { SetSystemCursor(No(), OCR_NO);             restApplied = 0; } }
                         }
                     }
                 }
@@ -675,6 +710,28 @@ public sealed class CursorEngine : IDisposable
             new Managed(OCR_NORMAL, BuildFrames(_arrowBase, 0.0, n)),
             new Managed(OCR_HAND, BuildFrames(_handBase, HandShape.BaseAngleDeg, n)),
         };
+        BuildRestFrames();
+    }
+
+    // Pre-render the "settled" frame of each non-rotating, non-time-animated cursor (I-beam, the four
+    // resizes, move, unavailable). Their motion springs return to a single fixed rest pose, so while
+    // one sits on screen with the mouse still its live re-render is pixel-identical — the loop swaps in
+    // these cached frames (see restApplied) instead of re-compositing ~60fps. Built once per run and
+    // freed in DestroyCursors, exactly like the rotated direction frames. (Wait/AppStarting/Cross
+    // animate on a clock and Help follows the pointer direction, so none of those has a single rest
+    // pose — they stay on the live path.)
+    void BuildRestFrames()
+    {
+        var l = ProgressRenderer.Layout(_settings);
+        _restFrames = new Dictionary<uint, IntPtr>(7);
+        void Add(uint ocr, Bitmap bmp) { _restFrames[ocr] = MakeCursor(bmp, l.HotX, l.HotY); bmp.Dispose(); }
+        Add(OCR_IBEAM,    ProgressRenderer.ComposeIbeam(_settings, 0f, 0f));
+        Add(OCR_SIZEWE,   ProgressRenderer.ComposeResize(_settings, 0f, 0f));
+        Add(OCR_SIZENS,   ProgressRenderer.ComposeResize(_settings, 90f, 0f));
+        Add(OCR_SIZENWSE, ProgressRenderer.ComposeResize(_settings, 45f, 0f));
+        Add(OCR_SIZENESW, ProgressRenderer.ComposeResize(_settings, -45f, 0f));
+        Add(OCR_SIZEALL,  ProgressRenderer.ComposeMove(_settings, 0f, 0f));
+        Add(OCR_NO,       ProgressRenderer.ComposeNo(_settings, 0f, 0f));
     }
 
     // Builds n cursor frames; frame i points at (i * 360/n) degrees. baseAngleDeg is the
@@ -745,6 +802,9 @@ public sealed class CursorEngine : IDisposable
             foreach (var h in m.Frames)
                 if (h != IntPtr.Zero) DestroyIcon(h);
         _managed = Array.Empty<Managed>();
+        foreach (var h in _restFrames.Values)
+            if (h != IntPtr.Zero) DestroyIcon(h);
+        _restFrames.Clear();
         _arrowBase?.Dispose();
         _arrowBase = null;
         _handBase?.Dispose();
