@@ -72,6 +72,45 @@ plus a transparent one).
 - The animated cursors re-render **only while actually on screen** (matched via `GetCursorInfo`
   against the live system handle), so an idle tray uses no CPU.
 
+## Agent notifier
+
+When an AI coding agent needs your attention, the cursor **sprouts a small logo charm** that hangs
+and swings on the same pendulum as the busy ring / help "?" — one logo for the waiting tool, with a
+frameless **"+N"** when several agents wait at once. It's an ambient, peripheral-vision nudge: no
+toast, no extra window. When nothing's waiting it costs nothing — the cursor falls back to its plain
+pre-rendered frames.
+
+Set it up from **Preferences… → Agent settings…**: register a tool there (currently **Claude
+Code**), toggle the logo, and set the "clear a stuck logo after" timeout. Registering writes
+WormsCursor's `hook` command into the tool's config (`~/.claude/settings.json`) with
+backup-and-merge — it never overwrites your own hooks. Each event then runs
+`WormsCursor.exe hook --tool …`, a throwaway process that writes one line to the running tray app
+over a named pipe and exits. It's **fail-silent** (<½ s pipe timeout, errors logged to
+`bridge.log`, always exits 0), so it can never block or break the agent.
+
+**What it reacts to.** Each tool's lifecycle hooks are normalised to a few events, and the logo
+tracks whether the ball is in *your* court:
+
+| The agent… | Claude hook | Logo |
+|---|---|---|
+| is blocked on you (permission / idle prompt) | `Notification` | **appears** |
+| finished its turn | `Stop` | **appears** |
+| ended on an error | `StopFailure` | **appears** |
+| started on your prompt, or you reopened the session | `UserPromptSubmit` / `SessionStart` | **clears** |
+| exited cleanly (`/exit`, `Ctrl+C`, `/clear`, logout) | `SessionEnd` | **clears at once** |
+
+So it shows up when an agent is *waiting on you* and clears the moment you're clearly back (you
+submitted a prompt) or the session ends. Multiple sessions are tracked independently (keyed by tool
++ session id), so the count is simply "how many agents need you right now".
+
+**Why it's event-driven (and the timeout).** WormsCursor only knows what the hooks tell it over the
+pipe — it never polls the agent or watches its process. That keeps it dead-simple and zero-cost when
+idle, but it means a session that never sends a closing event would otherwise wait forever. So
+there's a backstop: any waiting session with no further events for the **linger timeout** (default
+60 s, configurable 30–1800 s) is swept out of the count. The tool-call hooks (`PreToolUse` /
+`PostToolUse`) are deliberately *not* registered — they'd spawn a hook process on every single tool
+call — so "you replied" is inferred from your next prompt, not from the agent resuming work.
+
 ## Known issues
 
 - **Animated cursors flicker on a mixed-DPI multi-monitor setup.** If your monitors run at
@@ -86,6 +125,13 @@ plus a transparent one).
   mouse settings → Pointer Options, shortest setting), which forces a cursor-draw path that
   sidesteps the flicker. A proper fix would mean drawing the animated cursors in our own overlay
   instead of through `SetSystemCursor` (tracked for a future release).
+- **A hard-killed agent's logo lingers until the timeout.** The agent notifier learns everything
+  from the tool's hooks over the pipe — it never watches the agent's process. A *clean* exit
+  (`/exit`, `Ctrl+C`, `/clear`, logout) fires `SessionEnd` and the logo clears immediately, but if
+  the agent is **killed outright** (Task Manager "End Task", closing the terminal window, `kill`) no
+  hook runs, so no "session ended" ever reaches WormsCursor. The waiting logo then stays until the
+  **linger timeout** sweeps it (default 60 s, set in *Agent settings…*). This is by design — with no
+  event there's nothing to react to, and the timeout is the backstop.
 
 ## Project structure
 
