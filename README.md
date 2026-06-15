@@ -144,14 +144,23 @@ WormsCursor.sln
 │  │   ├─ HandRenderer.cs     Draws the hand/link cursor (solid fill + baked line art)
 │  │   ├─ ProgressRenderer.cs Draws the composited cursors (busy, help, crosshair, text, resize/move, unavailable)
 │  │   ├─ HandShape.cs        Baked hand geometry (silhouette + crease marks)
+│  │   ├─ NotifierRenderer.cs Composites the agent-notifier logo charm onto a cursor
+│  │   ├─ AgentLogos.cs       Baked tool logos (Claude critter, OpenAI knot); SvgPath.cs parses the path data
+│  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe); AgentEventMessage.cs is the wire format
 │  │   ├─ CursorSettings.cs   Tunable parameters (persisted as JSON)
 │  │   └─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
 │  ├─ WormsCursor.App/       Tray shell (WinForms, no main window)
-│  │   ├─ Program.cs                   Entry point (Velopack hook + single-instance guard)
-│  │   ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the engine
-│  │   ├─ PreferencesForm.cs          Live settings dialog (size, colours, thickness, radius, test cursor)
+│  │   ├─ Program.cs                   Entry point (Velopack + single-instance guard; `hook` verb short-circuits first)
+│  │   ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the engine, pipe server + keyboard hook
+│  │   ├─ PreferencesForm.cs          Live settings dialog (preview grid, size/colour/thickness/radius, feedback toggles, test cursor + Showtime)
+│  │   ├─ AgentHooksForm.cs            Agent-notifier settings + per-tool hook registration UI
+│  │   ├─ AgentPipeServer.cs           Named-pipe server that receives normalised agent events
+│  │   ├─ AgentHookBridge.cs           The `hook` verb: normalises a tool's payload → one pipe line, fail-silent
+│  │   ├─ Services/AgentHookRegistrar.cs Writes/removes WormsCursor's hook in each tool's config (backup + merge)
+│  │   ├─ LowLevelKeyboardHook.cs      Keyboard hook driving the I-beam typing bounce
 │  │   ├─ SingleInstance.cs            One instance only; a 2nd launch opens Preferences
 │  │   ├─ Autostart.cs                 "Start with Windows" via HKCU\…\Run
+│  │   ├─ ChangelogForm.cs             "What's new" dialog (from CHANGELOG.md)
 │  │   └─ Services/UpdateService.cs    Velopack check / download / apply updates
 │  └─ WormsCursor.Preview/   Console tool — renders the cursor showcase PNGs (docs/README)
 │      └─ Program.cs                    Dark + transparent sheets of every themed cursor
@@ -182,18 +191,20 @@ dotnet build WormsCursor.sln
 dotnet run --project src/WormsCursor.App
 ```
 
-A tray icon appears. Right-click it for **Enabled / Start with Windows / Preferences… /
-Check for updates… / Exit**; double-click toggles the effect on/off. Only one instance
-runs — launching it again just opens **Preferences**. "Start with Windows" registers a
-per-user `HKCU\…\Run` entry (no admin), which you can also manage from Task Manager →
-Startup apps.
+A tray icon appears. Right-click it for **Enabled / Preferences… / Exit**; double-click
+toggles the effect on/off. Only one instance runs — launching it again just opens
+**Preferences**.
 
-**Preferences…** opens a live editor for cursor **size**, **fill** and **outline
-colour**, **outline thickness** and **corner radius**, with a live preview of **all the
-cursors**, a **Test cursor** picker that forces a chosen cursor on screen, and
-**Apply** / **Defaults** / **Check for updates** buttons. Settings are saved to
-`%LocalAppData%\WormsCursor\settings.json` and persist across restarts — and across
-updates, since they live outside the app folder.
+**Preferences…** opens a live editor with a preview grid of **all the cursors** — hover a
+tile to try it on the real pointer, or untick it to keep the Windows default. It has sliders
+for **size**, **outline thickness** and **corner radius**, **fill** and **outline colour**
+pickers, **click-feedback** and **I-beam typing-bounce** toggles, a **Test cursor** picker
+(plus **Showtime**, a hands-free cycle through the enabled cursors for recording), a **Start
+with Windows** toggle, an **Agent settings…** button, and a **Check for updates** button.
+"Start with Windows" registers a per-user `HKCU\…\Run` entry (no admin), which you can also
+manage from Task Manager → Startup apps. Settings are saved to
+`%LocalAppData%\WormsCursor\settings.json` and persist across restarts — and across updates,
+since they live outside the app folder.
 
 ### Standalone build (no .NET install on the target)
 
