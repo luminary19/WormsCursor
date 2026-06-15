@@ -56,7 +56,7 @@ public static class NotifierRenderer
         using var path = new GraphicsPath();
         float em = sz * 0.20f;
         using var fam = new FontFamily(System.Drawing.Text.GenericFontFamilies.SansSerif);
-        var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+        using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         path.AddString("+" + extra, fam, (int)FontStyle.Bold, em, new PointF(cx, cy), fmt);
 
         using (var po = new Pen(outline, Math.Max(1.5f, sz * 0.03f)) { LineJoin = LineJoin.Round })

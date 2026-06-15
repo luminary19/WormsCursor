@@ -123,7 +123,22 @@ public sealed class CursorEngine : IDisposable
             var arrowFrames = _managed[0].Frames;          // [0] = arrow, [1] = hand (see BuildCursors)
             var handFrames = _managed[1].Frames;
             var l = ProgressRenderer.Layout(_settings);
+            using var fgBuf = new Bitmap(l.Canvas, l.Canvas); // reused back-buffer for foreground composites (Size is fixed for a run)
             int ciSize = Marshal.SizeOf<CURSORINFO>();
+
+            // LoadCursor(NULL, OCR_*) returns a stable shared handle — fetch each once instead of
+            // calling it up to 11×/frame in the on-screen detection chain below.
+            IntPtr hcWait = LoadCursor(IntPtr.Zero, (IntPtr)OCR_WAIT);
+            IntPtr hcApp  = LoadCursor(IntPtr.Zero, (IntPtr)OCR_APPSTARTING);
+            IntPtr hcHelp = LoadCursor(IntPtr.Zero, (IntPtr)OCR_HELP);
+            IntPtr hcCross= LoadCursor(IntPtr.Zero, (IntPtr)OCR_CROSS);
+            IntPtr hcIbeam= LoadCursor(IntPtr.Zero, (IntPtr)OCR_IBEAM);
+            IntPtr hcWE   = LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEWE);
+            IntPtr hcNS   = LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENS);
+            IntPtr hcD1   = LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENWSE);
+            IntPtr hcD2   = LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENESW);
+            IntPtr hcMove = LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEALL);
+            IntPtr hcNo   = LoadCursor(IntPtr.Zero, (IntPtr)OCR_NO);
 
             // Per-cursor enable flags: a cursor switched OFF in Preferences is left as the
             // Windows default — we simply never SetSystemCursor its slot (nor re-theme it on
@@ -238,7 +253,7 @@ public sealed class CursorEngine : IDisposable
                 double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
                 float rx = withArrow ? ringCX : l.HotX;
                 float ry = withArrow ? ringCY : l.HotY;
-                using var bmp = ProgressRenderer.Compose(_settings, _arrowBase!, deg, rx, ry, phase, withArrow);
+                var bmp = ProgressRenderer.Compose(_settings, _arrowBase!, deg, rx, ry, phase, withArrow, fgBuf);
                 if (withArrow) CharmsTail(bmp); else CharmsBelow(bmp); // arrow rotates → tail; bare wait spinner → below
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
@@ -248,7 +263,7 @@ public sealed class CursorEngine : IDisposable
             IntPtr Help()
             {
                 double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
-                using var bmp = ProgressRenderer.ComposeHelp(_settings, _arrowBase!, deg, ringCX, ringCY, helpAngleDeg);
+                var bmp = ProgressRenderer.ComposeHelp(_settings, _arrowBase!, deg, ringCX, ringCY, helpAngleDeg, fgBuf);
                 CharmsTail(bmp); // has the arrow → hangs off the tail like the "?"
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
@@ -259,7 +274,7 @@ public sealed class CursorEngine : IDisposable
             // stays put); pop == 1 at rest is a cheap pass-through.
             IntPtr Cross()
             {
-                using var bmp = ProgressRenderer.ComposeCross(_settings, crossGap, ringDeg);
+                var bmp = ProgressRenderer.ComposeCross(_settings, crossGap, ringDeg, fgBuf);
                 CharmsBelow(bmp); // no rotation → hang straight below
                 return ScaledCursor(bmp, l.HotX, l.HotY, clickFx ? popScale : 1f);
             }
@@ -267,7 +282,7 @@ public sealed class CursorEngine : IDisposable
             // The text / I-beam cursor: rigid bottom, jelly top (ibOffX/ibOffY), hotspot centre.
             IntPtr Ibeam()
             {
-                using var bmp = ProgressRenderer.ComposeIbeam(_settings, ibOffX, ibOffY, hopY, hopX);
+                var bmp = ProgressRenderer.ComposeIbeam(_settings, ibOffX, ibOffY, hopY, hopX, fgBuf);
                 CharmsBelow(bmp); // no rotation → hang straight below
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
@@ -275,14 +290,14 @@ public sealed class CursorEngine : IDisposable
             // Resize cursors: a taffy double-arrow that necks/stretches along its axis (WE = ↔,
             // NS = ↕, D1 = ↘↖ / SIZENWSE, D2 = ↗↙ / SIZENESW). Move crosses a horizontal +
             // vertical taffy. Hotspot dead centre (the precision point Windows expects).
-            IntPtr ResizeWE() { using var b = ProgressRenderer.ComposeResize(_settings, 0f, rsWE); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr ResizeNS() { using var b = ProgressRenderer.ComposeResize(_settings, 90f, rsNS); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr ResizeD1() { using var b = ProgressRenderer.ComposeResize(_settings, 45f, rsD1); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr ResizeD2() { using var b = ProgressRenderer.ComposeResize(_settings, -45f, rsD2); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr Move() { using var b = ProgressRenderer.ComposeMove(_settings, rsWE, rsNS); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeWE() { var b = ProgressRenderer.ComposeResize(_settings, 0f, rsWE, fgBuf); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeNS() { var b = ProgressRenderer.ComposeResize(_settings, 90f, rsNS, fgBuf); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeD1() { var b = ProgressRenderer.ComposeResize(_settings, 45f, rsD1, fgBuf); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeD2() { var b = ProgressRenderer.ComposeResize(_settings, -45f, rsD2, fgBuf); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr Move() { var b = ProgressRenderer.ComposeMove(_settings, rsWE, rsNS, fgBuf); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
 
             // The "unavailable" cursor: a red circle-with-slash whose ring wobbles like jelly.
-            IntPtr No() { using var b = ProgressRenderer.ComposeNo(_settings, noE, noAng); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr No() { var b = ProgressRenderer.ComposeNo(_settings, noE, noAng, fgBuf); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
 
             // Composites the waiting tools' logos onto a finished cursor bitmap when one or more
             // agents await the user. Two anchors (see the pendulum decls): CharmsTail hangs them off
@@ -307,9 +322,10 @@ public sealed class CursorEngine : IDisposable
             IntPtr PointerLive(Bitmap baseBmp, double baseAngleDeg, double deg, float scale, bool withCharms)
             {
                 if (!withCharms) return RotatedScaled(baseBmp, baseAngleDeg, deg, scale);
-                using var bmp = new Bitmap(l.Canvas, l.Canvas);
+                var bmp = fgBuf;
                 using (var g = Graphics.FromImage(bmp))
                 {
+                    g.Clear(Color.Transparent);
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                     g.PixelOffsetMode = PixelOffsetMode.HighQuality;
@@ -517,8 +533,9 @@ public sealed class CursorEngine : IDisposable
                             float sc = clickFx ? popScale : 1f;
                             if (onArrow)
                             {
-                                SetSystemCursor(PointerLive(_arrowBase!, 0.0, deg, sc, charmsActive), OCR_NORMAL);
-                                SetSystemCursor(PointerLive(_arrowBase!, 0.0, deg, sc, charmsActive), OCR_UP);
+                                IntPtr h = PointerLive(_arrowBase!, 0.0, deg, sc, charmsActive);
+                                SetSystemCursor(CopyIcon(h), OCR_UP);   // copy for the alternate-select slot first…
+                                SetSystemCursor(h, OCR_NORMAL);          // …then hand off h itself (SetSystemCursor destroys it)
                             }
                             if (onHand) SetSystemCursor(PointerLive(_handBase!, HandShape.BaseAngleDeg, deg, sc, charmsActive), OCR_HAND);
                         }
@@ -567,17 +584,17 @@ public sealed class CursorEngine : IDisposable
                             IntPtr cur = ci.hCursor;
                             // Each branch is gated by its enable flag: a disabled slot still shows the
                             // Windows default (we never themed it), so there's nothing to re-render.
-                            if (onWait && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_WAIT)) SetSystemCursor(Busy(false), OCR_WAIT);
-                            else if (onApp && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_APPSTARTING)) SetSystemCursor(Busy(true), OCR_APPSTARTING);
-                            else if (onHelp && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_HELP)) SetSystemCursor(Help(), OCR_HELP);
-                            else if (onCross && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_CROSS)) SetSystemCursor(Cross(), OCR_CROSS);
-                            else if (onIbeam && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_IBEAM)) SetSystemCursor(Ibeam(), OCR_IBEAM);
-                            else if (onWE && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEWE)) SetSystemCursor(ResizeWE(), OCR_SIZEWE);
-                            else if (onNS && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENS)) SetSystemCursor(ResizeNS(), OCR_SIZENS);
-                            else if (onD1 && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENWSE)) SetSystemCursor(ResizeD1(), OCR_SIZENWSE);
-                            else if (onD2 && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENESW)) SetSystemCursor(ResizeD2(), OCR_SIZENESW);
-                            else if (onMove && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEALL)) SetSystemCursor(Move(), OCR_SIZEALL);
-                            else if (onNo && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_NO)) SetSystemCursor(No(), OCR_NO);
+                            if (onWait && cur == hcWait) SetSystemCursor(Busy(false), OCR_WAIT);
+                            else if (onApp && cur == hcApp) SetSystemCursor(Busy(true), OCR_APPSTARTING);
+                            else if (onHelp && cur == hcHelp) SetSystemCursor(Help(), OCR_HELP);
+                            else if (onCross && cur == hcCross) SetSystemCursor(Cross(), OCR_CROSS);
+                            else if (onIbeam && cur == hcIbeam) SetSystemCursor(Ibeam(), OCR_IBEAM);
+                            else if (onWE && cur == hcWE) SetSystemCursor(ResizeWE(), OCR_SIZEWE);
+                            else if (onNS && cur == hcNS) SetSystemCursor(ResizeNS(), OCR_SIZENS);
+                            else if (onD1 && cur == hcD1) SetSystemCursor(ResizeD1(), OCR_SIZENWSE);
+                            else if (onD2 && cur == hcD2) SetSystemCursor(ResizeD2(), OCR_SIZENESW);
+                            else if (onMove && cur == hcMove) SetSystemCursor(Move(), OCR_SIZEALL);
+                            else if (onNo && cur == hcNo) SetSystemCursor(No(), OCR_NO);
                         }
                     }
                 }
