@@ -4,6 +4,27 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
+## 0.8.0 - 2026-06-15
+
+### Added
+- **Agent notifier — a waiting AI agent's logo on your cursor.** When an AI coding agent
+  (Claude Code) is waiting on you, the cursor sprouts a small tool-logo charm that hangs and
+  swings on the same pendulum as the busy ring / help "?", with a frameless **"+N"** when more
+  than one agent waits at once — an ambient, peripheral-vision nudge, no toast and no extra
+  window. Set it up in **Preferences → Agent settings…**: register Claude Code (WormsCursor
+  writes a `hook` into `~/.claude/settings.json` with backup-and-merge, never overwriting your
+  own hooks), toggle the logo, and choose how long a stuck logo lingers before it clears itself.
+  The logo appears when the agent is blocked on you (a permission/idle prompt) or finishes its
+  turn, and clears the moment you reply or the session ends — a hard-killed agent's logo lingers
+  until the timeout, since no exit hook fires.
+
+### Changed
+- **Lower idle CPU on the animated cursors.** The engine now skips its per-frame work when
+  nothing's happening: a settled resize / I-beam / move / "unavailable" cursor reuses a cached
+  frame instead of re-compositing, and the spring/clock physics is skipped entirely when an idle
+  pointer sits on a still mouse — plus a pass that cut per-frame allocations and Win32 calls across
+  the whole render path. Purely internal; the cursors look and animate exactly as before.
+
 ## 0.7.3 - 2026-06-13
 
 ### Changed
