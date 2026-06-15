@@ -45,11 +45,12 @@ public static class ProgressRenderer
     /// (0 = pointing right); <paramref name="ringX"/>/<paramref name="ringY"/> is the ring
     /// centre in canvas pixels; <paramref name="phase"/> spins the comet.</summary>
     public static Bitmap Compose(CursorSettings s, Bitmap arrowBase, double arrowDeg,
-                                 float ringX, float ringY, float phase, bool withArrow)
+                                 float ringX, float ringY, float phase, bool withArrow, Bitmap? into = null)
     {
         var l = Layout(s);
-        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        var bmp = into ?? new Bitmap(l.Canvas, l.Canvas);
         using var g = Graphics.FromImage(bmp);
+        if (into != null) g.Clear(Color.Transparent);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
@@ -59,6 +60,8 @@ public static class ProgressRenderer
         var fill = Parse(s.FillColor, Color.White);
         var outline = Parse(s.OutlineColor, Color.Black);
         float pen = (float)(s.OutlineThickness * (s.Size / 64f));
+        using var dotBrush = new SolidBrush(fill);
+        using var dotPen = pen > 0.01f ? new Pen(outline, pen) : null;
         for (int d = 0; d < Dots; d++)
         {
             float ang = phase + d * (MathF.PI * 2f / Dots);
@@ -67,11 +70,13 @@ public static class ProgressRenderer
             float t = d / (float)Dots;               // 0 = head (big/opaque) -> tail
             float rr = l.DotR * (1f - 0.65f * t);
             int alpha = (int)(255 * (1f - 0.78f * t));
-            using (var b = new SolidBrush(Color.FromArgb(alpha, fill)))
-                g.FillEllipse(b, cx - rr, cy - rr, rr * 2, rr * 2);
-            if (pen > 0.01f)
-                using (var p = new Pen(Color.FromArgb(alpha, outline), pen))
-                    g.DrawEllipse(p, cx - rr, cy - rr, rr * 2, rr * 2);
+            dotBrush.Color = Color.FromArgb(alpha, fill);
+            g.FillEllipse(dotBrush, cx - rr, cy - rr, rr * 2, rr * 2);
+            if (dotPen != null)
+            {
+                dotPen.Color = Color.FromArgb(alpha, outline);
+                g.DrawEllipse(dotPen, cx - rr, cy - rr, rr * 2, rr * 2);
+            }
         }
         return bmp;
     }
@@ -81,11 +86,12 @@ public static class ProgressRenderer
     /// of spinning. <paramref name="glyphDeg"/> is the string angle (the engine sets it so
     /// the "?" hangs upside-down at rest and swings as the cursor moves).</summary>
     public static Bitmap ComposeHelp(CursorSettings s, Bitmap arrowBase, double arrowDeg,
-                                     float qx, float qy, float glyphDeg)
+                                     float qx, float qy, float glyphDeg, Bitmap? into = null)
     {
         var l = Layout(s);
-        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        var bmp = into ?? new Bitmap(l.Canvas, l.Canvas);
         using var g = Graphics.FromImage(bmp);
+        if (into != null) g.Clear(Color.Transparent);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
@@ -171,12 +177,13 @@ public static class ProgressRenderer
     /// cursor moves fast); <paramref name="ringDeg"/> rotates the outer ring. Hotspot is the
     /// centre (precision point). Lines are stroked outline-under/fill-over for the same
     /// filled-with-an-outline look as the other cursors.</summary>
-    public static Bitmap ComposeCross(CursorSettings s, float gap, float ringDeg)
+    public static Bitmap ComposeCross(CursorSettings s, float gap, float ringDeg, Bitmap? into = null)
     {
         var l = Layout(s);
         int sz = Math.Max(8, s.Size);
-        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        var bmp = into ?? new Bitmap(l.Canvas, l.Canvas);
         using var g = Graphics.FromImage(bmp);
+        if (into != null) g.Clear(Color.Transparent);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
@@ -228,12 +235,13 @@ public static class ProgressRenderer
     /// top serif tilts with the bent tip. <paramref name="bounceX"/>/<paramref name="bounceY"/>
     /// shift the whole glyph (the typing "hop" up plus a small side-to-side shiver); the hotspot
     /// stays at the canvas centre.</summary>
-    public static Bitmap ComposeIbeam(CursorSettings s, float topOffX, float topOffY, float bounceY = 0f, float bounceX = 0f)
+    public static Bitmap ComposeIbeam(CursorSettings s, float topOffX, float topOffY, float bounceY = 0f, float bounceX = 0f, Bitmap? into = null)
     {
         var l = Layout(s);
         int sz = Math.Max(8, s.Size);
-        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        var bmp = into ?? new Bitmap(l.Canvas, l.Canvas);
         using var g = Graphics.FromImage(bmp);
+        if (into != null) g.Clear(Color.Transparent);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
         if (bounceX != 0f || bounceY != 0f) g.TranslateTransform(bounceX, bounceY); // typing hop + shiver; hotspot unchanged
@@ -335,12 +343,13 @@ public static class ProgressRenderer
     /// <summary>Composites a bi-directional resize cursor as stretched taffy along
     /// <paramref name="angleDeg"/> (0 = ↔, 90 = ↕, 45 = ↘↖, -45 = ↗↙). Hotspot is the centre;
     /// <paramref name="stretch"/> is the engine's spring value (0 at rest).</summary>
-    public static Bitmap ComposeResize(CursorSettings s, float angleDeg, float stretch)
+    public static Bitmap ComposeResize(CursorSettings s, float angleDeg, float stretch, Bitmap? into = null)
     {
         var l = Layout(s);
         int sz = Math.Max(8, s.Size);
-        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        var bmp = into ?? new Bitmap(l.Canvas, l.Canvas);
         using var g = Graphics.FromImage(bmp);
+        if (into != null) g.Clear(Color.Transparent);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
         float ob = (float)(s.OutlineThickness * (sz / 64f));
@@ -352,12 +361,13 @@ public static class ProgressRenderer
     /// <summary>Composites the move cursor (OCR_SIZEALL): a horizontal and a vertical taffy arrow
     /// crossed into a 4-way glyph. <paramref name="stretchX"/>/<paramref name="stretchY"/> stretch
     /// the horizontal / vertical arms with motion along that axis. Hotspot is the centre.</summary>
-    public static Bitmap ComposeMove(CursorSettings s, float stretchX, float stretchY)
+    public static Bitmap ComposeMove(CursorSettings s, float stretchX, float stretchY, Bitmap? into = null)
     {
         var l = Layout(s);
         int sz = Math.Max(8, s.Size);
-        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        var bmp = into ?? new Bitmap(l.Canvas, l.Canvas);
         using var g = Graphics.FromImage(bmp);
+        if (into != null) g.Clear(Color.Transparent);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
         float ob = (float)(s.OutlineThickness * (sz / 64f));
@@ -373,12 +383,13 @@ public static class ProgressRenderer
     /// ring is a soft jelly blob — at rest it's perfectly round, but the engine deforms it into
     /// an egg/oval along the direction of travel (<paramref name="deform"/> = signed stretch,
     /// <paramref name="axisDeg"/> = its axis) and wobbles it back. The diagonal slash stays put.</summary>
-    public static Bitmap ComposeNo(CursorSettings s, float deform, float axisDeg)
+    public static Bitmap ComposeNo(CursorSettings s, float deform, float axisDeg, Bitmap? into = null)
     {
         var l = Layout(s);
         int sz = Math.Max(8, s.Size);
-        var bmp = new Bitmap(l.Canvas, l.Canvas);
+        var bmp = into ?? new Bitmap(l.Canvas, l.Canvas);
         using var g = Graphics.FromImage(bmp);
+        if (into != null) g.Clear(Color.Transparent);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
@@ -450,10 +461,12 @@ public static class ProgressRenderer
         g.Restore(st);
     }
 
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Color> ColorCache = new();
     static Color Parse(string hex, Color fallback)
     {
         if (string.IsNullOrWhiteSpace(hex)) return fallback;
-        try { return ColorTranslator.FromHtml(hex.Trim()); }
+        if (ColorCache.TryGetValue(hex, out var c)) return c;
+        try { c = ColorTranslator.FromHtml(hex.Trim()); ColorCache[hex] = c; return c; }
         catch { return fallback; }
     }
 }

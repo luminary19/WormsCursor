@@ -39,6 +39,17 @@ public sealed class CursorSettings
     /// default; separate from <see cref="ClickFeedback"/> so it can be turned off on its own.</summary>
     public bool IbeamFeedback { get; set; } = true;
 
+    // ---------- agent notifier (preferences UI) ----------
+
+    /// <summary>Show a waiting tool's logo on the cursor while AI agents are waiting for the user
+    /// (always a single logo plus a "+N" count when several wait). On by default; the indicator only
+    /// appears once a hook is registered and an agent reports an event.</summary>
+    public bool AgentNotifierEnabled { get; set; } = true;
+
+    /// <summary>How long a waiting agent's logo lingers before it's swept, in seconds, if the agent
+    /// never sends a closing event. Default 60s; clamped to 30s–30min.</summary>
+    public int AgentNotifierTimeoutSeconds { get; set; } = 60;
+
     // ---------- which cursors are themed (preferences UI) ----------
 
     /// <summary>Cursor kinds the user has switched OFF — left as the Windows default
@@ -89,6 +100,7 @@ public sealed class CursorSettings
         Steps = Math.Clamp(Steps, 8, 720);
         Hz = Math.Clamp(Hz, 30, 240);
         AimSmooth = Math.Clamp(AimSmooth, 0.05, 1.0);
+        AgentNotifierTimeoutSeconds = Math.Clamp(AgentNotifierTimeoutSeconds, 30, 1800);
     }
 
     public CursorSettings Clone()
@@ -110,6 +122,8 @@ public sealed class CursorSettings
         CornerRadius = other.CornerRadius;
         ClickFeedback = other.ClickFeedback;
         IbeamFeedback = other.IbeamFeedback;
+        AgentNotifierEnabled = other.AgentNotifierEnabled;
+        AgentNotifierTimeoutSeconds = other.AgentNotifierTimeoutSeconds;
         DisabledCursors = new List<string>(other.DisabledCursors);
         Steps = other.Steps;
         Hz = other.Hz;

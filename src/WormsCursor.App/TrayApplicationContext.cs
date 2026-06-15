@@ -16,8 +16,6 @@ public sealed class TrayApplicationContext : ApplicationContext
     readonly IAutostart _autostart = new RegistryAutostart();
     readonly UpdateService _updates = new();
     readonly ToolStripMenuItem _enabledItem;
-    readonly ToolStripMenuItem _startupItem;
-    readonly ToolStripMenuItem _updatesItem;
 
     // A hidden, handle-backed control bound to the UI thread. Cross-process signals
     // (single-instance guard) BeginInvoke through it to hop onto the UI thread before
@@ -28,6 +26,13 @@ public sealed class TrayApplicationContext : ApplicationContext
     // Typing-hop keyboard hook (click feedback). Non-null only while it's installed; lives on
     // the UI thread so the low-level hook has a message loop. See SyncTypingHook.
     LowLevelKeyboardHook? _keyHook;
+
+    // Agent notifier: tracks how many agents await the user (fed by the pipe), pushes the count
+    // into the engine, and reflects it in the tray tooltip. The pipe server + sweep timer live
+    // here (not in the engine), so they survive ApplySettings' engine stop/restart.
+    readonly AgentActivity _agents = new();
+    AgentPipeServer? _agentPipe;
+    System.Windows.Forms.Timer? _agentSweep;
 
     public TrayApplicationContext()
     {
@@ -41,20 +46,13 @@ public sealed class TrayApplicationContext : ApplicationContext
             CheckOnClick = false, // we manage Checked ourselves so double-click can't desync it
             Checked = true,
         };
-        _startupItem = new ToolStripMenuItem("Start with Windows", null, OnToggleAutostart)
-        {
-            CheckOnClick = false,
-            Checked = _autostart.IsEnabled,
-        };
 
-        _updatesItem = new ToolStripMenuItem("Check for updates…", null, OnCheckForUpdates);
-
+        // The tray menu is deliberately minimal — Enabled / Preferences… / Exit. Autostart, the
+        // agent-notifications dialog, and update checks all live inside Preferences now.
         var menu = new ContextMenuStrip();
         menu.Items.Add(_enabledItem);
-        menu.Items.Add(_startupItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Preferences…", null, OnPreferences);
-        menu.Items.Add(_updatesItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, OnExit);
 
@@ -83,7 +81,47 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _engine.Start();
         SyncTypingHook();
+        StartAgentNotifier();
         MaybeShowWhatsNew();
+    }
+
+    // Brings up the agent-notifier plumbing: the named-pipe server that `WormsCursor.exe hook`
+    // invocations write to, a periodic sweep that evicts stale sessions, and the wiring that turns
+    // a changed waiting count into an engine update + tray tooltip. Independent of the engine's
+    // lifetime so it keeps listening across ApplySettings restarts.
+    void StartAgentNotifier()
+    {
+        _agents.WaitingCountChanged += OnWaitingCountChanged;
+        _agents.Ttl = TimeSpan.FromSeconds(_settings.AgentNotifierTimeoutSeconds);
+
+        _agentPipe = new AgentPipeServer(msg =>
+        {
+            // The pipe fires on its own thread; hop to the UI thread so AgentActivity's events
+            // (which touch the tray) stay single-threaded, like every other callback here.
+            if (_marshal.IsHandleCreated)
+                _marshal.BeginInvoke(new Action(() => HandleAgentEvent(msg)));
+        });
+        _agentPipe.Start();
+
+        // Sweep often (every 5 s) so the configurable timeout — as short as 30 s — clears a stuck
+        // logo promptly, not up to a minute late. The sweep just scans a tiny dictionary; it's cheap.
+        _agentSweep = new System.Windows.Forms.Timer { Interval = 5_000 };
+        _agentSweep.Tick += (_, _) => _agents.Sweep(DateTime.UtcNow);
+        _agentSweep.Start();
+    }
+
+    void HandleAgentEvent(AgentEventMessage msg)
+    {
+        if (msg.TryGetKind(out var kind))
+            _agents.Report(msg.Tool, msg.SessionId, msg.Project, kind, DateTime.UtcNow);
+    }
+
+    void OnWaitingCountChanged(int count)
+    {
+        _engine.SetWaitingAgents(_agents.WaitingTools);
+        _tray.Text = count > 0
+            ? $"WormsCursor — {count} agent{(count == 1 ? "" : "s")} waiting"
+            : "WormsCursor";
     }
 
     // First launch after an update: show the new version's "What's new" notes once. Compares
@@ -136,21 +174,43 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    void OnToggleAutostart(object? sender, EventArgs e)
+    void OnPreferences(object? sender, EventArgs e) => OpenPreferences();
+
+    /// <summary>Shows the "Agent notifications" settings panel (hook registration + logo display).
+    /// Opened from Preferences (the "Agent settings…" button); marshals onto the UI thread so it's
+    /// safe to call from anywhere.</summary>
+    public void OpenAgentHooks()
     {
-        try
-        {
-            if (_autostart.IsEnabled) _autostart.Disable();
-            else _autostart.Enable();
-        }
-        catch (Exception ex)
-        {
-            _tray.ShowBalloonTip(3000, "WormsCursor", "Couldn't change autostart: " + ex.Message, ToolTipIcon.Warning);
-        }
-        _startupItem.Checked = _autostart.IsEnabled;
+        if (_marshal.InvokeRequired) { _marshal.BeginInvoke(OpenAgentHooks); return; }
+        using var dlg = new AgentHooksForm(
+            _settings.AgentNotifierEnabled, _settings.AgentNotifierTimeoutSeconds, ApplyAgentDisplay, PreviewWaitingCount);
+        dlg.ShowDialog();
     }
 
-    void OnPreferences(object? sender, EventArgs e) => OpenPreferences();
+    // Drives the live cursor for the "Preview on cursor" test in the dialog: a non-null value fakes
+    // that many waiting agents (cycling the supported tools so you see each logo); null ends the
+    // preview and restores the real set (so a real agent event arriving mid-preview, or just closing
+    // the dialog, leaves the genuine charms on screen).
+    static readonly string[] PreviewTools = { "claude-code" }; // Codex hidden for now
+    void PreviewWaitingCount(int? testCount)
+    {
+        if (testCount is not int n) { _engine.SetWaitingAgents(_agents.WaitingTools); return; }
+        var tools = new string[Math.Max(0, n)];
+        for (int i = 0; i < tools.Length; i++) tools[i] = PreviewTools[i % PreviewTools.Length];
+        _engine.SetWaitingAgents(tools);
+    }
+
+    // The engine reads AgentNotifierEnabled live each tick (see ApplyCharms) and AgentActivity holds
+    // the linger timeout, so a display change takes effect immediately — no engine restart needed,
+    // just push the TTL and persist.
+    void ApplyAgentDisplay(bool enabled, int timeoutSeconds)
+    {
+        _settings.AgentNotifierEnabled = enabled;
+        _settings.AgentNotifierTimeoutSeconds = timeoutSeconds;
+        _settings.Normalize(); // clamp the timeout into range
+        _agents.Ttl = TimeSpan.FromSeconds(_settings.AgentNotifierTimeoutSeconds);
+        SettingsStore.Save(_settings);
+    }
 
     /// <summary>
     /// Shows the Preferences dialog and applies any changes. Safe to call from a
@@ -173,7 +233,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             // Pass SetTestCursor + ApplySettings so the dialog's "Test cursor" control can
             // force a cursor on the live (still-running) engine, and its "Apply" button can
             // commit edits without closing.
-            using var dlg = new PreferencesForm(_settings.Clone(), _updates, _engine.SetTestCursor, ApplySettings);
+            using var dlg = new PreferencesForm(_settings.Clone(), _updates, _engine.SetTestCursor, ApplySettings,
+                                                _autostart, OpenAgentHooks);
             var result = dlg.ShowDialog();
             _engine.SetTestCursor(TestCursor.Off); // always stop forcing a test cursor on close
             if (result == DialogResult.OK) ApplySettings(dlg.Settings);
@@ -199,68 +260,15 @@ public sealed class TrayApplicationContext : ApplicationContext
         _engine.Stop();
         if (wasRunning) _engine.Start();
         _enabledItem.Checked = _engine.IsRunning;
+        _engine.SetWaitingAgents(_agents.WaitingTools); // a fresh engine starts empty — re-push the live set
         SyncTypingHook(); // ClickFeedback / IbeamFeedback may have been toggled
-    }
-
-    // Tray-driven update check. Velopack has no UI of its own, so we surface
-    // progress/results through balloon tips. await-ing keeps the continuations on
-    // the UI thread (WinForms SynchronizationContext) so the NotifyIcon calls and
-    // ApplyUpdatesAndRestart (which tears down this process) are thread-safe.
-    async void OnCheckForUpdates(object? sender, EventArgs e)
-    {
-        _updatesItem.Enabled = false;
-        try
-        {
-            var result = await _updates.CheckAsync();
-            switch (result.Availability)
-            {
-                case UpdateAvailability.NotInstalled:
-                    // Dev build (run from bin\) — can't self-update. Offer the
-                    // Releases page so the user can grab a real Setup.exe.
-                    _tray.ShowBalloonTip(4000, "WormsCursor",
-                        "Dev build — auto-update disabled. Opening the Releases page.",
-                        ToolTipIcon.Info);
-                    _updates.OpenReleasesPage();
-                    break;
-
-                case UpdateAvailability.UpToDate:
-                    _tray.ShowBalloonTip(3000, "WormsCursor",
-                        $"You're up to date (v{_updates.CurrentVersionText}).",
-                        ToolTipIcon.Info);
-                    break;
-
-                case UpdateAvailability.Available:
-                    _tray.ShowBalloonTip(3000, "WormsCursor",
-                        $"Downloading update v{result.AvailableVersion}… the app will restart.",
-                        ToolTipIcon.Info);
-                    // VelopackInfo is non-null when Availability == Available.
-                    await _updates.ApplyAsync(result.VelopackInfo!);
-                    // If we get here the restart didn't happen.
-                    _tray.ShowBalloonTip(4000, "WormsCursor",
-                        "Update downloaded but restart didn't happen — try again later.",
-                        ToolTipIcon.Warning);
-                    break;
-
-                case UpdateAvailability.Failed:
-                    _tray.ShowBalloonTip(4000, "WormsCursor",
-                        "Update check failed: " + result.ErrorMessage, ToolTipIcon.Warning);
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            _tray.ShowBalloonTip(4000, "WormsCursor",
-                "Update failed: " + ex.Message, ToolTipIcon.Warning);
-        }
-        finally
-        {
-            _updatesItem.Enabled = true;
-        }
     }
 
     void OnExit(object? sender, EventArgs e)
     {
         _tray.Visible = false;
+        _agentSweep?.Dispose();
+        _agentPipe?.Dispose();
         _keyHook?.Dispose();
         _engine.Dispose();
         ExitThread();
@@ -280,6 +288,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         if (disposing)
         {
+            _agentSweep?.Dispose();
+            _agentPipe?.Dispose();
             _keyHook?.Dispose();
             _tray.Dispose();
             _engine.Dispose();

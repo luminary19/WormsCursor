@@ -72,6 +72,45 @@ plus a transparent one).
 - The animated cursors re-render **only while actually on screen** (matched via `GetCursorInfo`
   against the live system handle), so an idle tray uses no CPU.
 
+## Agent notifier
+
+When an AI coding agent needs your attention, the cursor **sprouts a small logo charm** that hangs
+and swings on the same pendulum as the busy ring / help "?" — one logo for the waiting tool, with a
+frameless **"+N"** when several agents wait at once. It's an ambient, peripheral-vision nudge: no
+toast, no extra window. When nothing's waiting it costs nothing — the cursor falls back to its plain
+pre-rendered frames.
+
+Set it up from **Preferences… → Agent settings…**: register a tool there (currently **Claude
+Code**), toggle the logo, and set the "clear a stuck logo after" timeout. Registering writes
+WormsCursor's `hook` command into the tool's config (`~/.claude/settings.json`) with
+backup-and-merge — it never overwrites your own hooks. Each event then runs
+`WormsCursor.exe hook --tool …`, a throwaway process that writes one line to the running tray app
+over a named pipe and exits. It's **fail-silent** (<½ s pipe timeout, errors logged to
+`bridge.log`, always exits 0), so it can never block or break the agent.
+
+**What it reacts to.** Each tool's lifecycle hooks are normalised to a few events, and the logo
+tracks whether the ball is in *your* court:
+
+| The agent… | Claude hook | Logo |
+|---|---|---|
+| is blocked on you (permission / idle prompt) | `Notification` | **appears** |
+| finished its turn | `Stop` | **appears** |
+| ended on an error | `StopFailure` | **appears** |
+| started on your prompt, or you reopened the session | `UserPromptSubmit` / `SessionStart` | **clears** |
+| exited cleanly (`/exit`, `Ctrl+C`, `/clear`, logout) | `SessionEnd` | **clears at once** |
+
+So it shows up when an agent is *waiting on you* and clears the moment you're clearly back (you
+submitted a prompt) or the session ends. Multiple sessions are tracked independently (keyed by tool
++ session id), so the count is simply "how many agents need you right now".
+
+**Why it's event-driven (and the timeout).** WormsCursor only knows what the hooks tell it over the
+pipe — it never polls the agent or watches its process. That keeps it dead-simple and zero-cost when
+idle, but it means a session that never sends a closing event would otherwise wait forever. So
+there's a backstop: any waiting session with no further events for the **linger timeout** (default
+60 s, configurable 30–1800 s) is swept out of the count. The tool-call hooks (`PreToolUse` /
+`PostToolUse`) are deliberately *not* registered — they'd spawn a hook process on every single tool
+call — so "you replied" is inferred from your next prompt, not from the agent resuming work.
+
 ## Known issues
 
 - **Animated cursors flicker on a mixed-DPI multi-monitor setup.** If your monitors run at
@@ -86,6 +125,13 @@ plus a transparent one).
   mouse settings → Pointer Options, shortest setting), which forces a cursor-draw path that
   sidesteps the flicker. A proper fix would mean drawing the animated cursors in our own overlay
   instead of through `SetSystemCursor` (tracked for a future release).
+- **A hard-killed agent's logo lingers until the timeout.** The agent notifier learns everything
+  from the tool's hooks over the pipe — it never watches the agent's process. A *clean* exit
+  (`/exit`, `Ctrl+C`, `/clear`, logout) fires `SessionEnd` and the logo clears immediately, but if
+  the agent is **killed outright** (Task Manager "End Task", closing the terminal window, `kill`) no
+  hook runs, so no "session ended" ever reaches WormsCursor. The waiting logo then stays until the
+  **linger timeout** sweeps it (default 60 s, set in *Agent settings…*). This is by design — with no
+  event there's nothing to react to, and the timeout is the backstop.
 
 ## Project structure
 
@@ -98,14 +144,23 @@ WormsCursor.sln
 │  │   ├─ HandRenderer.cs     Draws the hand/link cursor (solid fill + baked line art)
 │  │   ├─ ProgressRenderer.cs Draws the composited cursors (busy, help, crosshair, text, resize/move, unavailable)
 │  │   ├─ HandShape.cs        Baked hand geometry (silhouette + crease marks)
+│  │   ├─ NotifierRenderer.cs Composites the agent-notifier logo charm onto a cursor
+│  │   ├─ AgentLogos.cs       Baked tool logos (Claude critter, OpenAI knot); SvgPath.cs parses the path data
+│  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe); AgentEventMessage.cs is the wire format
 │  │   ├─ CursorSettings.cs   Tunable parameters (persisted as JSON)
 │  │   └─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
 │  ├─ WormsCursor.App/       Tray shell (WinForms, no main window)
-│  │   ├─ Program.cs                   Entry point (Velopack hook + single-instance guard)
-│  │   ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the engine
-│  │   ├─ PreferencesForm.cs          Live settings dialog (size, colours, thickness, radius, test cursor)
+│  │   ├─ Program.cs                   Entry point (Velopack + single-instance guard; `hook` verb short-circuits first)
+│  │   ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the engine, pipe server + keyboard hook
+│  │   ├─ PreferencesForm.cs          Live settings dialog (preview grid, size/colour/thickness/radius, feedback toggles, test cursor + Showtime)
+│  │   ├─ AgentHooksForm.cs            Agent-notifier settings + per-tool hook registration UI
+│  │   ├─ AgentPipeServer.cs           Named-pipe server that receives normalised agent events
+│  │   ├─ AgentHookBridge.cs           The `hook` verb: normalises a tool's payload → one pipe line, fail-silent
+│  │   ├─ Services/AgentHookRegistrar.cs Writes/removes WormsCursor's hook in each tool's config (backup + merge)
+│  │   ├─ LowLevelKeyboardHook.cs      Keyboard hook driving the I-beam typing bounce
 │  │   ├─ SingleInstance.cs            One instance only; a 2nd launch opens Preferences
 │  │   ├─ Autostart.cs                 "Start with Windows" via HKCU\…\Run
+│  │   ├─ ChangelogForm.cs             "What's new" dialog (from CHANGELOG.md)
 │  │   └─ Services/UpdateService.cs    Velopack check / download / apply updates
 │  └─ WormsCursor.Preview/   Console tool — renders the cursor showcase PNGs (docs/README)
 │      └─ Program.cs                    Dark + transparent sheets of every themed cursor
@@ -136,18 +191,20 @@ dotnet build WormsCursor.sln
 dotnet run --project src/WormsCursor.App
 ```
 
-A tray icon appears. Right-click it for **Enabled / Start with Windows / Preferences… /
-Check for updates… / Exit**; double-click toggles the effect on/off. Only one instance
-runs — launching it again just opens **Preferences**. "Start with Windows" registers a
-per-user `HKCU\…\Run` entry (no admin), which you can also manage from Task Manager →
-Startup apps.
+A tray icon appears. Right-click it for **Enabled / Preferences… / Exit**; double-click
+toggles the effect on/off. Only one instance runs — launching it again just opens
+**Preferences**.
 
-**Preferences…** opens a live editor for cursor **size**, **fill** and **outline
-colour**, **outline thickness** and **corner radius**, with a live preview of **all the
-cursors**, a **Test cursor** picker that forces a chosen cursor on screen, and
-**Apply** / **Defaults** / **Check for updates** buttons. Settings are saved to
-`%LocalAppData%\WormsCursor\settings.json` and persist across restarts — and across
-updates, since they live outside the app folder.
+**Preferences…** opens a live editor with a preview grid of **all the cursors** — hover a
+tile to try it on the real pointer, or untick it to keep the Windows default. It has sliders
+for **size**, **outline thickness** and **corner radius**, **fill** and **outline colour**
+pickers, **click-feedback** and **I-beam typing-bounce** toggles, a **Test cursor** picker
+(plus **Showtime**, a hands-free cycle through the enabled cursors for recording), a **Start
+with Windows** toggle, an **Agent settings…** button, and a **Check for updates** button.
+"Start with Windows" registers a per-user `HKCU\…\Run` entry (no admin), which you can also
+manage from Task Manager → Startup apps. Settings are saved to
+`%LocalAppData%\WormsCursor\settings.json` and persist across restarts — and across updates,
+since they live outside the app folder.
 
 ### Standalone build (no .NET install on the target)
 

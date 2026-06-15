@@ -5,8 +5,18 @@ namespace WormsCursor.App;
 static class Program
 {
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
+        // Agent-notifier bridge: `WormsCursor.exe hook …` is a throwaway invocation fired by an
+        // AI agent's hook. Handle it FIRST — before Velopack and the single-instance guard — so
+        // it starts lean and never spins up UI: it forwards one event over the pipe and exits 0.
+        // Fail-silent (it must never block or crash the agent), so this can't throw.
+        if (AgentHookBridge.IsHookInvocation(args))
+        {
+            AgentHookBridge.Run(args);
+            return;
+        }
+
         // Velopack hijacks Main when invoked with --veloapp-* args during
         // install / update / uninstall: it runs the matching hook and exits
         // before any UI spins up. Must stay the very first call in Main.

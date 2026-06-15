@@ -29,7 +29,9 @@ public sealed class CursorEngine : IDisposable
     Managed[] _managed = Array.Empty<Managed>();
     Bitmap? _arrowBase;                       // kept for compositing the busy cursor + click-pop scaling
     Bitmap? _handBase;                        // kept for click-pop scaling of the hand
+    Dictionary<uint, IntPtr> _restFrames = new(); // pre-built "settled" frame per non-animated cursor (OCR id -> HCURSOR)
     volatile bool _ibeamKick;                 // a keystroke arrived (set by NudgeIbeam) -> hop the I-beam
+    volatile string[] _waitingTools = Array.Empty<string>(); // one tool id per waiting agent (dangling charms)
     volatile TestCursor _test = TestCursor.Off;
     Thread? _thread;
     volatile bool _running;
@@ -49,6 +51,18 @@ public sealed class CursorEngine : IDisposable
     /// consumed on the next loop tick. No-op unless click feedback is on and an I-beam is
     /// actually showing.</summary>
     public void NudgeIbeam() => _ibeamKick = true;
+
+    /// <summary>Set which agent sessions currently await the user — one tool id (e.g. "claude-code",
+    /// "codex") per waiting agent. The loop hangs one logo charm per entry off the cursor's pendulum
+    /// (empty = none, cheap pre-rendered frames resume). Thread-safe: copies into a fresh array and
+    /// stores it as a volatile, consumed on the next tick. The tray re-pushes after an engine restart.</summary>
+    public void SetWaitingAgents(IReadOnlyList<string>? tools)
+    {
+        if (tools is null || tools.Count == 0) { _waitingTools = Array.Empty<string>(); return; }
+        var arr = new string[tools.Count];
+        for (int i = 0; i < arr.Length; i++) arr[i] = tools[i];
+        _waitingTools = arr;
+    }
 
     /// <summary>Builds the rotated cursors and starts the background tracking loop.</summary>
     public void Start()
@@ -110,7 +124,22 @@ public sealed class CursorEngine : IDisposable
             var arrowFrames = _managed[0].Frames;          // [0] = arrow, [1] = hand (see BuildCursors)
             var handFrames = _managed[1].Frames;
             var l = ProgressRenderer.Layout(_settings);
+            using var fgBuf = new Bitmap(l.Canvas, l.Canvas); // reused back-buffer for foreground composites (Size is fixed for a run)
             int ciSize = Marshal.SizeOf<CURSORINFO>();
+
+            // LoadCursor(NULL, OCR_*) returns a stable shared handle — fetch each once instead of
+            // calling it up to 11×/frame in the on-screen detection chain below.
+            IntPtr hcWait = LoadCursor(IntPtr.Zero, (IntPtr)OCR_WAIT);
+            IntPtr hcApp  = LoadCursor(IntPtr.Zero, (IntPtr)OCR_APPSTARTING);
+            IntPtr hcHelp = LoadCursor(IntPtr.Zero, (IntPtr)OCR_HELP);
+            IntPtr hcCross= LoadCursor(IntPtr.Zero, (IntPtr)OCR_CROSS);
+            IntPtr hcIbeam= LoadCursor(IntPtr.Zero, (IntPtr)OCR_IBEAM);
+            IntPtr hcWE   = LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEWE);
+            IntPtr hcNS   = LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENS);
+            IntPtr hcD1   = LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENWSE);
+            IntPtr hcD2   = LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENESW);
+            IntPtr hcMove = LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEALL);
+            IntPtr hcNo   = LoadCursor(IntPtr.Zero, (IntPtr)OCR_NO);
 
             // Per-cursor enable flags: a cursor switched OFF in Preferences is left as the
             // Windows default — we simply never SetSystemCursor its slot (nor re-theme it on
@@ -154,6 +183,19 @@ public sealed class CursorEngine : IDisposable
             float maxLen = sz * 0.42f;                // taut-string max length from the tail
             float phaseStep = 1.6f * MathF.PI * 2f * dt;            // ~1.6 rev/s
 
+            // --- agent-notifier charms: the waiting tools' logos hang on a pendulum, same world-space
+            //     spring physics as the busy ring / help "?". The ANCHOR differs by cursor kind:
+            //     the arrow & hand rotate to follow movement, so their logo hangs off the tail
+            //     (ringCX/ringCY + helpAngleDeg) exactly like the "?"; the cursors that DON'T rotate
+            //     (I-beam, crosshair, resize, move, unavailable, the no-arrow wait spinner) instead
+            //     hang it straight BELOW the hotspot (belowCX/belowCY) so it doesn't appear to orbit
+            //     them. Both are read by ApplyCharms. ---
+            float lbx = 0, lby = 0, lvbx = 0, lvby = 0; bool belowInit = false;
+            float belowCX = 0, belowCY = 0, belowDeg = 0; // hotspot-anchored bob (canvas px) + swing
+            float belowDrop = sz * 0.42f;             // hangs below the hotspot, clear of the glyph
+            float belowGravity = belowDrop * pendK;
+            float belowMaxLen = sz * 0.60f;
+
             // --- crosshair state: a breathing gap + recoil spring + a slowly spinning ring ---
             float tsec = 0;                           // master clock for breathing / ring rotation
             float recoil = 0, vrec = 0;               // extra gap that springs out when moving fast
@@ -180,6 +222,7 @@ public sealed class CursorEngine : IDisposable
             bool busyInit = false;
             var lastTest = TestCursor.Off;
             int tick = 0;
+            uint restApplied = 0;             // OCR id whose cached rest frame is currently applied (0 = none)
 
             // --- click squash&pop: the pointer scales down while a mouse button is held and
             //     springs back with a little overshoot on release (underdamped). Mouse-button
@@ -212,7 +255,8 @@ public sealed class CursorEngine : IDisposable
                 double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
                 float rx = withArrow ? ringCX : l.HotX;
                 float ry = withArrow ? ringCY : l.HotY;
-                using var bmp = ProgressRenderer.Compose(_settings, _arrowBase!, deg, rx, ry, phase, withArrow);
+                var bmp = ProgressRenderer.Compose(_settings, _arrowBase!, deg, rx, ry, phase, withArrow, fgBuf);
+                if (withArrow) CharmsTail(bmp); else CharmsBelow(bmp); // arrow rotates → tail; bare wait spinner → below
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
@@ -221,7 +265,8 @@ public sealed class CursorEngine : IDisposable
             IntPtr Help()
             {
                 double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
-                using var bmp = ProgressRenderer.ComposeHelp(_settings, _arrowBase!, deg, ringCX, ringCY, helpAngleDeg);
+                var bmp = ProgressRenderer.ComposeHelp(_settings, _arrowBase!, deg, ringCX, ringCY, helpAngleDeg, fgBuf);
+                CharmsTail(bmp); // has the arrow → hangs off the tail like the "?"
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
@@ -231,28 +276,85 @@ public sealed class CursorEngine : IDisposable
             // stays put); pop == 1 at rest is a cheap pass-through.
             IntPtr Cross()
             {
-                using var bmp = ProgressRenderer.ComposeCross(_settings, crossGap, ringDeg);
+                var bmp = ProgressRenderer.ComposeCross(_settings, crossGap, ringDeg, fgBuf);
+                CharmsBelow(bmp); // no rotation → hang straight below
                 return ScaledCursor(bmp, l.HotX, l.HotY, clickFx ? popScale : 1f);
             }
 
             // The text / I-beam cursor: rigid bottom, jelly top (ibOffX/ibOffY), hotspot centre.
             IntPtr Ibeam()
             {
-                using var bmp = ProgressRenderer.ComposeIbeam(_settings, ibOffX, ibOffY, hopY, hopX);
+                var bmp = ProgressRenderer.ComposeIbeam(_settings, ibOffX, ibOffY, hopY, hopX, fgBuf);
+                CharmsBelow(bmp); // no rotation → hang straight below
                 return MakeCursor(bmp, l.HotX, l.HotY);
             }
 
             // Resize cursors: a taffy double-arrow that necks/stretches along its axis (WE = ↔,
             // NS = ↕, D1 = ↘↖ / SIZENWSE, D2 = ↗↙ / SIZENESW). Move crosses a horizontal +
             // vertical taffy. Hotspot dead centre (the precision point Windows expects).
-            IntPtr ResizeWE() { using var b = ProgressRenderer.ComposeResize(_settings, 0f, rsWE); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr ResizeNS() { using var b = ProgressRenderer.ComposeResize(_settings, 90f, rsNS); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr ResizeD1() { using var b = ProgressRenderer.ComposeResize(_settings, 45f, rsD1); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr ResizeD2() { using var b = ProgressRenderer.ComposeResize(_settings, -45f, rsD2); return MakeCursor(b, l.HotX, l.HotY); }
-            IntPtr Move() { using var b = ProgressRenderer.ComposeMove(_settings, rsWE, rsNS); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeWE() { var b = ProgressRenderer.ComposeResize(_settings, 0f, rsWE, fgBuf); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeNS() { var b = ProgressRenderer.ComposeResize(_settings, 90f, rsNS, fgBuf); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeD1() { var b = ProgressRenderer.ComposeResize(_settings, 45f, rsD1, fgBuf); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr ResizeD2() { var b = ProgressRenderer.ComposeResize(_settings, -45f, rsD2, fgBuf); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr Move() { var b = ProgressRenderer.ComposeMove(_settings, rsWE, rsNS, fgBuf); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
 
             // The "unavailable" cursor: a red circle-with-slash whose ring wobbles like jelly.
-            IntPtr No() { using var b = ProgressRenderer.ComposeNo(_settings, noE, noAng); return MakeCursor(b, l.HotX, l.HotY); }
+            IntPtr No() { var b = ProgressRenderer.ComposeNo(_settings, noE, noAng, fgBuf); CharmsBelow(b); return MakeCursor(b, l.HotX, l.HotY); }
+
+            // Composites the waiting tools' logos onto a finished cursor bitmap when one or more
+            // agents await the user. Two anchors (see the pendulum decls): CharmsTail hangs them off
+            // the rotating tail like the "?" (helpAngleDeg is 180 at rest — its "?" hangs upside-down
+            // — so logo swing = helpAngleDeg-180 keeps the logo upright at rest), for the arrow & hand;
+            // CharmsBelow hangs them straight under the hotspot for cursors that don't rotate. Zero
+            // cost when off / nothing waiting.
+            void ApplyCharms(Bitmap bmp, float bobX, float bobY, float swingDeg)
+            {
+                var tools = _waitingTools;
+                if (tools.Length == 0 || !_settings.AgentNotifierEnabled) return;
+                using var g = Graphics.FromImage(bmp);
+                NotifierRenderer.DrawCharms(g, _settings, tools, bobX, bobY, swingDeg);
+            }
+            void CharmsTail(Bitmap bmp) => ApplyCharms(bmp, ringCX, ringCY, helpAngleDeg - 180f);
+            void CharmsBelow(Bitmap bmp) => ApplyCharms(bmp, belowCX, belowCY, belowDeg);
+
+            // The pointer (arrow/hand) rendered live for the click-pop and/or with the hanging
+            // agent logos. Without charms it returns the arrow-sized scaled frame (unchanged pop
+            // behaviour); with charms it draws onto the full 2x canvas so the logos have room to
+            // hang off the tail, hotspot still at the canvas centre.
+            IntPtr PointerLive(Bitmap baseBmp, double baseAngleDeg, double deg, float scale, bool withCharms)
+            {
+                if (!withCharms) return RotatedScaled(baseBmp, baseAngleDeg, deg, scale);
+                var bmp = fgBuf;
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    g.Clear(Color.Transparent);
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    int a = baseBmp.Width;
+                    g.TranslateTransform(l.HotX, l.HotY);
+                    g.RotateTransform((float)(deg - baseAngleDeg));
+                    g.ScaleTransform(scale, scale);
+                    g.TranslateTransform(-a / 2f, -a / 2f);
+                    g.DrawImage(baseBmp, 0, 0);
+                }
+                CharmsTail(bmp); // the pointer rotates → hang off the tail like the "?"
+                return MakeCursor(bmp, l.HotX, l.HotY);
+            }
+
+            // Swap in a pre-built rest frame for a settled cursor — but only once. While it stays
+            // settled on screen restApplied remembers the slot, so we then do NOTHING per frame (the
+            // whole point: an idle resize / I-beam / "no" cursor costs zero). SetSystemCursor is
+            // persistent, so the frame stays put until a spring reactivates and the live path resets it.
+            void ApplyRest(uint ocr)
+            {
+                if (restApplied == ocr) return;
+                if (_restFrames.TryGetValue(ocr, out var h) && h != IntPtr.Zero)
+                {
+                    SetSystemCursor(CopyIcon(h), ocr);
+                    restApplied = ocr;
+                }
+            }
 
             while (_running)
             {
@@ -300,10 +402,41 @@ public sealed class CursorEngine : IDisposable
                 int idx = ((int)Math.Round((double.IsNaN(dispDeg) ? 0.0 : dispDeg) / stepDeg)) % _settings.Steps;
                 if (idx < 0) idx += _settings.Steps;
 
+                // --- 2.5) decide whether step 3 (the physics) can be skipped this tick. Skip ONLY when
+                //          nothing would observe it: no animated cursor on screen (their clocks/springs
+                //          drive the visible frame), no charm swinging, no test cursor forced, no button
+                //          held, and every spring already settled to its rest pose — where integrating is
+                //          a no-op and the dt gap on resume is harmless. The time-based clocks (comet
+                //          spin, crosshair ring/breathing) only matter while their cursor shows (covered
+                //          by onScreenAnimated) and the pendulums only while charms/help/app show. So an
+                //          idle pointer on a still mouse costs zero physics. btnDown is also read by the
+                //          pop logic and charmsActive / curNow / showingNow by the apply block below.
+                bool btnDown = clickFx && ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0
+                                        || (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0);
+                bool charmsActive = _settings.AgentNotifierEnabled && _waitingTools.Length > 0;
+                var ciNow = new CURSORINFO { cbSize = ciSize };
+                bool showingNow = GetCursorInfo(ref ciNow) && (ciNow.flags & CURSOR_SHOWING) != 0;
+                IntPtr curNow = showingNow ? ciNow.hCursor : IntPtr.Zero;
+                bool onScreenAnimated = showingNow && (curNow == hcWait || curNow == hcApp || curNow == hcHelp
+                    || curNow == hcCross || curNow == hcIbeam || curNow == hcWE || curNow == hcNS
+                    || curNow == hcD1 || curNow == hcD2 || curNow == hcMove || curNow == hcNo);
+                bool moving = dx != 0 || dy != 0;
+                bool springsSettled = !moving
+                    && MathF.Abs(popScale - 1f) < 0.004f && MathF.Abs(vPop) < 0.02f
+                    && MathF.Abs(recoil) < 0.05f && MathF.Abs(vrec) < 0.5f
+                    && MathF.Abs(ibOffX) < 0.15f && MathF.Abs(ibOffY) < 0.15f && MathF.Abs(vibX) < 0.6f && MathF.Abs(vibY) < 0.6f
+                    && MathF.Abs(hopY) < 0.15f && MathF.Abs(hopX) < 0.15f && MathF.Abs(vHop) < 0.6f && MathF.Abs(vHopX) < 0.6f
+                    && MathF.Abs(rsWE) < 0.004f && MathF.Abs(vWE) < 0.02f && MathF.Abs(rsNS) < 0.004f && MathF.Abs(vNS) < 0.02f
+                    && MathF.Abs(rsD1) < 0.004f && MathF.Abs(vD1) < 0.02f && MathF.Abs(rsD2) < 0.004f && MathF.Abs(vD2) < 0.02f
+                    && MathF.Abs(noE) < 0.004f && MathF.Abs(vno) < 0.02f;
+                bool needPhysics = !busyInit || _test != TestCursor.Off || onScreenAnimated || charmsActive || btnDown || !springsSettled;
+
                 // --- 3) advance the spinner: spin the comet, and swing the bob. The
                 //        bob hangs off the arrow's TAIL on a springy string under gravity;
                 //        simulated in world coords so moving the cursor whips the anchor
                 //        and the bob lags/swings, then settles straight down when you stop ---
+                if (needPhysics)
+                {
                 phase += phaseStep;
                 if (phase > MathF.PI * 2f) phase -= MathF.PI * 2f;
                 {
@@ -328,6 +461,29 @@ public sealed class CursorEngine : IDisposable
                     // string angle (anchor -> bob); +90 so the "?" hangs upside-down at rest
                     // (straight-down string) and tilts as the bob swings to the sides.
                     helpAngleDeg = (float)(Math.Atan2(by - ay, bx - ax) * 180.0 / Math.PI) + 90f;
+                }
+
+                // The "below" pendulum: same spring, but anchored at the HOTSPOT (not the rotating
+                // tail), so the logo on a non-rotating cursor hangs straight under it and swings only
+                // as the cursor translates — never orbiting. belowDeg is 0 (upright) at rest.
+                {
+                    float ax = p.x, ay = p.y;
+                    if (!belowInit) { lbx = ax; lby = ay + belowDrop; lvbx = lvby = 0; belowInit = true; }
+                    lvbx += ((ax - lbx) * pendK - lvbx * pendC) * dt;
+                    lvby += ((ay - lby) * pendK + belowGravity - lvby * pendC) * dt;
+                    lbx += lvbx * dt; lby += lvby * dt;
+                    float dxn = lbx - ax, dyn = lby - ay;
+                    float dlen = MathF.Sqrt(dxn * dxn + dyn * dyn);
+                    if (dlen > belowMaxLen)
+                    {
+                        float nx = dxn / dlen, ny = dyn / dlen;
+                        lbx = ax + nx * belowMaxLen; lby = ay + ny * belowMaxLen;
+                        float vd = lvbx * nx + lvby * ny;
+                        if (vd > 0) { lvbx -= vd * nx; lvby -= vd * ny; }
+                    }
+                    belowCX = Math.Clamp(l.HotX + (lbx - p.x), 0, l.Canvas);
+                    belowCY = Math.Clamp(l.HotY + (lby - p.y), 0, l.Canvas);
+                    belowDeg = (float)(Math.Atan2(lby - ay, lbx - ax) * 180.0 / Math.PI) - 90f;
                 }
 
                 // crosshair: advance the clock (breathing + ring spin) and the recoil
@@ -372,10 +528,8 @@ public sealed class CursorEngine : IDisposable
                 float noTgt = MathF.Min(spd / noRef, 1f) * noMax;
                 vno += ((noTgt - noE) * noK - vno * noC) * dt; noE += vno * dt;
 
-                // click squash&pop: poll the mouse buttons, then spring popScale toward the
-                // target (squashed while held, 1 at rest) — underdamped, so release overshoots.
-                bool btnDown = clickFx && ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0
-                                        || (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0);
+                // click squash&pop: spring popScale toward the target (squashed while a button is held,
+                // 1 at rest) — underdamped, so release overshoots. (btnDown is polled above, in step 2.5.)
                 float popTgt = btnDown ? popSquash : 1f;
                 vPop += ((popTgt - popScale) * popK - vPop * popC) * dt;
                 popScale += vPop * dt;
@@ -399,6 +553,7 @@ public sealed class CursorEngine : IDisposable
                     vHopX += (-hopX * hopXK - vHopX * hopXC) * dt; hopX += vHopX * dt;
                 }
                 else { hopY = 0f; vHop = 0f; hopX = 0f; vHopX = 0f; }
+                } // end if (needPhysics) — skipped entirely when idle + settled (see step 2.5)
 
                 // --- 4) apply cursors ---
                 var test = _test;
@@ -407,25 +562,30 @@ public sealed class CursorEngine : IDisposable
 
                 if (test == TestCursor.Off)
                 {
-                    // While the click pop is in flight, render the pointer scaled-about-hotspot
-                    // from the base bitmaps (~60fps, only when the frame actually changed); once
-                    // it settles, fall back to the crisp pre-rendered frames.
+                    // While the click pop is in flight OR agents are waiting (hanging logos),
+                    // render the pointer live (~60fps): scaled-about-hotspot for the pop, and/or with
+                    // the agent logos (which swing, so re-render every frame). Otherwise fall back to
+                    // the crisp pre-rendered direction frames — zero cost on an idle tray.
+                    // charmsActive + btnDown were computed in step 2.5 (the physics gate) and are reused here.
                     bool popActive = clickFx && (btnDown || MathF.Abs(popScale - 1f) > 0.004f || MathF.Abs(vPop) > 0.02f);
-                    if (popActive)
+                    if (popActive || charmsActive)
                     {
                         int popScaleQ = (int)MathF.Round(popScale * 200f);
-                        if (fgRender && (idx != lastPopIdx || popScaleQ != lastPopScaleQ))
+                        // Charms must re-render every frame to swing; a bare pop only when it moved.
+                        if (fgRender && (charmsActive || idx != lastPopIdx || popScaleQ != lastPopScaleQ))
                         {
                             lastPopIdx = idx; lastPopScaleQ = popScaleQ;
                             double deg = double.IsNaN(dispDeg) ? 0.0 : dispDeg;
+                            float sc = clickFx ? popScale : 1f;
                             if (onArrow)
                             {
-                                SetSystemCursor(RotatedScaled(_arrowBase!, 0.0, deg, popScale), OCR_NORMAL);
-                                SetSystemCursor(RotatedScaled(_arrowBase!, 0.0, deg, popScale), OCR_UP);
+                                IntPtr h = PointerLive(_arrowBase!, 0.0, deg, sc, charmsActive);
+                                SetSystemCursor(CopyIcon(h), OCR_UP);   // copy for the alternate-select slot first…
+                                SetSystemCursor(h, OCR_NORMAL);          // …then hand off h itself (SetSystemCursor destroys it)
                             }
-                            if (onHand) SetSystemCursor(RotatedScaled(_handBase!, HandShape.BaseAngleDeg, deg, popScale), OCR_HAND);
+                            if (onHand) SetSystemCursor(PointerLive(_handBase!, HandShape.BaseAngleDeg, deg, sc, charmsActive), OCR_HAND);
                         }
-                        curIdx = -1; normalDirty = true; // force a crisp re-apply once the pop ends
+                        curIdx = -1; normalDirty = true; // force a crisp re-apply once pop/charms end
                     }
                     else if (normalDirty || idx != curIdx)
                     {
@@ -464,23 +624,42 @@ public sealed class CursorEngine : IDisposable
                         // NB: do NOT compare against the handles we passed to SetSystemCursor
                         // — that call DESTROYS them, so they never equal what GetCursorInfo
                         // reports (this is why these used to animate only via "Test cursor").
-                        var ci = new CURSORINFO { cbSize = ciSize };
-                        if (GetCursorInfo(ref ci) && (ci.flags & CURSOR_SHOWING) != 0)
+                        // Reuse the cursor query from step 2.5 (one GetCursorInfo per tick).
+                        if (showingNow)
                         {
-                            IntPtr cur = ci.hCursor;
+                            IntPtr cur = curNow;
+                            // The non-rotating, non-time-animated cursors return to ONE fixed rest pose
+                            // once their motion springs settle, so a settled on-screen frame is pixel-
+                            // identical to the pre-built rest frame — swap that in (ApplyRest: applied
+                            // once, then skipped) instead of re-compositing every frame. Charms (swinging
+                            // logos) force the live path. Thresholds: 0.004 for the normalised stretch /
+                            // jelly springs (same scale as the click-pop settle test above), sub-px +
+                            // low-velocity for the I-beam's pixel offsets. Wait/AppStarting/Cross animate
+                            // on a clock and so are never at rest — they stay live below.
+                            bool noCharms = !charmsActive;
+                            bool weRest   = noCharms && MathF.Abs(rsWE) < 0.004f && MathF.Abs(vWE) < 0.02f;
+                            bool nsRest   = noCharms && MathF.Abs(rsNS) < 0.004f && MathF.Abs(vNS) < 0.02f;
+                            bool d1Rest   = noCharms && MathF.Abs(rsD1) < 0.004f && MathF.Abs(vD1) < 0.02f;
+                            bool d2Rest   = noCharms && MathF.Abs(rsD2) < 0.004f && MathF.Abs(vD2) < 0.02f;
+                            bool moveRest = weRest && nsRest;
+                            bool noRest   = noCharms && MathF.Abs(noE) < 0.004f && MathF.Abs(vno) < 0.02f;
+                            bool ibeamRest = noCharms
+                                && MathF.Abs(ibOffX) < 0.15f && MathF.Abs(ibOffY) < 0.15f && MathF.Abs(vibX) < 0.6f && MathF.Abs(vibY) < 0.6f
+                                && MathF.Abs(hopY) < 0.15f && MathF.Abs(hopX) < 0.15f && MathF.Abs(vHop) < 0.6f && MathF.Abs(vHopX) < 0.6f;
+
                             // Each branch is gated by its enable flag: a disabled slot still shows the
                             // Windows default (we never themed it), so there's nothing to re-render.
-                            if (onWait && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_WAIT)) SetSystemCursor(Busy(false), OCR_WAIT);
-                            else if (onApp && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_APPSTARTING)) SetSystemCursor(Busy(true), OCR_APPSTARTING);
-                            else if (onHelp && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_HELP)) SetSystemCursor(Help(), OCR_HELP);
-                            else if (onCross && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_CROSS)) SetSystemCursor(Cross(), OCR_CROSS);
-                            else if (onIbeam && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_IBEAM)) SetSystemCursor(Ibeam(), OCR_IBEAM);
-                            else if (onWE && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEWE)) SetSystemCursor(ResizeWE(), OCR_SIZEWE);
-                            else if (onNS && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENS)) SetSystemCursor(ResizeNS(), OCR_SIZENS);
-                            else if (onD1 && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENWSE)) SetSystemCursor(ResizeD1(), OCR_SIZENWSE);
-                            else if (onD2 && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZENESW)) SetSystemCursor(ResizeD2(), OCR_SIZENESW);
-                            else if (onMove && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_SIZEALL)) SetSystemCursor(Move(), OCR_SIZEALL);
-                            else if (onNo && cur == LoadCursor(IntPtr.Zero, (IntPtr)OCR_NO)) SetSystemCursor(No(), OCR_NO);
+                            if (onWait && cur == hcWait) SetSystemCursor(Busy(false), OCR_WAIT);
+                            else if (onApp && cur == hcApp) SetSystemCursor(Busy(true), OCR_APPSTARTING);
+                            else if (onHelp && cur == hcHelp) SetSystemCursor(Help(), OCR_HELP);
+                            else if (onCross && cur == hcCross) SetSystemCursor(Cross(), OCR_CROSS);
+                            else if (onIbeam && cur == hcIbeam) { if (ibeamRest) ApplyRest(OCR_IBEAM); else { SetSystemCursor(Ibeam(), OCR_IBEAM); restApplied = 0; } }
+                            else if (onWE && cur == hcWE)       { if (weRest)   ApplyRest(OCR_SIZEWE);   else { SetSystemCursor(ResizeWE(), OCR_SIZEWE);   restApplied = 0; } }
+                            else if (onNS && cur == hcNS)       { if (nsRest)   ApplyRest(OCR_SIZENS);   else { SetSystemCursor(ResizeNS(), OCR_SIZENS);   restApplied = 0; } }
+                            else if (onD1 && cur == hcD1)       { if (d1Rest)   ApplyRest(OCR_SIZENWSE); else { SetSystemCursor(ResizeD1(), OCR_SIZENWSE); restApplied = 0; } }
+                            else if (onD2 && cur == hcD2)       { if (d2Rest)   ApplyRest(OCR_SIZENESW); else { SetSystemCursor(ResizeD2(), OCR_SIZENESW); restApplied = 0; } }
+                            else if (onMove && cur == hcMove)   { if (moveRest) ApplyRest(OCR_SIZEALL);  else { SetSystemCursor(Move(), OCR_SIZEALL);       restApplied = 0; } }
+                            else if (onNo && cur == hcNo)       { if (noRest)   ApplyRest(OCR_NO);       else { SetSystemCursor(No(), OCR_NO);             restApplied = 0; } }
                         }
                     }
                 }
@@ -561,6 +740,28 @@ public sealed class CursorEngine : IDisposable
             new Managed(OCR_NORMAL, BuildFrames(_arrowBase, 0.0, n)),
             new Managed(OCR_HAND, BuildFrames(_handBase, HandShape.BaseAngleDeg, n)),
         };
+        BuildRestFrames();
+    }
+
+    // Pre-render the "settled" frame of each non-rotating, non-time-animated cursor (I-beam, the four
+    // resizes, move, unavailable). Their motion springs return to a single fixed rest pose, so while
+    // one sits on screen with the mouse still its live re-render is pixel-identical — the loop swaps in
+    // these cached frames (see restApplied) instead of re-compositing ~60fps. Built once per run and
+    // freed in DestroyCursors, exactly like the rotated direction frames. (Wait/AppStarting/Cross
+    // animate on a clock and Help follows the pointer direction, so none of those has a single rest
+    // pose — they stay on the live path.)
+    void BuildRestFrames()
+    {
+        var l = ProgressRenderer.Layout(_settings);
+        _restFrames = new Dictionary<uint, IntPtr>(7);
+        void Add(uint ocr, Bitmap bmp) { _restFrames[ocr] = MakeCursor(bmp, l.HotX, l.HotY); bmp.Dispose(); }
+        Add(OCR_IBEAM,    ProgressRenderer.ComposeIbeam(_settings, 0f, 0f));
+        Add(OCR_SIZEWE,   ProgressRenderer.ComposeResize(_settings, 0f, 0f));
+        Add(OCR_SIZENS,   ProgressRenderer.ComposeResize(_settings, 90f, 0f));
+        Add(OCR_SIZENWSE, ProgressRenderer.ComposeResize(_settings, 45f, 0f));
+        Add(OCR_SIZENESW, ProgressRenderer.ComposeResize(_settings, -45f, 0f));
+        Add(OCR_SIZEALL,  ProgressRenderer.ComposeMove(_settings, 0f, 0f));
+        Add(OCR_NO,       ProgressRenderer.ComposeNo(_settings, 0f, 0f));
     }
 
     // Builds n cursor frames; frame i points at (i * 360/n) degrees. baseAngleDeg is the
@@ -631,6 +832,9 @@ public sealed class CursorEngine : IDisposable
             foreach (var h in m.Frames)
                 if (h != IntPtr.Zero) DestroyIcon(h);
         _managed = Array.Empty<Managed>();
+        foreach (var h in _restFrames.Values)
+            if (h != IntPtr.Zero) DestroyIcon(h);
+        _restFrames.Clear();
         _arrowBase?.Dispose();
         _arrowBase = null;
         _handBase?.Dispose();
