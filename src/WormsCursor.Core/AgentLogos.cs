@@ -88,11 +88,20 @@ static class AgentLogos
         // filling the whole vector path (a widened round-join pen) to a single DrawImage. The swing
         // rotation is already in g's transform (set by DrawCharms), so the sprite rotates with it,
         // exactly like the pre-rendered arrow frames.
+        // The sprite is padded all round (see PadFor) so the rim stroke that straddles the logo's
+        // edge isn't clipped — blit it back at the matching negative offset so the logo itself still
+        // lands exactly inside `box`, the rim spilling into the surrounding canvas as it did before.
+        int pad = PadFor(edge);
         var sprite = GetSprite(logo, box.Width, edge);
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        g.DrawImage(sprite, box.X, box.Y, box.Width, box.Height);
+        g.DrawImage(sprite, box.X - pad, box.Y - pad, sprite.Width, sprite.Height);
         g.Restore(saved);
     }
+
+    // Padding (px) around the logo inside its sprite. The contrast rim is a pen that straddles the
+    // path edge by ~edge px (plus a little anti-aliasing), so without this margin the protruding
+    // parts of a logo (e.g. the Claude critter's arms) get their outline clipped at the sprite edge.
+    static int PadFor(float edge) => (int)MathF.Ceiling(edge) + 2;
 
     // The cached sprite for this logo at the given on-screen box size + rim width, built on first use.
     static Bitmap GetSprite(Logo logo, float boxSide, float edge)
@@ -102,11 +111,14 @@ static class AgentLogos
         return logo.Sprites.GetOrAdd((side, eKey), k => BuildSprite(logo, k.side, edge));
     }
 
-    // Rasterises a logo upright into a side×side transparent sprite: brand fill over a contrast rim,
-    // centred + aspect-preserved — the exact look the live vector path produced, baked once.
+    // Rasterises a logo upright into a padded transparent sprite: brand fill over a contrast rim,
+    // centred + aspect-preserved in the inner side×side area — the exact look the live vector path
+    // produced, baked once. The pad margin keeps the rim from being clipped (see PadFor).
     static Bitmap BuildSprite(Logo logo, int side, float edge)
     {
-        var bmp = new Bitmap(side, side);
+        int pad = PadFor(edge);
+        int dim = side + 2 * pad;
+        var bmp = new Bitmap(dim, dim);
         using var g = Graphics.FromImage(bmp);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
@@ -115,8 +127,8 @@ static class AgentLogos
         float scale = Math.Min(side / b.Width, side / b.Height);
         float w = b.Width * scale, h = b.Height * scale;
 
-        // Map the logo's native bounds into the centred, scaled sprite.
-        g.TranslateTransform((side - w) / 2f, (side - h) / 2f);
+        // Map the logo's native bounds into the centred, scaled inner area (offset by the pad margin).
+        g.TranslateTransform(pad + (side - w) / 2f, pad + (side - h) / 2f);
         g.ScaleTransform(scale, scale);
         g.TranslateTransform(-b.X, -b.Y);
 
