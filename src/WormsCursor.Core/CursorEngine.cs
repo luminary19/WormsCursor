@@ -402,10 +402,41 @@ public sealed class CursorEngine : IDisposable
                 int idx = ((int)Math.Round((double.IsNaN(dispDeg) ? 0.0 : dispDeg) / stepDeg)) % _settings.Steps;
                 if (idx < 0) idx += _settings.Steps;
 
+                // --- 2.5) decide whether step 3 (the physics) can be skipped this tick. Skip ONLY when
+                //          nothing would observe it: no animated cursor on screen (their clocks/springs
+                //          drive the visible frame), no charm swinging, no test cursor forced, no button
+                //          held, and every spring already settled to its rest pose — where integrating is
+                //          a no-op and the dt gap on resume is harmless. The time-based clocks (comet
+                //          spin, crosshair ring/breathing) only matter while their cursor shows (covered
+                //          by onScreenAnimated) and the pendulums only while charms/help/app show. So an
+                //          idle pointer on a still mouse costs zero physics. btnDown is also read by the
+                //          pop logic and charmsActive / curNow / showingNow by the apply block below.
+                bool btnDown = clickFx && ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0
+                                        || (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0);
+                bool charmsActive = _settings.AgentNotifierEnabled && _waitingTools.Length > 0;
+                var ciNow = new CURSORINFO { cbSize = ciSize };
+                bool showingNow = GetCursorInfo(ref ciNow) && (ciNow.flags & CURSOR_SHOWING) != 0;
+                IntPtr curNow = showingNow ? ciNow.hCursor : IntPtr.Zero;
+                bool onScreenAnimated = showingNow && (curNow == hcWait || curNow == hcApp || curNow == hcHelp
+                    || curNow == hcCross || curNow == hcIbeam || curNow == hcWE || curNow == hcNS
+                    || curNow == hcD1 || curNow == hcD2 || curNow == hcMove || curNow == hcNo);
+                bool moving = dx != 0 || dy != 0;
+                bool springsSettled = !moving
+                    && MathF.Abs(popScale - 1f) < 0.004f && MathF.Abs(vPop) < 0.02f
+                    && MathF.Abs(recoil) < 0.05f && MathF.Abs(vrec) < 0.5f
+                    && MathF.Abs(ibOffX) < 0.15f && MathF.Abs(ibOffY) < 0.15f && MathF.Abs(vibX) < 0.6f && MathF.Abs(vibY) < 0.6f
+                    && MathF.Abs(hopY) < 0.15f && MathF.Abs(hopX) < 0.15f && MathF.Abs(vHop) < 0.6f && MathF.Abs(vHopX) < 0.6f
+                    && MathF.Abs(rsWE) < 0.004f && MathF.Abs(vWE) < 0.02f && MathF.Abs(rsNS) < 0.004f && MathF.Abs(vNS) < 0.02f
+                    && MathF.Abs(rsD1) < 0.004f && MathF.Abs(vD1) < 0.02f && MathF.Abs(rsD2) < 0.004f && MathF.Abs(vD2) < 0.02f
+                    && MathF.Abs(noE) < 0.004f && MathF.Abs(vno) < 0.02f;
+                bool needPhysics = !busyInit || _test != TestCursor.Off || onScreenAnimated || charmsActive || btnDown || !springsSettled;
+
                 // --- 3) advance the spinner: spin the comet, and swing the bob. The
                 //        bob hangs off the arrow's TAIL on a springy string under gravity;
                 //        simulated in world coords so moving the cursor whips the anchor
                 //        and the bob lags/swings, then settles straight down when you stop ---
+                if (needPhysics)
+                {
                 phase += phaseStep;
                 if (phase > MathF.PI * 2f) phase -= MathF.PI * 2f;
                 {
@@ -497,10 +528,8 @@ public sealed class CursorEngine : IDisposable
                 float noTgt = MathF.Min(spd / noRef, 1f) * noMax;
                 vno += ((noTgt - noE) * noK - vno * noC) * dt; noE += vno * dt;
 
-                // click squash&pop: poll the mouse buttons, then spring popScale toward the
-                // target (squashed while held, 1 at rest) — underdamped, so release overshoots.
-                bool btnDown = clickFx && ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0
-                                        || (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0);
+                // click squash&pop: spring popScale toward the target (squashed while a button is held,
+                // 1 at rest) — underdamped, so release overshoots. (btnDown is polled above, in step 2.5.)
                 float popTgt = btnDown ? popSquash : 1f;
                 vPop += ((popTgt - popScale) * popK - vPop * popC) * dt;
                 popScale += vPop * dt;
@@ -524,6 +553,7 @@ public sealed class CursorEngine : IDisposable
                     vHopX += (-hopX * hopXK - vHopX * hopXC) * dt; hopX += vHopX * dt;
                 }
                 else { hopY = 0f; vHop = 0f; hopX = 0f; vHopX = 0f; }
+                } // end if (needPhysics) — skipped entirely when idle + settled (see step 2.5)
 
                 // --- 4) apply cursors ---
                 var test = _test;
@@ -536,7 +566,7 @@ public sealed class CursorEngine : IDisposable
                     // render the pointer live (~60fps): scaled-about-hotspot for the pop, and/or with
                     // the agent logos (which swing, so re-render every frame). Otherwise fall back to
                     // the crisp pre-rendered direction frames — zero cost on an idle tray.
-                    bool charmsActive = _settings.AgentNotifierEnabled && _waitingTools.Length > 0;
+                    // charmsActive + btnDown were computed in step 2.5 (the physics gate) and are reused here.
                     bool popActive = clickFx && (btnDown || MathF.Abs(popScale - 1f) > 0.004f || MathF.Abs(vPop) > 0.02f);
                     if (popActive || charmsActive)
                     {
@@ -594,10 +624,10 @@ public sealed class CursorEngine : IDisposable
                         // NB: do NOT compare against the handles we passed to SetSystemCursor
                         // — that call DESTROYS them, so they never equal what GetCursorInfo
                         // reports (this is why these used to animate only via "Test cursor").
-                        var ci = new CURSORINFO { cbSize = ciSize };
-                        if (GetCursorInfo(ref ci) && (ci.flags & CURSOR_SHOWING) != 0)
+                        // Reuse the cursor query from step 2.5 (one GetCursorInfo per tick).
+                        if (showingNow)
                         {
-                            IntPtr cur = ci.hCursor;
+                            IntPtr cur = curNow;
                             // The non-rotating, non-time-animated cursors return to ONE fixed rest pose
                             // once their motion springs settle, so a settled on-screen frame is pixel-
                             // identical to the pre-built rest frame — swap that in (ApplyRest: applied
