@@ -120,7 +120,6 @@ static class AgentHookBridge
         "Stop" => "turn_complete",
         "StopFailure" => "error",
         "PreToolUse" or "PostToolUse" => "tool_use",
-        "PostToolUseFailure" => "error",
         _ => null,
     };
 

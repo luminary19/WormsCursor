@@ -10,8 +10,12 @@ public enum HookState
 {
     /// <summary>No WormsCursor hook present.</summary>
     NotRegistered,
-    /// <summary>Our hook is registered.</summary>
+    /// <summary>Our hook is registered for the full current event set.</summary>
     Registered,
+    /// <summary>Our hook is present, but only for some of the events we now register — an older
+    /// version registered a smaller set (e.g. before <c>SessionEnd</c> was added, so /clear and /exit
+    /// no longer clear the indicator). Re-registering refreshes it to the full set.</summary>
+    Outdated,
     /// <summary>The tool already has a conflicting custom hook we won't overwrite (Codex's single
     /// <c>notify</c>). The user must clear it before we can register.</summary>
     ConfigConflict,
@@ -96,9 +100,13 @@ public static class AgentHookRegistrar
     {
         var hooks = ReadJsonObject(ClaudePath, throwOnBad: false)?["hooks"] as JsonObject;
         if (hooks is null) return HookState.NotRegistered;
-        foreach (var ev in hooks)
-            if (ev.Value is JsonArray arr && HasOurHook(arr)) return HookState.Registered;
-        return HookState.NotRegistered;
+        // Count how many of the events we *now* register already carry our hook. None → not us;
+        // all → fully registered; some → an older, partial registration that needs a refresh.
+        int present = 0;
+        foreach (var ev in ClaudeEvents)
+            if (hooks[ev] is JsonArray arr && HasOurHook(arr)) present++;
+        if (present == 0) return HookState.NotRegistered;
+        return present == ClaudeEvents.Length ? HookState.Registered : HookState.Outdated;
     }
 
     static void RegisterClaude()

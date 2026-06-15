@@ -275,6 +275,12 @@ public sealed class AgentHooksForm : Form
                 row.action.Text = "Unregister";
                 row.action.Tag = "unregister";
                 break;
+            case HookState.Outdated:
+                row.status.Text = "● Update available";
+                row.status.ForeColor = Color.DarkOrange;
+                row.action.Text = "Re-register";
+                row.action.Tag = "register";
+                break;
             case HookState.ConfigConflict:
                 row.status.Text = "● Manual setup needed";
                 row.status.ForeColor = Color.DarkOrange;
