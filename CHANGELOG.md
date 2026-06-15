@@ -4,6 +4,16 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
+## 0.8.1 - 2026-06-15
+
+### Fixed
+- **The agent logo now clears on `/clear` and `/exit`.** If the Claude Code hooks had been
+  registered by an older build (before the session-lifecycle events were added), ending a
+  session left the logo hanging until the linger timeout instead of clearing at once.
+  **Preferences → Agent settings…** now detects an out-of-date registration and shows
+  **"Update available" → "Re-register"**; refreshing it restores the full event set so the
+  logo disappears the moment a session ends.
+
 ## 0.8.0 - 2026-06-15
 
 ### Added
