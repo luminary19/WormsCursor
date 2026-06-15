@@ -113,6 +113,16 @@ call — so "you replied" is inferred from your next prompt, not from the agent 
 
 ## Known issues
 
+- **Non-standard cursors (grab / grabbing / zoom-in / zoom-out / cell) aren't themed** and fall
+  back to the Windows defaults. These aren't Windows *system* cursors — there's no `OCR_*` slot
+  for them, so `SetSystemCursor` (how WormsCursor themes everything) has nothing to replace.
+  They're CSS cursor values that the **application** draws itself: a browser handles
+  `WM_SETCURSOR` and calls `SetCursor` with its own embedded cursor resource, bypassing the
+  global system-cursor table entirely — so nothing we install there is ever seen. Any way to
+  override them would necessarily be a hack: an owner-drawn overlay that hides the real cursor
+  and paints our own (the same rearchitecture the mixed-DPI flicker would need), plus capturing
+  and re-styling whatever bitmap the app set, since the handle we read back can't be reliably
+  told apart (grab vs zoom vs cell). Outside a browser these cursors essentially never appear.
 - **Animated cursors flicker on a mixed-DPI multi-monitor setup.** If your monitors run at
   different display scales (e.g. 125% on one, 150% on another), the *animated* cursors
   (busy/wait, app-starting, help, crosshair, …) can strobe while shown on the higher-DPI
