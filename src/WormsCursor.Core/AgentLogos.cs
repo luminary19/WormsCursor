@@ -19,6 +19,10 @@ static class AgentLogos
         public required GraphicsPath Path;
         public required Color Color;   // brand fill, drawn on the light charm tile
         public RectangleF Bounds;      // cached native bounds for fitting
+        // Rasterised sprites keyed on (on-screen side px, quantised rim width) — built once, blitted
+        // every frame instead of re-stroking the vector path. A settings change (new size) just adds
+        // an entry; the handful of tiny ARGB bitmaps live for the process lifetime.
+        public readonly System.Collections.Concurrent.ConcurrentDictionary<(int side, int eKey), Bitmap> Sprites = new();
     }
 
     // Claude Code — the pixel-art critter (fill #D97757, even-odd so the two eyes punch through).
@@ -78,11 +82,41 @@ static class AgentLogos
 
         var b = logo.Bounds;
         if (b.Width <= 0 || b.Height <= 0) { g.Restore(saved); return; }
-        float scale = Math.Min(box.Width / b.Width, box.Height / b.Height);
+
+        // The logo content is fixed for a run (brand path + colour + size + rim), so rasterise it
+        // ONCE into a small sprite and just blit it here — the per-frame cost drops from stroking +
+        // filling the whole vector path (a widened round-join pen) to a single DrawImage. The swing
+        // rotation is already in g's transform (set by DrawCharms), so the sprite rotates with it,
+        // exactly like the pre-rendered arrow frames.
+        var sprite = GetSprite(logo, box.Width, edge);
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        g.DrawImage(sprite, box.X, box.Y, box.Width, box.Height);
+        g.Restore(saved);
+    }
+
+    // The cached sprite for this logo at the given on-screen box size + rim width, built on first use.
+    static Bitmap GetSprite(Logo logo, float boxSide, float edge)
+    {
+        int side = Math.Max(1, (int)MathF.Round(boxSide));
+        int eKey = (int)MathF.Round(edge * 4f);                 // quarter-px rim resolution
+        return logo.Sprites.GetOrAdd((side, eKey), k => BuildSprite(logo, k.side, edge));
+    }
+
+    // Rasterises a logo upright into a side×side transparent sprite: brand fill over a contrast rim,
+    // centred + aspect-preserved — the exact look the live vector path produced, baked once.
+    static Bitmap BuildSprite(Logo logo, int side, float edge)
+    {
+        var bmp = new Bitmap(side, side);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+        var b = logo.Bounds;
+        float scale = Math.Min(side / b.Width, side / b.Height);
         float w = b.Width * scale, h = b.Height * scale;
 
-        // Map the logo's native bounds into the centred, scaled target box.
-        g.TranslateTransform(box.X + (box.Width - w) / 2f, box.Y + (box.Height - h) / 2f);
+        // Map the logo's native bounds into the centred, scaled sprite.
+        g.TranslateTransform((side - w) / 2f, (side - h) / 2f);
         g.ScaleTransform(scale, scale);
         g.TranslateTransform(-b.X, -b.Y);
 
@@ -94,7 +128,7 @@ static class AgentLogos
             g.DrawPath(rim, logo.Path);
         using (var brush = new SolidBrush(logo.Color))
             g.FillPath(brush, logo.Path);
-        g.Restore(saved);
+        return bmp;
     }
 
     // A light rim for dark logos, a dark rim for light ones — whichever gives contrast on the
