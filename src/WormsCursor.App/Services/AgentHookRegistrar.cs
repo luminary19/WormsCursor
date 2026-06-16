@@ -56,7 +56,23 @@ public static class AgentHookRegistrar
     static string Exe => Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "WormsCursor.exe");
     static string Home => HomeOverride ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-    public static string ClaudePath => Path.Combine(Home, ".claude", "settings.json");
+    // Claude Code reads its user settings from %CLAUDE_CONFIG_DIR%\settings.json when that env var is
+    // set (the config dir *is* the .claude folder, so no nested ".claude"), and falls back to
+    // ~/.claude/settings.json otherwise. Honour the override or our hooks land in a file Claude never
+    // reads. The test seam (HomeOverride) always wins so merge tests stay hermetic.
+    public static string ClaudePath
+    {
+        get
+        {
+            if (HomeOverride is null)
+            {
+                var configDir = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
+                if (!string.IsNullOrWhiteSpace(configDir))
+                    return Path.Combine(configDir, "settings.json");
+            }
+            return Path.Combine(Home, ".claude", "settings.json");
+        }
+    }
     public static string CodexPath => Path.Combine(Home, ".codex", "config.toml");
 
     // Codex is hidden for now (untested end-to-end). Its Register/Unregister/State plumbing stays

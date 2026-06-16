@@ -4,6 +4,18 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
+## 0.8.2 - 2026-06-16
+
+### Fixed
+- **The agent notifier now registers its hooks where Claude Code actually reads them.** If you
+  run Claude Code with a `CLAUDE_CONFIG_DIR` set (a custom config location), WormsCursor was
+  writing its lifecycle hooks into `~/.claude/settings.json` — a file Claude never reads in that
+  setup — so the waiting-agent logo never appeared. Registration now targets
+  `%CLAUDE_CONFIG_DIR%\settings.json` when the variable is set, falling back to
+  `~/.claude/settings.json` otherwise, and the **Agent settings…** status reads the same file.
+  Re-register from **Preferences → Agent settings…** to move an existing registration to the
+  right place.
+
 ## 0.8.1 - 2026-06-15
 
 ### Fixed

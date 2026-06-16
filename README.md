@@ -82,8 +82,9 @@ pre-rendered frames.
 
 Set it up from **Preferences… → Agent settings…**: register a tool there (currently **Claude
 Code**), toggle the logo, and set the "clear a stuck logo after" timeout. Registering writes
-WormsCursor's `hook` command into the tool's config (`~/.claude/settings.json`) with
-backup-and-merge — it never overwrites your own hooks. Each event then runs
+WormsCursor's `hook` command into the tool's config — `%CLAUDE_CONFIG_DIR%\settings.json` when
+that environment variable is set, otherwise `~/.claude/settings.json` — with backup-and-merge, so
+it never overwrites your own hooks. Each event then runs
 `WormsCursor.exe hook --tool …`, a throwaway process that writes one line to the running tray app
 over a named pipe and exits. It's **fail-silent** (<½ s pipe timeout, errors logged to
 `bridge.log`, always exits 0), so it can never block or break the agent.
