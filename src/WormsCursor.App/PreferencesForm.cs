@@ -15,7 +15,7 @@ namespace WormsCursor.App;
 /// </summary>
 public sealed class PreferencesForm : Form
 {
-    const string RepoUrl = "https://github.com/dawidope/WormsCursor";
+    const string RepoUrl = "https://github.com/luminary19/WormsCursor";
 
     const int M = 16;            // outer margin
     const int W = 460;           // client width
@@ -118,7 +118,7 @@ public sealed class PreferencesForm : Form
 
         // --- footer ---
         _version = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "v" + AppVersion() };
-        _link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor" };
+        _link = new LinkLabel { AutoSize = true, Text = "github.com/luminary19/WormsCursor" };
         _link.LinkClicked += (_, _) => OpenUrl(RepoUrl);
         _whatsNew = new LinkLabel { AutoSize = true, Text = "What's new" };
         _whatsNew.LinkClicked += (_, _) => { using var dlg = new ChangelogForm(_updates); dlg.ShowDialog(this); };

@@ -23,7 +23,8 @@ public sealed class AgentHooksForm : Form
     readonly Button _previewClear;
     readonly List<(HookTool tool, Label status, Button action)> _rows = new();
 
-    /// <param name="timeoutSeconds">How long a waiting logo lingers before being swept, in seconds.</param>
+    /// <param name="timeoutSeconds">How long a finished-turn logo lingers before being swept, in
+    /// seconds (approval-prompt logos ignore this and stay until answered).</param>
     /// <param name="applyDisplay">Called with (enabled, timeoutSeconds) whenever a display setting changes.</param>
     /// <param name="preview">Shows a fake waiting count on the live cursor for testing; called with
     /// the count to preview, or <c>null</c> to end the preview and restore the real count.</param>
@@ -53,8 +54,9 @@ public sealed class AgentHooksForm : Form
             MaximumSize = new Size(innerW, 0), // wrap to the column, grow as tall as needed
             Location = new Point(pad, y),
             Text = "When an AI agent is waiting for you, a bouncing token shows that tool's logo — with a "
-                 + "“+N” tag when several wait. Register the tools below so they tell WormsCursor what "
-                 + "they're doing.",
+                 + "“+N” tag when several wait. A prompt waiting on your approval stays until you answer; "
+                 + "a finished-turn notice clears on the timeout below. Register the tools below so they "
+                 + "tell WormsCursor what they're doing.",
         };
         Controls.Add(intro);
         y = intro.Bottom + 14;
@@ -76,9 +78,10 @@ public sealed class AgentHooksForm : Form
         // content's right edge). The preview's action buttons go right-aligned on the row just
         // below, lined up under that box.
 
-        // How long a logo lingers before it's swept (in case an agent never sends a closing event).
-        // In seconds (10s–30min), so short timeouts are selectable.
-        var timeoutLabel = new Label { AutoSize = true, Text = "Clear a stuck logo after:" };
+        // How long a *finished-turn* logo lingers before it's swept (a turn-complete/error notice just
+        // needs a fresh prompt). Approval prompts stay until you answer, so they ignore this. In
+        // seconds (10s–30min), so short timeouts are selectable.
+        var timeoutLabel = new Label { AutoSize = true, Text = "Clear a finished-turn logo after:" };
         _timeoutNum = new NumericUpDown
         {
             Width = 72,

@@ -20,7 +20,7 @@ namespace WormsCursor.App.Services;
 /// </summary>
 public sealed class UpdateService
 {
-    private const string RepoUrl = "https://github.com/dawidope/WormsCursor";
+    private const string RepoUrl = "https://github.com/luminary19/WormsCursor";
 
     // GitHub REST endpoint for the repo's releases (derived from RepoUrl). Each release's
     // body is the CHANGELOG section the release workflow extracted, so this feeds the

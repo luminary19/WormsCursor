@@ -8,10 +8,14 @@ public enum AgentEventKind
     /// <summary>The agent started working on your prompt (Claude <c>UserPromptSubmit</c>). Clears "needs you".</summary>
     ThinkingStarted,
     /// <summary>The agent is blocked on you mid-turn — a permission/idle prompt (Claude
-    /// <c>Notification</c> permission_prompt/idle_prompt). Sets "needs you".</summary>
+    /// <c>Notification</c> permission_prompt/idle_prompt). Sets "needs you" <b>indefinitely</b>: the
+    /// agent is actively waiting on your decision, so this logo is never swept by the idle timeout —
+    /// it stays until you respond (the session reports work again) or it ends.</summary>
     AwaitingUser,
     /// <summary>The agent finished its turn; the ball is in your court (Claude <c>Stop</c>,
-    /// Codex <c>agent-turn-complete</c>). Sets "needs you" and fires a celebratory pulse.</summary>
+    /// Codex <c>agent-turn-complete</c>). Sets "needs you" and fires a celebratory pulse. Unlike
+    /// <see cref="AwaitingUser"/> this just needs a fresh prompt, so its logo lingers then auto-clears
+    /// once the idle timeout elapses.</summary>
     TurnComplete,
     /// <summary>The agent is actively using a tool (Pre/PostToolUse). Clears "needs you".</summary>
     ToolUse,
@@ -36,12 +40,19 @@ public readonly record struct AgentPulse(string Tool, string Key, AgentEventKind
 /// and <see cref="AgentEventKind.Error"/> (the agent is blocked or done — your move), and cleared by
 /// <see cref="AgentEventKind.ThinkingStarted"/> / <see cref="AgentEventKind.ToolUse"/> (it's working again,
 /// so you must have responded), and the session is dropped outright by <see cref="AgentEventKind.SessionEnded"/>
-/// (the agent exited). Sessions with no event for <see cref="_ttl"/> are also swept, so one that never
-/// sends a closing event can't wedge the count.
+/// (the agent exited).
+///
+/// The idle timeout (<see cref="_ttl"/>) only sweeps <b>timed</b> waits — a finished turn or an error,
+/// which just need a fresh prompt — so a logo can't wedge the count after a quiet finish. A session
+/// blocked on your approval (<see cref="AgentEventKind.AwaitingUser"/>) is <b>sticky</b>: it is never
+/// swept and stays until you actually respond or it ends, because the agent really is still waiting on
+/// you. (Trade-off: a hard-killed agent that was awaiting approval leaves its logo up until you clear
+/// or disable it, since no closing event ever arrives.)
 /// </summary>
 public sealed class AgentActivity
 {
-    sealed class Entry { public bool NeedsYou; public DateTime LastUtc; public string Tool = ""; }
+    // Sticky == this wait is the agent blocking on your approval; it survives the idle sweep entirely.
+    sealed class Entry { public bool NeedsYou; public bool Sticky; public DateTime LastUtc; public string Tool = ""; }
 
     readonly object _gate = new();
     readonly Dictionary<string, Entry> _sessions = new();
@@ -49,8 +60,10 @@ public sealed class AgentActivity
 
     public AgentActivity(TimeSpan? ttl = null) => _ttl = ttl ?? TimeSpan.FromMinutes(1);
 
-    /// <summary>The idle timeout after which a waiting session with no further events is swept out of
-    /// the count (so a logo can't linger forever). Settable live from the preferences UI.</summary>
+    /// <summary>The idle timeout after which a <i>timed</i> waiting session (a finished turn or error)
+    /// with no further events is swept out of the count, so a finished-turn logo can't linger forever.
+    /// Sessions blocked on your approval (<see cref="AgentEventKind.AwaitingUser"/>) are sticky and
+    /// ignore this. Settable live from the preferences UI.</summary>
     public TimeSpan Ttl
     {
         get { lock (_gate) return _ttl; }
@@ -109,6 +122,10 @@ public sealed class AgentActivity
                     AgentEventKind.AwaitingUser or AgentEventKind.TurnComplete or AgentEventKind.Error => true,
                     _ => false, // ThinkingStarted / ToolUse: the agent is working again
                 };
+                // An approval/idle prompt means the agent is *blocked* on you, so keep its logo up
+                // indefinitely (never swept). A finished/errored turn just needs a fresh prompt, so it
+                // stays timed and clears once the idle timeout elapses.
+                e.Sticky = kind == AgentEventKind.AwaitingUser;
                 if (kind is AgentEventKind.TurnComplete or AgentEventKind.Error)
                     pulse = new AgentPulse(tool, key, kind);
             }
@@ -118,8 +135,9 @@ public sealed class AgentActivity
         if (after != before) WaitingCountChanged?.Invoke(after);
     }
 
-    /// <summary>Evict sessions idle longer than the TTL. Call periodically (e.g. a tray timer) so a
-    /// session that never sends a closing event eventually drops out of the count.</summary>
+    /// <summary>Evict <i>timed</i> sessions (finished turn / error) idle longer than the TTL. Call
+    /// periodically (e.g. a tray timer) so a finished-turn logo eventually drops out of the count.
+    /// Sticky sessions (blocked on your approval) are never evicted here.</summary>
     public void Sweep(DateTime nowUtc)
     {
         int before, after;
@@ -148,7 +166,7 @@ public sealed class AgentActivity
     {
         List<string>? dead = null;
         foreach (var kv in _sessions)
-            if (nowUtc - kv.Value.LastUtc > _ttl)
+            if (!kv.Value.Sticky && nowUtc - kv.Value.LastUtc > _ttl) // sticky = blocked on your approval, never sweep
                 (dead ??= new()).Add(kv.Key);
         if (dead is not null)
             foreach (var k in dead) _sessions.Remove(k);

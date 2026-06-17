@@ -43,9 +43,9 @@ tracks whether the ball is in *your* court:
 
 | The agent… | Claude hook | Token |
 |---|---|---|
-| is blocked on you (permission / idle prompt) | `Notification` | **appears** |
-| finished its turn | `Stop` | **appears** |
-| ended on an error | `StopFailure` | **appears** |
+| is blocked on you (permission / idle prompt) | `Notification` | **appears — stays until you reply** |
+| finished its turn | `Stop` | **appears — clears after the timeout** |
+| ended on an error | `StopFailure` | **appears — clears after the timeout** |
 | started on your prompt, or you reopened the session | `UserPromptSubmit` / `SessionStart` | **clears** |
 | exited cleanly (`/exit`, `Ctrl+C`, `/clear`, logout) | `SessionEnd` | **clears at once** |
 
@@ -53,23 +53,33 @@ So it shows up when an agent is *waiting on you* and clears the moment you're cl
 submitted a prompt) or the session ends. Multiple sessions are tracked independently (keyed by tool +
 session id), so the count is simply "how many agents need you right now".
 
+**Two kinds of waiting.** A token isn't all-or-nothing on the timeout:
+
+- **Blocked on your approval** (a permission / idle prompt) — the agent is *actively* waiting on your
+  decision, so the token **stays indefinitely**. It's never swept by the timeout; it clears only when
+  you actually respond (the session reports work again) or the session ends.
+- **Finished its turn / errored** — the agent is done and just needs a fresh prompt, so the token
+  **lingers, then auto-clears** after the **linger timeout** (default 20 s, configurable 10–1800 s).
+
 **Why it's event-driven (and the timeout).** WormsCursor only knows what the hooks tell it over the
 pipe — it never polls the agent or watches its process. That keeps it dead-simple and zero-cost when
-idle, but it means a session that never sends a closing event would otherwise wait forever. So there's
-a backstop: any waiting session with no further events for the **linger timeout** (default 20 s,
-configurable 10–1800 s) is swept out of the count. The tool-call hooks (`PreToolUse` / `PostToolUse`)
-are deliberately *not* registered — they'd spawn a hook process on every single tool call — so "you
-replied" is inferred from your next prompt, not from the agent resuming work.
+idle, but it means a *finished-turn* session that never sends a closing event would otherwise wait
+forever — so the linger timeout is its backstop. (An approval prompt has no such backstop by design:
+the agent really is still blocked on you, so its token persists until you reply.) The tool-call hooks
+(`PreToolUse` / `PostToolUse`) are deliberately *not* registered — they'd spawn a hook process on
+every single tool call — so "you replied" is inferred from your next prompt, not from the agent
+resuming work.
 
 ## Known issues
 
-- **A hard-killed agent's token lingers until the timeout.** The notifier learns everything from the
-  tool's hooks over the pipe — it never watches the agent's process. A *clean* exit (`/exit`,
-  `Ctrl+C`, `/clear`, logout) fires `SessionEnd` and the token clears immediately, but if the agent is
-  **killed outright** (Task Manager "End Task", closing the terminal window, `kill`) no hook runs, so
-  no "session ended" ever reaches WormsCursor. The waiting token then stays until the **linger
-  timeout** sweeps it (default 20 s, set in *Agent settings…*). This is by design — with no event
-  there's nothing to react to, and the timeout is the backstop.
+- **A hard-killed agent's token can linger.** The notifier learns everything from the tool's hooks
+  over the pipe — it never watches the agent's process. A *clean* exit (`/exit`, `Ctrl+C`, `/clear`,
+  logout) fires `SessionEnd` and the token clears immediately, but if the agent is **killed outright**
+  (Task Manager "End Task", closing the terminal window, `kill`) no hook runs, so no "session ended"
+  ever reaches WormsCursor. A token left by a **finished turn** is swept by the **linger timeout**
+  (default 20 s, set in *Agent settings…*). A token left by an **approval prompt** stays
+  indefinitely — by design, since an unanswered approval is exactly the case that should persist —
+  so to dismiss it, click the tray and toggle the notifier off and on (or just **Exit**).
 
 ## Project structure
 
@@ -109,6 +119,8 @@ Requires the **.NET 8 SDK** (Windows). Open `WormsCursor.sln` in Visual Studio 2
 a terminal:
 
 ```powershell
+git clone https://github.com/luminary19/WormsCursor.git
+cd WormsCursor
 dotnet build WormsCursor.sln
 dotnet run --project src/WormsCursor.App
 ```
