@@ -1,5 +1,10 @@
 # Porting WormsCursor to macOS and Linux — Feasibility Analysis
 
+> **Obsolete.** This analyses porting the old `SetSystemCursor`-based **cursor-theming engine**, which
+> has since been removed — WormsCursor is now an agent-waiting overlay (no system-cursor theming), so
+> the cross-platform blocker this document is about no longer applies. Kept for historical context; see
+> `CLAUDE.md` / `README.md` for the current architecture.
+
 > Produced by a multi-agent analysis pass (codebase mapping + platform API research,
 > 2026-06-13). All codebase claims were verified against the source; platform claims
 > were researched against current (2025/2026) API documentation and the Mousecape

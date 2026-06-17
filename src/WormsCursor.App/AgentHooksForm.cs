@@ -52,7 +52,7 @@ public sealed class AgentHooksForm : Form
             AutoSize = true,
             MaximumSize = new Size(innerW, 0), // wrap to the column, grow as tall as needed
             Location = new Point(pad, y),
-            Text = "When an AI agent is waiting for you, the cursor hangs that tool's logo — with a "
+            Text = "When an AI agent is waiting for you, a bouncing token shows that tool's logo — with a "
                  + "“+N” tag when several wait. Register the tools below so they tell WormsCursor what "
                  + "they're doing.",
         };
@@ -64,7 +64,7 @@ public sealed class AgentHooksForm : Form
         {
             AutoSize = true,
             Location = new Point(pad, y),
-            Text = "Show the agent logo on the cursor while agents are waiting",
+            Text = "Show the bouncing agent token while agents are waiting",
             Checked = charmsEnabled,
         };
         _enabledChk.CheckedChanged += (_, _) => Apply();
@@ -77,15 +77,15 @@ public sealed class AgentHooksForm : Form
         // below, lined up under that box.
 
         // How long a logo lingers before it's swept (in case an agent never sends a closing event).
-        // Shown in minutes; stored as seconds.
+        // In seconds (10s–30min), so short timeouts are selectable.
         var timeoutLabel = new Label { AutoSize = true, Text = "Clear a stuck logo after:" };
         _timeoutNum = new NumericUpDown
         {
-            Width = 64,
-            Minimum = 0.5m, Maximum = 30m, Increment = 0.5m, DecimalPlaces = 1,
-            Value = Math.Clamp(timeoutSeconds / 60m, 0.5m, 30m),
+            Width = 72,
+            Minimum = 10m, Maximum = 1800m, Increment = 5m, DecimalPlaces = 0,
+            Value = Math.Clamp((decimal)timeoutSeconds, 10m, 1800m),
         };
-        var minutesLabel = new Label { AutoSize = true, Text = "minutes" };
+        var unitLabel = new Label { AutoSize = true, Text = "seconds" };
 
         // Live preview: fake a waiting-agent count on the real cursor so you can see the logo (and the
         // "+N" tag) without wiring up an actual agent. "Clear" ends it; closing the dialog ends it too.
@@ -96,14 +96,14 @@ public sealed class AgentHooksForm : Form
         _previewClear = MakeButton("Clear");
         _previewClear.Enabled = false;
         _previewClear.Click += (_, _) => EndPreview();
-        Controls.Add(timeoutLabel); Controls.Add(_timeoutNum); Controls.Add(minutesLabel);
+        Controls.Add(timeoutLabel); Controls.Add(_timeoutNum); Controls.Add(unitLabel);
         Controls.Add(previewLabel); Controls.Add(_previewNum); Controls.Add(_previewShow); Controls.Add(_previewClear);
 
         // Both numeric boxes on one line. rowH is the tallest control so an enlarged font centres
         // rather than clips; the preview group is right-aligned so its box ends at rightEdge.
         int numsRowH = Math.Max(Math.Max(_timeoutNum.Height, _previewNum.Height),
                                 Math.Max(timeoutLabel.Height, previewLabel.Height));
-        PlaceRow(pad + indent, y, numsRowH, 6, timeoutLabel, _timeoutNum, minutesLabel);
+        PlaceRow(pad + indent, y, numsRowH, 6, timeoutLabel, _timeoutNum, unitLabel);
         PlaceRow(rightEdge - GroupWidth(6, previewLabel, _previewNum), y, numsRowH, 6, previewLabel, _previewNum);
         y += numsRowH + 10;
 
@@ -226,7 +226,7 @@ public sealed class AgentHooksForm : Form
     void Apply()
     {
         SyncEnabled();
-        _applyDisplay(_enabledChk.Checked, (int)Math.Round(_timeoutNum.Value * 60m));
+        _applyDisplay(_enabledChk.Checked, (int)_timeoutNum.Value);
         // Keep an in-flight preview honest if the user just turned charms off, or re-render it if
         // they're still on.
         if (_previewClear.Enabled)

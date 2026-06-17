@@ -1,16 +1,18 @@
+using System.Runtime.InteropServices;
 using WormsCursor.App.Services;
 using WormsCursor.Core;
 
 namespace WormsCursor.App;
 
 /// <summary>
-/// Tray-only application context: there is no main window. It owns the tray icon and
-/// the cursor engine, and guarantees the default cursors are restored on exit.
+/// Tray-only application context: there is no main window. It owns the tray icon and the agent-notifier
+/// overlay (the bouncing tool logo shown while an AI agent is waiting for you), and the named-pipe
+/// plumbing that feeds it.
 /// </summary>
 public sealed class TrayApplicationContext : ApplicationContext
 {
     readonly CursorSettings _settings = SettingsStore.Load();
-    readonly CursorEngine _engine;
+    readonly NotifierOverlay _overlay;
     readonly NotifyIcon _tray;
     readonly Icon _appIcon;
     readonly IAutostart _autostart = new RegistryAutostart();
@@ -23,13 +25,9 @@ public sealed class TrayApplicationContext : ApplicationContext
     readonly Control _marshal = new();
     bool _preferencesOpen;
 
-    // Typing-hop keyboard hook (click feedback). Non-null only while it's installed; lives on
-    // the UI thread so the low-level hook has a message loop. See SyncTypingHook.
-    LowLevelKeyboardHook? _keyHook;
-
-    // Agent notifier: tracks how many agents await the user (fed by the pipe), pushes the count
-    // into the engine, and reflects it in the tray tooltip. The pipe server + sweep timer live
-    // here (not in the engine), so they survive ApplySettings' engine stop/restart.
+    // Agent notifier: tracks how many agents await the user (fed by the pipe), pushes the waiting set
+    // into the overlay, and reflects the count in the tray tooltip. The pipe server + sweep timer live
+    // here so they survive a settings change.
     readonly AgentActivity _agents = new();
     AgentPipeServer? _agentPipe;
     System.Windows.Forms.Timer? _agentSweep;
@@ -38,17 +36,22 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         _ = _marshal.Handle; // realise the window handle on the UI thread for BeginInvoke
 
-        _engine = new CursorEngine(_settings);
+        // Self-heal for anyone upgrading from the cursor-theming version: if that older build was
+        // force-killed it may have left a themed system cursor via SetSystemCursor. Reload the real
+        // scheme once on startup. Harmless when nothing was hijacked; this app never themes cursors.
+        try { SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0); } catch { /* best effort */ }
+
+        _overlay = new NotifierOverlay(_settings);
         _appIcon = LoadAppIcon();
 
         _enabledItem = new ToolStripMenuItem("Enabled", null, OnToggleEnabled)
         {
             CheckOnClick = false, // we manage Checked ourselves so double-click can't desync it
-            Checked = true,
+            Checked = _settings.AgentNotifierEnabled,
         };
 
         // The tray menu is deliberately minimal — Enabled / Preferences… / Exit. Autostart, the
-        // agent-notifications dialog, and update checks all live inside Preferences now.
+        // agent-notifications dialog, and update checks all live inside Preferences.
         var menu = new ContextMenuStrip();
         menu.Items.Add(_enabledItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -65,30 +68,17 @@ public sealed class TrayApplicationContext : ApplicationContext
         };
         _tray.DoubleClick += (_, _) => OnToggleEnabled(this, EventArgs.Empty);
 
-        // Safety net: restore the default cursors no matter how we exit.
-        // SetSystemCursor is a global, persistent change, so every interceptable
-        // teardown path must undo it.
-        Application.ApplicationExit += (_, _) => _engine.Dispose();
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => _engine.Dispose();
-        // Crash paths: restore before the process goes down.
-        Application.ThreadException += (_, _) => _engine.RestoreNow();
-        AppDomain.CurrentDomain.UnhandledException += (_, _) => _engine.RestoreNow();
+        // The overlay touches no global system state, so there's nothing to undo on exit — but still
+        // dispose it cleanly so the layered window goes away promptly.
+        Application.ApplicationExit += (_, _) => _overlay.Dispose();
 
-        // Self-heal: if a previous instance was killed (Task Manager / "Stop
-        // Debugging") it may have left a rotated cursor. Reload the real scheme before
-        // we install our own, so re-launching always starts clean.
-        CursorEngine.RestoreDefaultCursors();
-
-        _engine.Start();
-        SyncTypingHook();
         StartAgentNotifier();
         MaybeShowWhatsNew();
     }
 
     // Brings up the agent-notifier plumbing: the named-pipe server that `WormsCursor.exe hook`
     // invocations write to, a periodic sweep that evicts stale sessions, and the wiring that turns
-    // a changed waiting count into an engine update + tray tooltip. Independent of the engine's
-    // lifetime so it keeps listening across ApplySettings restarts.
+    // a changed waiting set into an overlay update + tray tooltip.
     void StartAgentNotifier()
     {
         _agents.WaitingCountChanged += OnWaitingCountChanged;
@@ -97,15 +87,15 @@ public sealed class TrayApplicationContext : ApplicationContext
         _agentPipe = new AgentPipeServer(msg =>
         {
             // The pipe fires on its own thread; hop to the UI thread so AgentActivity's events
-            // (which touch the tray) stay single-threaded, like every other callback here.
+            // (which touch the tray + overlay) stay single-threaded, like every other callback here.
             if (_marshal.IsHandleCreated)
                 _marshal.BeginInvoke(new Action(() => HandleAgentEvent(msg)));
         });
         _agentPipe.Start();
 
-        // Sweep often (every 5 s) so the configurable timeout — as short as 30 s — clears a stuck
-        // logo promptly, not up to a minute late. The sweep just scans a tiny dictionary; it's cheap.
-        _agentSweep = new System.Windows.Forms.Timer { Interval = 5_000 };
+        // Sweep often (every 3 s) so even the shortest timeout (10 s) clears a stuck logo within a few
+        // seconds of it elapsing. The sweep just scans a tiny dictionary; it's cheap.
+        _agentSweep = new System.Windows.Forms.Timer { Interval = 3_000 };
         _agentSweep.Tick += (_, _) => _agents.Sweep(DateTime.UtcNow);
         _agentSweep.Start();
     }
@@ -118,7 +108,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     void OnWaitingCountChanged(int count)
     {
-        _engine.SetWaitingAgents(_agents.WaitingTools);
+        _overlay.SetWaitingAgents(_agents.WaitingTools);
         _tray.Text = count > 0
             ? $"WormsCursor — {count} agent{(count == 1 ? "" : "s")} waiting"
             : "WormsCursor";
@@ -147,36 +137,19 @@ public sealed class TrayApplicationContext : ApplicationContext
         }));
     }
 
+    // Master on/off for the notifier (the tray "Enabled" item + double-click). Flips
+    // AgentNotifierEnabled, persists it, and re-evaluates the overlay live.
     void OnToggleEnabled(object? sender, EventArgs e)
     {
-        if (_engine.IsRunning) _engine.Stop();
-        else _engine.Start();
-        _enabledItem.Checked = _engine.IsRunning;
-        SyncTypingHook();
-    }
-
-    // Installs the typing-hop keyboard hook only while I-beam feedback is ON and the engine is
-    // running, and tears it down otherwise — so we don't hold a global hook when that feature is
-    // off. Must run on the UI thread (it has the message loop). The hook exists solely to nudge
-    // the I-beam; the mouse squash & pop polls and needs no hook.
-    void SyncTypingHook()
-    {
-        bool want = _engine.IsRunning && _settings.IbeamFeedback;
-        if (want && _keyHook is null)
-        {
-            _keyHook = new LowLevelKeyboardHook();
-            _keyHook.KeyDown += _engine.NudgeIbeam;
-        }
-        else if (!want && _keyHook is not null)
-        {
-            _keyHook.Dispose();
-            _keyHook = null;
-        }
+        _settings.AgentNotifierEnabled = !_settings.AgentNotifierEnabled;
+        SettingsStore.Save(_settings);
+        _enabledItem.Checked = _settings.AgentNotifierEnabled;
+        _overlay.RefreshSettings();
     }
 
     void OnPreferences(object? sender, EventArgs e) => OpenPreferences();
 
-    /// <summary>Shows the "Agent notifications" settings panel (hook registration + logo display).
+    /// <summary>Shows the "Agent notifications" settings panel (display + hook registration).
     /// Opened from Preferences (the "Agent settings…" button); marshals onto the UI thread so it's
     /// safe to call from anywhere.</summary>
     public void OpenAgentHooks()
@@ -187,22 +160,20 @@ public sealed class TrayApplicationContext : ApplicationContext
         dlg.ShowDialog();
     }
 
-    // Drives the live cursor for the "Preview on cursor" test in the dialog: a non-null value fakes
-    // that many waiting agents (cycling the supported tools so you see each logo); null ends the
-    // preview and restores the real set (so a real agent event arriving mid-preview, or just closing
-    // the dialog, leaves the genuine charms on screen).
+    // Drives the live token for the "Preview" test in a dialog: a non-null value fakes that many
+    // waiting agents (one logo + "+N"); null ends the preview and restores the real set (so a real
+    // agent event arriving mid-preview, or just closing the dialog, leaves the genuine token on screen).
     static readonly string[] PreviewTools = { "claude-code" }; // Codex hidden for now
     void PreviewWaitingCount(int? testCount)
     {
-        if (testCount is not int n) { _engine.SetWaitingAgents(_agents.WaitingTools); return; }
+        if (testCount is not int n) { _overlay.SetWaitingAgents(_agents.WaitingTools); return; }
         var tools = new string[Math.Max(0, n)];
         for (int i = 0; i < tools.Length; i++) tools[i] = PreviewTools[i % PreviewTools.Length];
-        _engine.SetWaitingAgents(tools);
+        _overlay.SetWaitingAgents(tools);
     }
 
-    // The engine reads AgentNotifierEnabled live each tick (see ApplyCharms) and AgentActivity holds
-    // the linger timeout, so a display change takes effect immediately — no engine restart needed,
-    // just push the TTL and persist.
+    // The overlay reads AgentNotifierEnabled live each frame and AgentActivity holds the linger
+    // timeout, so a display change takes effect immediately — push the TTL, persist, and re-evaluate.
     void ApplyAgentDisplay(bool enabled, int timeoutSeconds)
     {
         _settings.AgentNotifierEnabled = enabled;
@@ -210,6 +181,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         _settings.Normalize(); // clamp the timeout into range
         _agents.Ttl = TimeSpan.FromSeconds(_settings.AgentNotifierTimeoutSeconds);
         SettingsStore.Save(_settings);
+        _enabledItem.Checked = _settings.AgentNotifierEnabled;
+        _overlay.RefreshSettings();
     }
 
     /// <summary>
@@ -230,13 +203,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         _preferencesOpen = true;
         try
         {
-            // Pass SetTestCursor + ApplySettings so the dialog's "Test cursor" control can
-            // force a cursor on the live (still-running) engine, and its "Apply" button can
-            // commit edits without closing.
-            using var dlg = new PreferencesForm(_settings.Clone(), _updates, _engine.SetTestCursor, ApplySettings,
-                                                _autostart, OpenAgentHooks);
+            using var dlg = new PreferencesForm(_settings.Clone(), _updates, ApplySettings, _autostart, OpenAgentHooks);
             var result = dlg.ShowDialog();
-            _engine.SetTestCursor(TestCursor.Off); // always stop forcing a test cursor on close
             if (result == DialogResult.OK) ApplySettings(dlg.Settings);
         }
         finally
@@ -246,22 +214,15 @@ public sealed class TrayApplicationContext : ApplicationContext
     }
 
     /// <summary>
-    /// Apply edited settings to the live engine — used by both Preferences "Apply" and
-    /// "OK". Persists them and rebuilds the cursors, preserving the enabled/disabled
-    /// state. A running test cursor survives the rebuild, so you can tweak size/colour
-    /// and watch it update without closing the dialog.
+    /// Apply edited settings — used by both Preferences "Apply" and "OK". Persists them and re-reads
+    /// them into the live overlay (size/placement/corner take effect on the next frame; no restart).
     /// </summary>
     void ApplySettings(CursorSettings source)
     {
         _settings.CopyFrom(source);
         SettingsStore.Save(_settings);
-
-        bool wasRunning = _engine.IsRunning;
-        _engine.Stop();
-        if (wasRunning) _engine.Start();
-        _enabledItem.Checked = _engine.IsRunning;
-        _engine.SetWaitingAgents(_agents.WaitingTools); // a fresh engine starts empty — re-push the live set
-        SyncTypingHook(); // ClickFeedback / IbeamFeedback may have been toggled
+        _enabledItem.Checked = _settings.AgentNotifierEnabled;
+        _overlay.RefreshSettings();
     }
 
     void OnExit(object? sender, EventArgs e)
@@ -269,8 +230,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _tray.Visible = false;
         _agentSweep?.Dispose();
         _agentPipe?.Dispose();
-        _keyHook?.Dispose();
-        _engine.Dispose();
+        _overlay.Dispose();
         ExitThread();
     }
 
@@ -290,12 +250,16 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             _agentSweep?.Dispose();
             _agentPipe?.Dispose();
-            _keyHook?.Dispose();
             _tray.Dispose();
-            _engine.Dispose();
+            _overlay.Dispose();
             _appIcon.Dispose();
             _marshal.Dispose();
         }
         base.Dispose(disposing);
     }
+
+    // Reload the user's configured cursor scheme from the registry (used once on startup to undo a
+    // themed cursor a killed older version may have left behind).
+    const uint SPI_SETCURSORS = 0x0057;
+    [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint a, uint b, IntPtr c, uint d);
 }

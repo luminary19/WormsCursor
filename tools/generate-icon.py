@@ -8,8 +8,8 @@ glyphs (see the system tray). A white silhouette on transparent matches that
 vocabulary on the default dark taskbar. The cursor itself keeps its black
 outline for visibility over arbitrary content; the icon drops it on purpose.
 
-The arrow geometry is the same 7-point polygon as
-src/WormsCursor.Core/ArrowRenderer.cs, so the icon reads as "that cursor".
+The arrow geometry is a baked 7-point aim-arrow polygon (the project's original
+cursor glyph, kept as the recognisable app mark).
 It's drawn supersampled and LANCZOS-downscaled for clean antialiased edges
 (PIL's polygon fill is not antialiased), rotated to point up-right so the
 square canvas is used well.

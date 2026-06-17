@@ -1,5 +1,13 @@
 # Agent Notifier — design
 
+> **Superseded (rendering only).** This doc describes the original design where the notifier was
+> composited onto the *themed system cursors* by `CursorEngine`. The cursor-theming engine has since
+> been **removed**, and the token is now drawn by a standalone transparent overlay window
+> (`NotifierOverlay`) that follows the cursor *or* pins to a screen corner — no `SetSystemCursor`
+> involved. The **transport, wire format, `AgentActivity` state model, and hook registration below are
+> still accurate**; only the "Rendering"/engine-integration parts (and "Coverage: all themed cursors")
+> are historical. See `CLAUDE.md` / `README.md` for the current architecture.
+
 > Feature branch: `feat/agent-notifier`. Status: MVP built (pipe + `hook` verb, `AgentActivity`,
 > per-tool **logo** charms — Claude Code / Codex — that hang on the same pendulum as the busy ring /
 > help "?" (same spot, same swing), register/unregister/status UI + a live preview). Not yet

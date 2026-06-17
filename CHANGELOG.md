@@ -4,6 +4,40 @@ Notable changes to WormsCursor. Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
+## Unreleased
+
+### Changed
+- **WormsCursor is now just the agent-waiting notifier — the cursor theming is gone.** The token that
+  shows when an AI agent needs you no longer rides on a themed system cursor, so you don't have to
+  enable any of the *Worms*-style cursors to see it. It's drawn by its own transparent, click-through
+  overlay (true per-pixel alpha via `UpdateLayeredWindow`) that touches no system state — nothing to
+  restore on exit, and it's invisible/zero-cost when no agent is waiting.
+- **The token bounces, and you choose where.** In **Preferences** pick **Next to the mouse cursor**
+  (it hangs off the pointer on a springy pendulum and follows it, with a gentle idle bob) or **Pinned
+  to a screen corner** (it sits in the corner you choose and bounces in place). Plus a **token size**
+  slider and a live preview. The DPI of the monitor it's shown on is honoured, so the token keeps a
+  consistent size across mixed-DPI setups — which also retires the old mixed-DPI cursor flicker.
+- **The bounce is fluid.** The token animates on a dedicated high-resolution thread
+  (`timeBeginPeriod(1)` + real elapsed delta-time) instead of a coarse UI timer, so the motion is
+  smooth and time-correct even while a dialog is open — no stutter.
+- **The token clears the instant the agent resumes, not at the timeout.** WormsCursor now registers
+  Claude's `PreToolUse`/`PostToolUse` hooks, so approving a permission prompt (which fires no
+  `UserPromptSubmit`) clears the token as soon as the agent does its next thing, instead of lingering
+  until the linger timeout. The trade-off is one short fail-silent hook process per tool call during an
+  active turn. **Re-register from Preferences → Agent settings…** ("Update available" → "Re-register")
+  and restart your agent session to pick up the new events.
+
+### Fixed
+- Preferences layout: the corner picker no longer runs past the window edge.
+
+### Removed
+- The **Check for updates** button in Preferences (the app still records the version for the post-update
+  "What's new" pop-up; the *What's new* link and version still show).
+- The whole cursor-theming engine: the rotating arrow/hand, the animated busy/help/crosshair/
+  I-beam/resize/move/unavailable cursors, click & typing feedback, the preview grid + per-cursor
+  toggles + Showtime, and the `WormsCursor.Preview` showcase tool. The hook → pipe plumbing, the tray,
+  Preferences, autostart, single-instance and auto-update are all unchanged.
+
 ## 0.8.2 - 2026-06-16
 
 ### Fixed

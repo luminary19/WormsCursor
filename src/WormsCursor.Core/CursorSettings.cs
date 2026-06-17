@@ -1,9 +1,23 @@
 namespace WormsCursor.Core;
 
+/// <summary>Where the bouncing agent token is drawn while an agent is waiting.</summary>
+public enum NotifierPlacement
+{
+    /// <summary>The token hangs next to the mouse pointer and follows it (pendulum bounce).</summary>
+    Cursor,
+    /// <summary>The token sits in a fixed screen corner and bounces in place.</summary>
+    Corner,
+}
+
+/// <summary>Which screen corner the <see cref="NotifierPlacement.Corner"/> token pins to.</summary>
+public enum ScreenCorner { TopLeft, TopRight, BottomLeft, BottomRight }
+
 /// <summary>
-/// Tunable parameters for the rotating-cursor engine. Appearance fields are what the
-/// preferences UI edits; the behaviour fields are engine tuning (not yet exposed).
-/// Persisted as JSON by <see cref="SettingsStore"/>.
+/// Tunable parameters for the agent-notifier token (the bouncing tool logo shown while an AI agent is
+/// waiting for you). What was once a cursor-theming engine is now a single floating overlay, so these
+/// settings only describe that token: its size, where it lives, and how long a stuck logo lingers.
+/// Persisted as JSON by <see cref="SettingsStore"/>; additive/tolerant load (unknown fields ignored,
+/// missing fields default), so an older settings file upgrades cleanly.
 /// </summary>
 public sealed class CursorSettings
 {
@@ -11,67 +25,34 @@ public sealed class CursorSettings
     /// a future load can migrate. Additive changes are handled by tolerant JSON.</summary>
     public int Version { get; set; } = 1;
 
-    // ---------- appearance (preferences UI) ----------
+    // ---------- token appearance (preferences UI) ----------
 
-    /// <summary>Cursor bitmap size in px (square; hotspot at the centre). The arrow
-    /// geometry scales with this, keeping proportions at any size.</summary>
-    public int Size { get; set; } = 64;
+    /// <summary>Token size in px (logical, at 96 DPI — scaled up on high-DPI monitors). The logo
+    /// and its swing space scale with this.</summary>
+    public int Size { get; set; } = 96;
 
-    /// <summary>Fill colour as an HTML hex string, e.g. "#FFFFFF".</summary>
-    public string FillColor { get; set; } = "#FFFFFF";
-
-    /// <summary>Outline colour as an HTML hex string, e.g. "#000000".</summary>
+    /// <summary>Outline colour as an HTML hex string, e.g. "#000000" — used for the small "+N"
+    /// badge drawn when more than one agent is waiting.</summary>
     public string OutlineColor { get; set; } = "#000000";
-
-    /// <summary>Outline thickness at the reference size (64); scales with <see cref="Size"/>.
-    /// 0 = no outline.</summary>
-    public double OutlineThickness { get; set; } = 1.4;
-
-    /// <summary>Corner rounding radius at the reference size (64); scales with
-    /// <see cref="Size"/>. 0 = sharp corners.</summary>
-    public double CornerRadius { get; set; } = 0.0;
-
-    /// <summary>Click feedback: the pointer and crosshair do a little "squash &amp; pop" while
-    /// a mouse button is held. On by default.</summary>
-    public bool ClickFeedback { get; set; } = true;
-
-    /// <summary>I-beam typing feedback: the text cursor hops and shivers as you type. On by
-    /// default; separate from <see cref="ClickFeedback"/> so it can be turned off on its own.</summary>
-    public bool IbeamFeedback { get; set; } = true;
 
     // ---------- agent notifier (preferences UI) ----------
 
-    /// <summary>Show a waiting tool's logo on the cursor while AI agents are waiting for the user
-    /// (always a single logo plus a "+N" count when several wait). On by default; the indicator only
-    /// appears once a hook is registered and an agent reports an event.</summary>
+    /// <summary>Show the waiting tool's logo while AI agents are waiting for the user (always a single
+    /// logo plus a "+N" count when several wait). On by default; the token only appears once a hook is
+    /// registered and an agent reports an event.</summary>
     public bool AgentNotifierEnabled { get; set; } = true;
 
     /// <summary>How long a waiting agent's logo lingers before it's swept, in seconds, if the agent
-    /// never sends a closing event. Default 60s; clamped to 30s–30min.</summary>
-    public int AgentNotifierTimeoutSeconds { get; set; } = 60;
+    /// never sends a closing event. Default 20s; clamped to 10s–30min.</summary>
+    public int AgentNotifierTimeoutSeconds { get; set; } = 20;
 
-    // ---------- which cursors are themed (preferences UI) ----------
+    /// <summary>Where the token is drawn: hanging off the mouse pointer, or pinned to a screen
+    /// corner. Defaults to following the cursor.</summary>
+    public NotifierPlacement Placement { get; set; } = NotifierPlacement.Cursor;
 
-    /// <summary>Cursor kinds the user has switched OFF — left as the Windows default
-    /// instead of themed. Stored by name (the <see cref="TestCursor"/> value, e.g.
-    /// "Wait"); any kind NOT listed is enabled, so every cursor is themed by default and
-    /// a newly-added cursor lights up automatically. Additive/tolerant JSON.</summary>
-    public List<string> DisabledCursors { get; set; } = new();
-
-    /// <summary>True if <paramref name="kind"/> should be themed (the default).
-    /// <see cref="TestCursor.Off"/> isn't a themed cursor, so it always reads enabled.</summary>
-    public bool IsCursorEnabled(TestCursor kind)
-        => kind == TestCursor.Off
-            || !DisabledCursors.Contains(kind.ToString(), StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>Turn theming of <paramref name="kind"/> on/off (no-op for
-    /// <see cref="TestCursor.Off"/>); keeps the list duplicate-free.</summary>
-    public void SetCursorEnabled(TestCursor kind, bool enabled)
-    {
-        if (kind == TestCursor.Off) return;
-        DisabledCursors.RemoveAll(s => string.Equals(s, kind.ToString(), StringComparison.OrdinalIgnoreCase));
-        if (!enabled) DisabledCursors.Add(kind.ToString());
-    }
+    /// <summary>Which corner the token pins to when <see cref="Placement"/> is
+    /// <see cref="NotifierPlacement.Corner"/>. Defaults to the bottom-right.</summary>
+    public ScreenCorner Corner { get; set; } = ScreenCorner.BottomRight;
 
     // ---------- app state (persisted, not shown in the UI) ----------
 
@@ -79,59 +60,29 @@ public sealed class CursorSettings
     /// post-update changelog pops only once. Empty until first recorded.</summary>
     public string LastSeenVersion { get; set; } = "";
 
-    // ---------- behaviour (engine tuning; not in the UI yet) ----------
-
-    public int Steps { get; set; } = 360;
-    public int Hz { get; set; } = 144;
-    public double AimDist { get; set; } = 8.0;
-    public double AimSmooth { get; set; } = 0.50;
-    public double HystDeg { get; set; } = 3.0;
-    public int IdleReset { get; set; } = 60;
-    public double TurnDps { get; set; } = 720;
-    public bool Debug { get; set; } = false;
-
     /// <summary>Clamp values into safe ranges (e.g. after loading a hand-edited or
     /// migrated file) so bad input can't break rendering.</summary>
     public void Normalize()
     {
-        Size = Math.Clamp(Size, 24, 256);
-        OutlineThickness = Math.Clamp(OutlineThickness, 0, 4);
-        CornerRadius = Math.Clamp(CornerRadius, 0, 12);
-        Steps = Math.Clamp(Steps, 8, 720);
-        Hz = Math.Clamp(Hz, 30, 240);
-        AimSmooth = Math.Clamp(AimSmooth, 0.05, 1.0);
-        AgentNotifierTimeoutSeconds = Math.Clamp(AgentNotifierTimeoutSeconds, 30, 1800);
+        Size = Math.Clamp(Size, 48, 192);
+        AgentNotifierTimeoutSeconds = Math.Clamp(AgentNotifierTimeoutSeconds, 10, 1800);
     }
 
-    public CursorSettings Clone()
-    {
-        var copy = (CursorSettings)MemberwiseClone();
-        copy.DisabledCursors = new List<string>(DisabledCursors); // own list, so dialog edits don't alias the live settings
-        return copy;
-    }
+    /// <summary>A deep copy. All fields are value types or immutable strings, so a shallow
+    /// member-wise clone is already a safe, independent working copy for the dialog.</summary>
+    public CursorSettings Clone() => (CursorSettings)MemberwiseClone();
 
-    /// <summary>Copy all values from <paramref name="other"/> into this instance (so a
-    /// reference held by the engine sees the change without being replaced).</summary>
+    /// <summary>Copy all editable values from <paramref name="other"/> into this instance (so a
+    /// reference held by the overlay sees the change without being replaced). <see cref="LastSeenVersion"/>
+    /// is app state, not an appearance edit, so it's deliberately left alone.</summary>
     public void CopyFrom(CursorSettings other)
     {
         Version = other.Version;
         Size = other.Size;
-        FillColor = other.FillColor;
         OutlineColor = other.OutlineColor;
-        OutlineThickness = other.OutlineThickness;
-        CornerRadius = other.CornerRadius;
-        ClickFeedback = other.ClickFeedback;
-        IbeamFeedback = other.IbeamFeedback;
         AgentNotifierEnabled = other.AgentNotifierEnabled;
         AgentNotifierTimeoutSeconds = other.AgentNotifierTimeoutSeconds;
-        DisabledCursors = new List<string>(other.DisabledCursors);
-        Steps = other.Steps;
-        Hz = other.Hz;
-        AimDist = other.AimDist;
-        AimSmooth = other.AimSmooth;
-        HystDeg = other.HystDeg;
-        IdleReset = other.IdleReset;
-        TurnDps = other.TurnDps;
-        Debug = other.Debug;
+        Placement = other.Placement;
+        Corner = other.Corner;
     }
 }

@@ -6,7 +6,7 @@ namespace WormsCursor.Core;
 /// <summary>
 /// A tiny SVG path-data ("d" attribute) → <see cref="GraphicsPath"/> parser — just enough to bake the
 /// agent tool logos (see <see cref="AgentLogos"/>) into vector geometry, so they scale crisply to any
-/// cursor size instead of being rasterised. Mirrors how <c>HandShape</c> bakes its silhouette.
+/// token size instead of being rasterised.
 ///
 /// Supports M/L/H/V/C/S/Q/T/A/Z in both absolute (upper) and relative (lower) form, implicit command
 /// repetition, and SVG's packed arc flags; arcs are flattened to cubic Béziers. Not a general SVG

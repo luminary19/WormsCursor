@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
 using System.Reflection;
 using WormsCursor.App.Services;
 using WormsCursor.Core;
@@ -8,227 +6,107 @@ using WormsCursor.Core;
 namespace WormsCursor.App;
 
 /// <summary>
-/// Live cursor-appearance editor. Works on a clone of the settings (passed in) and
-/// exposes the edited copy via <see cref="Settings"/>; the caller applies it on OK.
-/// The preview pane renders the arrow with the same <see cref="ArrowRenderer"/> the
-/// engine uses, on both a dark and a light background.
+/// The notifier appearance editor. Works on a clone of the settings (passed in) and exposes the edited
+/// copy via <see cref="Settings"/>; the caller applies it on OK (and "Apply" commits live without
+/// closing). Controls the bouncing agent token: its size and where it lives (following the cursor, or
+/// pinned to a screen corner). The live preview draws the token with the same
+/// <see cref="NotifierRenderer"/> the overlay uses, over a dark/light split so it reads either way.
+/// Autostart and the agent-notifications dialog hang off here too.
 /// </summary>
 public sealed class PreferencesForm : Form
 {
     const string RepoUrl = "https://github.com/dawidope/WormsCursor";
 
     const int M = 16;            // outer margin
-    const int W = 460;           // minimum client width (the window grows wider for the 7-col preview)
-    const int PreviewGap = 14;   // gap between the preview and the controls below it
-    const int PreviewCols = 7;   // fixed preview columns: 13 cursors -> 2 tidy rows (matches the README sheet)
-    const int CellPad = 14;      // breathing room around each cursor (drawn 1:1, never scaled)
-    const int ColGap = 28;       // gap between the two control columns below the preview
-    const int ShowtimeLeadIn = 3; // seconds counted down before Showtime forces the first cursor
-    const int ShowtimeStepMs = 1500; // dwell on each cursor once cycling starts
+    const int W = 460;           // client width
+    const int PreviewH = 220;    // preview pane height (fits the largest token the slider allows)
 
     readonly CursorSettings _working;
     public CursorSettings Settings => _working;
 
     readonly DoubleBufferedPanel _preview;
-    readonly Panel _body;        // every control below the preview, moved/resized as one block
-    readonly System.Windows.Forms.Timer _previewDebounce; // coalesces rapid slider edits into one render
-    readonly System.Windows.Forms.Timer _showtime;        // hands-free demo: forces each test cursor in turn
-    readonly CheckBox[] _cursorChecks;   // one per preview tile: ticked = themed, unticked = Windows default
-    readonly ToolTip _checkTip = new();  // explains the tile checkboxes on hover
-    int _bodyHeight;             // _body content height (computed once when built)
-    int _cellW = 1, _cellH = 1, _rows = 1; // preview grid metrics (set by LayoutPreview)
-    int _hoverIndex = -1;        // preview tile under the mouse (-1 = none): its cursor is "borrowed" onto the live pointer
-
-    // --- showtime state (the auto-cycling demo) ---
-    readonly bool _showtimeLoops = true; // false = one pass through all cursors, then auto-stop
-    bool _showtimeRunning;       // active (covers both the lead-in countdown and the cycling)
-    bool _suppressTestCombo;     // guard: programmatic combo moves during showtime mustn't re-force a cursor
-    int _showtimeStep = -1;      // -1 during the lead-in, else the index into PreviewKinds
-    int _showtimeCountdown;      // seconds left in the lead-in
-    int _preShowtimeIndex;       // combo selection to restore when showtime ends
-    Bitmap?[] _previews = Array.Empty<Bitmap?>();
-    static readonly TestCursor[] PreviewKinds =
-    {
-        TestCursor.Arrow, TestCursor.Hand, TestCursor.Wait, TestCursor.AppStarting, TestCursor.Help, TestCursor.Cross,
-        TestCursor.Ibeam, TestCursor.SizeWE, TestCursor.SizeNS, TestCursor.SizeNWSE, TestCursor.SizeNESW, TestCursor.SizeAll,
-        TestCursor.No,
-    };
-
-    // Cursors shown in the Showtime cycle, in PreviewKinds order — captured when it starts so it
-    // only cycles the ENABLED cursors (an unticked tile is skipped, just like in normal use).
-    TestCursor[] _showtimeKinds = Array.Empty<TestCursor>();
-
-    readonly TrackBar _sizeBar, _thickBar, _radiusBar;
-    readonly Label _sizeVal, _thickVal, _radiusVal;
-    readonly Label _sizeCap, _thickCap, _radiusCap, _fillCap, _outlineCap, _testCap;
-    readonly Button _fillBtn, _outlineBtn;
-    readonly ComboBox _testCombo;
-    readonly Button _showtimeBtn;
-    readonly CheckBox _clickFxChk;
-    readonly CheckBox _ibeamFxChk;
-    readonly Label _tip;
+    readonly Label _previewCap;
+    readonly TrackBar _sizeBar;
+    readonly Label _sizeVal, _sizeCap;
+    readonly Label _placeCap;
+    readonly RadioButton _followCursorRadio, _cornerRadio;
+    readonly Label _cornerCap;
+    readonly ComboBox _cornerCombo;
     readonly Button _defaultsBtn, _applyBtn, _okBtn, _cancelBtn;
     readonly Label _version;
-    readonly LinkLabel _link;
-    readonly LinkLabel _whatsNew;
-    readonly Action<TestCursor> _setTest;
+    readonly LinkLabel _link, _whatsNew;
+    readonly ToolTip _tip = new();
+
     readonly Action<CursorSettings> _apply;
     readonly UpdateService _updates;
-    readonly Button _updateBtn;
-    readonly Label _updateStatus;
 
-    // App-level controls (not part of the appearance working-copy): autostart commits immediately
-    // to the registry; the agent button opens the notifications dialog the tray used to own.
+    // App-level controls (not part of the appearance working-copy): autostart commits immediately to
+    // the registry; the agent button opens the notifications dialog.
     readonly IAutostart _autostart;
     readonly Action _openAgentSettings;
     readonly CheckBox _autostartChk;
     readonly Button _agentBtn;
     bool _suppressAutostart; // guards the revert-on-failure write so it doesn't re-enter the handler
 
+    // Corner combo order mirrors the ScreenCorner enum (TopLeft, TopRight, BottomLeft, BottomRight).
+    static readonly string[] CornerNames = { "Top-left", "Top-right", "Bottom-left", "Bottom-right" };
+
     public PreferencesForm(CursorSettings working, UpdateService updates,
-                           Action<TestCursor> setTestCursor, Action<CursorSettings> applyLive,
-                           IAutostart autostart, Action openAgentSettings)
+                           Action<CursorSettings> applyLive, IAutostart autostart, Action openAgentSettings)
     {
         _working = working;
         _updates = updates;
-        _setTest = setTestCursor;
         _apply = applyLive;
         _autostart = autostart;
         _openAgentSettings = openAgentSettings;
 
-        // Auto-rescale the whole dialog when it crosses to a monitor with a different scale
-        // (the process is PerMonitorV2, but WinForms only auto-scales a form on a DPI change
-        // when AutoScaleMode is Font/Dpi — the hand-coded default is Inherit ≈ none, so the
-        // window otherwise stays at the DPI it opened on and looks cut off on the other screen).
         AutoScaleMode = AutoScaleMode.Font;
-
         Text = "WormsCursor — Preferences";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterScreen;
         MaximizeBox = false;
         MinimizeBox = false;
-        _preview = new DoubleBufferedPanel
-        {
-            Location = new Point(M, M),
-            BackColor = Color.FromArgb(122, 122, 122),
-            // No border (it would eat client pixels and trip the scrollbar). AutoScroll is turned
-            // on in LayoutWindow ONLY when the grid genuinely can't fit on screen.
-        };
+        _tip.ShowAlways = true;
+
+        // --- live token preview ---
+        _previewCap = MakeCaption("Preview");
+        _preview = new DoubleBufferedPanel { BackColor = Color.FromArgb(60, 60, 60) };
         _preview.Paint += PreviewPaint;
-        // Hover-to-try: moving over a tile borrows that cursor onto the real pointer
-        // (and hides the tile, since the cursor is "now on your pointer"); leaving the
-        // grid hands the pointer back to whatever the Test-cursor combo has selected.
-        _preview.MouseMove += PreviewMouseMove;
-        _preview.MouseLeave += PreviewMouseLeave;
-        Controls.Add(_preview);
 
-        // A small checkbox per preview tile: ticked = WormsCursor themes that cursor, unticked
-        // leaves it as the Windows default. All ticked by default. They're children of the
-        // preview panel so they ride its scroll; LayoutWindow positions them over each tile's
-        // top-left corner. Toggling only edits the working copy — it takes effect on Apply/OK,
-        // like every other edit here.
-        _checkTip.ShowAlways = true;
-        _cursorChecks = new CheckBox[PreviewKinds.Length];
-        for (int i = 0; i < PreviewKinds.Length; i++)
+        // --- token size ---
+        _sizeCap = MakeCaption("Token size");
+        _sizeBar = new TrackBar
         {
-            var kind = PreviewKinds[i];
-            var cb = new CheckBox
-            {
-                AutoSize = false,
-                Size = new Size(16, 16),
-                Checked = _working.IsCursorEnabled(kind),
-                BackColor = _preview.BackColor, // blend into the grey backdrop (no light plate)
-            };
-            _checkTip.SetToolTip(cb, "Theme this cursor (untick to keep the Windows default)");
-            cb.CheckedChanged += (_, _) => { _working.SetCursorEnabled(kind, cb.Checked); _preview.Invalidate(); };
-            _cursorChecks[i] = cb;
-            _preview.Controls.Add(cb);
-        }
+            Minimum = 48, Maximum = 192, TickStyle = TickStyle.None, AutoSize = false,
+            Value = Math.Clamp(_working.Size, 48, 192),
+        };
+        _sizeBar.ValueChanged += (_, _) => { _working.Size = _sizeBar.Value; UpdateLabels(); _preview.Invalidate(); };
+        _sizeVal = new Label { AutoSize = false, Size = new Size(64, 18), TextAlign = ContentAlignment.MiddleRight };
 
-        // Everything below the preview lives in _body, so the preview can grow (real-size, never
-        // scaled) and just push the controls down / widen the window as a single block.
-        _body = new Panel { Left = 0, Width = W };
-        Controls.Add(_body);
+        // --- placement ---
+        _placeCap = MakeCaption("Show the token");
+        _followCursorRadio = new RadioButton { Text = "Next to the mouse cursor", AutoSize = true, Checked = _working.Placement == NotifierPlacement.Cursor };
+        _cornerRadio = new RadioButton { Text = "Pinned to a screen corner", AutoSize = true, Checked = _working.Placement == NotifierPlacement.Corner };
+        _followCursorRadio.CheckedChanged += (_, _) => { if (_followCursorRadio.Checked) { _working.Placement = NotifierPlacement.Cursor; SyncCornerEnabled(); } };
+        _cornerRadio.CheckedChanged += (_, _) => { if (_cornerRadio.Checked) { _working.Placement = NotifierPlacement.Corner; SyncCornerEnabled(); } };
+        _tip.SetToolTip(_followCursorRadio, "The token hangs off the pointer and follows it, bouncing as you move.");
+        _tip.SetToolTip(_cornerRadio, "The token sits in a fixed screen corner and bounces in place.");
 
-        // Re-rendering all the cursors at real size is cheap when small but heavy at large sizes,
-        // so dragging the size slider is debounced: redraw once the slider settles, not per tick.
-        _previewDebounce = new System.Windows.Forms.Timer { Interval = 70 };
-        _previewDebounce.Tick += (_, _) => { _previewDebounce.Stop(); RenderPreview(); _preview.Invalidate(); };
+        _cornerCap = MakeCaption("Corner");
+        _cornerCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150 };
+        _cornerCombo.Items.AddRange(CornerNames);
+        _cornerCombo.SelectedIndex = Math.Clamp((int)_working.Corner, 0, CornerNames.Length - 1);
+        _cornerCombo.SelectedIndexChanged += (_, _) => _working.Corner = (ScreenCorner)_cornerCombo.SelectedIndex;
 
-        // The controls are CREATED here but POSITIONED by LayoutBody once the final window
-        // width is known (the window widens to fit the 7-column preview). Layout is two
-        // columns — sliders left, colours + test on the right — so the dialog stays wide
-        // and short rather than a tall single stack.
+        // --- app-level row ---
+        _autostartChk = new CheckBox { Text = "Start with Windows", AutoSize = true, Checked = ReadAutostart() };
+        _autostartChk.CheckedChanged += (_, _) => ToggleAutostart();
+        _tip.SetToolTip(_autostartChk, "Launch WormsCursor automatically when you sign in.");
+        _agentBtn = MakeButton("Agent settings…", minWidth: 130);
+        _agentBtn.Click += (_, _) => _openAgentSettings();
+        _tip.SetToolTip(_agentBtn, "Turn the waiting-agent token on/off, set how long it lingers, and register tools.");
 
-        // Full-width tip above the two columns.
-        _tip = MakeCaption("Tip: hover a tile to try it live; untick a cursor to keep the Windows default.");
-        _tip.ForeColor = SystemColors.GrayText;
-
-        // --- left column: the three numeric sliders ---
-        _sizeBar = MakeBar(24, 128, _working.Size);
-        _sizeVal = MakeVal();
-        _sizeCap = MakeCaption("Cursor size");
-        _sizeBar.ValueChanged += (_, _) => { _working.Size = _sizeBar.Value; OnEdited(); };
-
-        _thickBar = MakeBar(0, 40, (int)Math.Round(_working.OutlineThickness * 10));
-        _thickVal = MakeVal();
-        _thickCap = MakeCaption("Outline thickness");
-        _thickBar.ValueChanged += (_, _) => { _working.OutlineThickness = _thickBar.Value / 10.0; OnEdited(); };
-
-        _radiusBar = MakeBar(0, 120, (int)Math.Round(_working.CornerRadius * 10));
-        _radiusVal = MakeVal();
-        _radiusCap = MakeCaption("Corner radius (arrow only)");
-        _radiusBar.ValueChanged += (_, _) => { _working.CornerRadius = _radiusBar.Value / 10.0; OnEdited(); };
-
-        // --- right column: the two colours + the test-cursor combo ---
-        _fillBtn = MakeColorButton(ParseOr(_working.FillColor, Color.White));
-        _fillBtn.Click += (_, _) => PickColor(_fillBtn, c => _working.FillColor = ToHex(c));
-        _fillCap = MakeCaption("Fill colour");
-
-        _outlineBtn = MakeColorButton(ParseOr(_working.OutlineColor, Color.Black));
-        _outlineBtn.Click += (_, _) => PickColor(_outlineBtn, c => _working.OutlineColor = ToHex(c));
-        _outlineCap = MakeCaption("Outline colour");
-
-        // Click feedback: pointer + crosshair "squash & pop" on click. AutoSize so the label can't
-        // clip when the system font / "Make text bigger" is enlarged.
-        _clickFxChk = new CheckBox { Text = "Click feedback", AutoSize = true, Checked = _working.ClickFeedback };
-        _clickFxChk.CheckedChanged += (_, _) => _working.ClickFeedback = _clickFxChk.Checked;
-        _checkTip.SetToolTip(_clickFxChk, "Pointer & crosshair squash & pop while a mouse button is held.");
-
-        // I-beam typing bounce: the text cursor hops/shivers as you type (separate toggle).
-        _ibeamFxChk = new CheckBox { Text = "I-beam typing bounce", AutoSize = true, Checked = _working.IbeamFeedback };
-        _ibeamFxChk.CheckedChanged += (_, _) => _working.IbeamFeedback = _ibeamFxChk.Checked;
-        _checkTip.SetToolTip(_ibeamFxChk, "The text I-beam hops and shivers slightly as you type.");
-
-        // Test cursor: forces the chosen cursor on screen so you can see the busy /
-        // progress animation on demand (it normally only shows when the OS decides).
-        // It reflects the currently APPLIED appearance, not unsaved edits — OK first to
-        // test new colours/size. Cleared automatically when this dialog closes.
-        _testCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
-        _testCombo.Items.AddRange(new object[]
-        {
-            "Off (normal)", "Arrow", "Hand", "Busy (wait)", "App starting", "Help (arrow + ?)", "Crosshair", "Text (I-beam)",
-            "Resize ↔", "Resize ↕", "Resize ↘↖", "Resize ↗↙", "Move ✥", "Unavailable ⊘",
-        });
-        _testCombo.SelectedIndex = 0;
-        _testCombo.SelectedIndexChanged += (_, _) => { if (!_suppressTestCombo) _setTest(MapTest(_testCombo.SelectedIndex)); };
-        _testCap = MakeCaption("Test cursor (force on screen)");
-
-        // Showtime: a hands-free demo for recording. After a 3-2-1 lead-in (time to start your
-        // capture) it forces each test cursor in turn, one per second, looping until you Stop.
-        // Move the mouse while it runs so the motion-driven animations actually play. The combo
-        // follows along (disabled) to show the live cursor's name; the button doubles as Stop.
-        _showtimeBtn = new Button { Text = "▶ Showtime" };
-        _showtimeBtn.Click += (_, _) => ToggleShowtime();
-        _showtime = new System.Windows.Forms.Timer { Interval = 1000 }; // 1s during the lead-in, then ShowtimeStepMs
-        _showtime.Tick += OnShowtimeTick;
-
-        // Stop forcing any test cursor — and halt showtime — when the dialog closes.
-        FormClosed += (_, _) => { _showtime.Stop(); _setTest(TestCursor.Off); };
-
-        // --- action buttons: Defaults + Check-for-updates (left) | Apply OK Cancel (right) ---
-        // Apply commits edits to the live cursor without closing, so you can tweak
-        // size/colour and watch the test cursor update.
+        // --- action buttons ---
         _defaultsBtn = MakeButton("Defaults");
         _defaultsBtn.Click += (_, _) => ResetDefaults();
         _cancelBtn = MakeButton("Cancel"); _cancelBtn.DialogResult = DialogResult.Cancel;
@@ -238,84 +116,84 @@ public sealed class PreferencesForm : Form
         AcceptButton = _okBtn;
         CancelButton = _cancelBtn;
 
-        // --- footer: version + the repo link on one line ---
+        // --- footer ---
         _version = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "v" + AppVersion() };
-        _updateBtn = MakeButton("Check for updates");
-        _updateBtn.Click += OnCheckUpdates;
-        _updateStatus = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = string.Empty };
         _link = new LinkLabel { AutoSize = true, Text = "github.com/dawidope/WormsCursor" };
         _link.LinkClicked += (_, _) => OpenUrl(RepoUrl);
         _whatsNew = new LinkLabel { AutoSize = true, Text = "What's new" };
         _whatsNew.LinkClicked += (_, _) => { using var dlg = new ChangelogForm(_updates); dlg.ShowDialog(this); };
 
-        // --- app-level row: autostart (immediate) + the agent-notifications dialog ---
-        _autostartChk = new CheckBox { Text = "Start with Windows", AutoSize = true, Checked = ReadAutostart() };
-        _autostartChk.CheckedChanged += (_, _) => ToggleAutostart();
-        _checkTip.SetToolTip(_autostartChk, "Launch WormsCursor automatically when you sign in.");
-        _agentBtn = MakeButton("Agent settings…", minWidth: 130);
-        _agentBtn.Click += (_, _) => _openAgentSettings();
-        _checkTip.SetToolTip(_agentBtn, "Show an AI agent's logo on the cursor while it waits for you, and register tools.");
-
-        foreach (Control c in new Control[]
+        Controls.AddRange(new Control[]
         {
-            _tip,
-            _sizeCap, _sizeBar, _sizeVal, _thickCap, _thickBar, _thickVal, _radiusCap, _radiusBar, _radiusVal,
-            _fillCap, _fillBtn, _outlineCap, _outlineBtn, _clickFxChk, _ibeamFxChk, _testCap, _testCombo, _showtimeBtn,
+            _previewCap, _preview,
+            _sizeCap, _sizeBar, _sizeVal,
+            _placeCap, _followCursorRadio, _cornerRadio, _cornerCap, _cornerCombo,
             _autostartChk, _agentBtn,
             _defaultsBtn, _applyBtn, _okBtn, _cancelBtn,
-            _version, _updateBtn, _updateStatus, _link, _whatsNew,
-        })
-            _body.Controls.Add(c);
+            _version, _link, _whatsNew,
+        });
 
         UpdateLabels();
-        MeasureCells();  // fix the grid cell size for the largest cursor the slider allows (128 px)
-        LayoutWindow();  // set the window size ONCE for that grid — no dynamic resizing afterwards
-        RenderPreview();
-        _preview.Invalidate();
+        SyncCornerEnabled();
+        LayoutControls();
     }
 
-    // ---------- layout helpers ----------
-    static TrackBar MakeBar(int min, int max, int value) => new()
+    // ---------- layout ----------
+    void LayoutControls()
     {
-        Minimum = min,
-        Maximum = max,
-        Value = Math.Clamp(value, min, max),
-        TickStyle = TickStyle.None,
-        AutoSize = false,
-    };
+        int innerW = W - 2 * M;
+        int y = M;
 
-    static Label MakeVal() => new()
-    {
-        AutoSize = false,
-        Size = new Size(56, 18),
-        TextAlign = ContentAlignment.MiddleRight,
-        ForeColor = SystemColors.ControlText,
-    };
+        _previewCap.Location = new Point(M, y);
+        y = _previewCap.Bottom + 4;
+        _preview.SetBounds(M, y, innerW, PreviewH);
+        y = _preview.Bottom + 16;
 
-    static Button MakeColorButton(Color c)
-    {
-        var b = new Button { FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false, Size = new Size(150, 28) };
-        b.FlatAppearance.BorderColor = Color.FromArgb(120, 120, 120);
-        b.FlatAppearance.BorderSize = 1;
-        StyleSwatch(b, c);
-        return b;
-    }
+        // size: caption, then a full-width bar with a right-aligned value
+        _sizeCap.Location = new Point(M, y);
+        int barTop = _sizeCap.Bottom + 4;
+        _sizeBar.SetBounds(M, barTop, innerW - 70, 28);
+        _sizeVal.SetBounds(M + innerW - 64, barTop + 5, 64, 18);
+        y = barTop + 28 + 14;
 
-    // Paints a colour button with its colour plus the hex value in a contrasting ink, so a
-    // pure black/white swatch still reads as a clickable colour picker, not a blank bar.
-    static void StyleSwatch(Button b, Color c)
-    {
-        b.BackColor = c;
-        b.Text = ToHex(c);
-        double lum = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0;
-        b.ForeColor = lum > 0.55 ? Color.FromArgb(45, 45, 45) : Color.White;
+        // placement: caption then two radios stacked
+        _placeCap.Location = new Point(M, y);
+        y = _placeCap.Bottom + 4;
+        _followCursorRadio.Location = new Point(M + 4, y);
+        y = _followCursorRadio.Bottom + 6;
+        _cornerRadio.Location = new Point(M + 4, y);
+
+        // corner picker: combo right-aligned to the margin (so it can't run off the edge), with its
+        // caption just to its left, both on the corner-radio's baseline
+        int comboX = W - M - _cornerCombo.Width;
+        _cornerCombo.Location = new Point(comboX, y + Math.Max(0, (_cornerRadio.Height - _cornerCombo.Height) / 2));
+        _cornerCap.Location = new Point(comboX - 6 - _cornerCap.Width, y + Math.Max(0, (_cornerRadio.Height - _cornerCap.Height) / 2));
+        y = Math.Max(_cornerRadio.Bottom, _cornerCombo.Bottom) + 18;
+
+        // app row: autostart (left) + agent settings (right)
+        _agentBtn.SetBounds(W - M - _agentBtn.Width, y, _agentBtn.Width, _agentBtn.Height);
+        _autostartChk.Location = new Point(M, y + Math.Max(0, (_agentBtn.Height - _autostartChk.Height) / 2));
+        y = Math.Max(_agentBtn.Bottom, _autostartChk.Bottom) + 18;
+
+        // action buttons: Defaults (left) | Apply OK Cancel (right)
+        int btnH = _okBtn.Height;
+        _defaultsBtn.Location = new Point(M, y);
+        _cancelBtn.Location = new Point(W - M - _cancelBtn.Width, y);
+        _okBtn.Location = new Point(_cancelBtn.Left - 8 - _okBtn.Width, y);
+        _applyBtn.Location = new Point(_okBtn.Left - 8 - _applyBtn.Width, y);
+        y += btnH + 16;
+
+        // footer: version + links
+        _version.Location = new Point(M, y);
+        _link.Location = new Point(_version.Right + 14, y);
+        _whatsNew.Location = new Point(_link.Right + 14, y);
+        y += 20 + M;
+
+        ClientSize = new Size(W, y);
     }
 
     static Label MakeCaption(string text) => new() { Text = text, AutoSize = true };
 
-    // A push-button that grows to fit its label + the current font (so the text never clips when the
-    // system font / "Make text bigger" is enlarged), with a minimum width so short labels still read
-    // as buttons. All such buttons end up the same height, so a row of them lines up.
     static Button MakeButton(string text, int minWidth = 88) => new()
     {
         Text = text,
@@ -325,482 +203,46 @@ public sealed class PreferencesForm : Form
         MinimumSize = new Size(minWidth, 0),
     };
 
-    // Positions every control inside _body for a given body width: two columns of three
-    // rows each (sliders left, colours + test on the right) keep the dialog wide-and-short,
-    // with the action buttons and footer spanning the full width below. Row heights don't
-    // depend on the width, so LayoutWindow can call this to learn _bodyHeight and again
-    // once the final width is settled.
-    void LayoutBody(int width)
-    {
-        int colW = (width - 2 * M - ColGap) / 2;
-        int leftX = M, rightX = M + colW + ColGap;
-
-        int top = 8;
-        _tip.Location = new Point(M, top);
-        top = _tip.Bottom + 12; // flow from the tip's real height so a bigger font can't crowd it
-
-        // left column — the numeric sliders
-        int ly = top;
-        ly = PlaceSlider(_sizeCap, _sizeBar, _sizeVal, leftX, ly, colW);
-        ly = PlaceSlider(_thickCap, _thickBar, _thickVal, leftX, ly, colW);
-        ly = PlaceSlider(_radiusCap, _radiusBar, _radiusVal, leftX, ly, colW);
-
-        // Every inline field in the right column (the two colour swatches, the test combo, and the
-        // Showtime button) shares the combo's natural, font-driven height so they line up flush —
-        // the combo is a DropDownList, whose height is fixed by the font, so it sets the bar.
-        int fieldH = _testCombo.PreferredHeight;
-
-        // right column — the two colours share one row as two sub-columns (they're narrow, so
-        // stacking them wasted vertical space), then the feedback toggles + the test combo
-        int ry = top;
-        const int swatchGap = 12;
-        int swatchW = (colW - swatchGap) / 2;
-        int outlineX = rightX + swatchW + swatchGap;
-        _fillCap.Location = new Point(rightX, ry);
-        _outlineCap.Location = new Point(outlineX, ry);
-        int swatchTop = Math.Max(_fillCap.Bottom, _outlineCap.Bottom) + 4; // flow below the captions
-        _fillBtn.SetBounds(rightX, swatchTop, swatchW, fieldH);
-        _outlineBtn.SetBounds(outlineX, swatchTop, swatchW, fieldH);
-        ry = swatchTop + fieldH + 14;
-
-        // feedback toggles — two AutoSize rows with breathing room above, between and below; flow
-        // from each control's real height so an enlarged font can't clip or overlap them
-        _clickFxChk.Location = new Point(rightX, ry);
-        ry = _clickFxChk.Bottom + 10;
-        _ibeamFxChk.Location = new Point(rightX, ry);
-        ry = _ibeamFxChk.Bottom + 18;
-
-        // test row: caption, then the combo and the Showtime button on one baseline. Showtime is
-        // sized to its preferred width (+ slack for the "■ Stop (n/n)" label) so it never clips.
-        _testCap.Location = new Point(rightX, ry);
-        int fieldTop = _testCap.Bottom + 4;
-        const int stGap = 6;
-        int stW = _showtimeBtn.PreferredSize.Width + 12;
-        int comboW = colW - stW - stGap;
-        _testCombo.SetBounds(rightX, fieldTop, comboW, fieldH);
-        _showtimeBtn.SetBounds(rightX + comboW + stGap, fieldTop, stW, fieldH);
-        ry = fieldTop + fieldH;
-
-        // app-level row spanning the full width, below both columns: autostart on the left, the
-        // agent-notifications dialog button on the right. Visually separate from the appearance
-        // controls because these don't go through the Apply/Cancel working-copy.
-        int appY = Math.Max(ly, ry) + 14;
-        _agentBtn.SetBounds(width - M - _agentBtn.Width, appY, _agentBtn.Width, _agentBtn.Height);
-        // AutoSize checkbox, vertically centred on the (taller) Agent-settings button beside it
-        _autostartChk.Location = new Point(M, appY + Math.Max(0, (_agentBtn.Height - _autostartChk.Height) / 2));
-
-        // action buttons — Defaults + Check-for-updates on the left, Apply|OK|Cancel clustered
-        // at the right. The wide window leaves a comfortable gap in the middle, so the update
-        // status text sits right beside its button again. Flow from the app row's real bottom so
-        // there's a clear gap above them (a fixed offset crowded the Agent-settings button).
-        int btnY = Math.Max(_agentBtn.Bottom, _autostartChk.Bottom) + 18;
-        int btnH = _okBtn.Height; // AutoSize buttons all share this height, so the row lines up
-        _defaultsBtn.Location = new Point(M, btnY);
-        _updateBtn.Location = new Point(_defaultsBtn.Right + 8, btnY);
-        _updateStatus.Location = new Point(_updateBtn.Right + 12, btnY + Math.Max(0, (btnH - _updateStatus.Height) / 2));
-        _cancelBtn.Location = new Point(width - M - _cancelBtn.Width, btnY);
-        _okBtn.Location = new Point(_cancelBtn.Left - 8 - _okBtn.Width, btnY);
-        _applyBtn.Location = new Point(_okBtn.Left - 8 - _applyBtn.Width, btnY);
-
-        // footer — version + repo link on a single line below the buttons
-        int footerY = btnY + btnH + 14;
-        _version.Location = new Point(M, footerY);
-        _link.Location = new Point(_version.Right + 14, footerY);
-        _whatsNew.Location = new Point(_link.Right + 14, footerY);
-
-        // Fixed line height (~20): autosize PreferredHeight is unreliable before the form gets
-        // a handle, which would clip the footer off the bottom.
-        _bodyHeight = footerY + 20 + M;
-    }
-
-    // One slider row: AutoSize caption, then a full-column-width bar with a right-aligned value
-    // label. Everything flows from the caption's real height and the value is sized to the font, so
-    // an enlarged system font can't clip the caption into the bar or chop the value's descenders.
-    static int PlaceSlider(Label cap, TrackBar bar, Label val, int x, int y, int colW)
-    {
-        const int valW = 64, barH = 28;
-        cap.Location = new Point(x, y);
-        int barTop = cap.Bottom + 4;
-        bar.SetBounds(x, barTop, colW - valW - 6, barH);
-        int valH = val.Font.Height;
-        val.SetBounds(x + colW - valW, barTop + (barH - valH) / 2, valW, valH);
-        return barTop + barH + 12;
-    }
-
-    static TestCursor MapTest(int index) => index switch
-    {
-        1 => TestCursor.Arrow,
-        2 => TestCursor.Hand,
-        3 => TestCursor.Wait,
-        4 => TestCursor.AppStarting,
-        5 => TestCursor.Help,
-        6 => TestCursor.Cross,
-        7 => TestCursor.Ibeam,
-        8 => TestCursor.SizeWE,
-        9 => TestCursor.SizeNS,
-        10 => TestCursor.SizeNWSE,
-        11 => TestCursor.SizeNESW,
-        12 => TestCursor.SizeAll,
-        13 => TestCursor.No,
-        _ => TestCursor.Off,
-    };
-
     // ---------- behaviour ----------
-    void OnEdited()
+    void UpdateLabels() => _sizeVal.Text = $"{_working.Size} px";
+
+    void SyncCornerEnabled()
     {
-        UpdateLabels();         // instant feedback on the value label
-        _previewDebounce.Stop();
-        _previewDebounce.Start(); // heavy re-render fires once the slider settles (no per-tick lag)
-    }
-
-    // Fixes the grid cell to the largest cursor the size slider allows (128 px), so the window
-    // can be sized ONCE and never has to resize. Smaller sizes just draw smaller, centred in the
-    // (fixed) cell — real size, never scaled.
-    void MeasureCells()
-    {
-        var probe = _working.Clone();
-        probe.Size = 128;
-        probe.Normalize();
-        using var arrowBase = ArrowRenderer.DrawArrow(probe);
-        int maxW = 1, maxH = 1;
-        foreach (var kind in PreviewKinds)
-        {
-            using Bitmap full = kind switch
-            {
-                TestCursor.Arrow => ArrowRenderer.DrawArrow(probe),
-                TestCursor.Hand => HandRenderer.DrawHand(probe),
-                var k => ProgressRenderer.RenderRest(probe, k, arrowBase),
-            };
-            using var t = Trim(full);
-            maxW = Math.Max(maxW, t.Width);
-            maxH = Math.Max(maxH, t.Height);
-        }
-        _cellW = maxW + 2 * CellPad;
-        _cellH = maxH + 2 * CellPad;
-    }
-
-    // Sizes the window once for the fixed 7-column grid (real size, never scaled). Capped to the
-    // screen so it can't run off-screen; if the grid is taller than that, the preview scrolls.
-    void LayoutWindow()
-    {
-        int n = PreviewKinds.Length;
-        _rows = Math.Max(1, (n + PreviewCols - 1) / PreviewCols);
-        int contentW = PreviewCols * _cellW, contentH = _rows * _cellH;
-
-        var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
-        int maxPanelW = wa.Width - 2 * M;
-
-        // Body height is width-independent, so lay it out at a provisional width to learn
-        // _bodyHeight (needed for the vertical-overflow check), then again at the final width.
-        LayoutBody(Math.Max(W, Math.Min(contentW, maxPanelW) + 2 * M));
-
-        int maxPanelH = wa.Height - 2 * M - PreviewGap - _bodyHeight - 64; // title bar + taskbar headroom
-        bool overflow = contentW > maxPanelW || contentH > maxPanelH;
-
-        // Scroll ONLY when the grid can't fit (otherwise no scrollbar at all). When it fits, the
-        // panel is exactly the content size, so nothing overflows.
-        _preview.AutoScroll = overflow;
-        _preview.AutoScrollMinSize = overflow ? new Size(contentW, contentH) : Size.Empty;
-        int sb = overflow ? SystemInformation.VerticalScrollBarWidth + 2 : 0;
-
-        int panelW = Math.Min(contentW + sb, maxPanelW);
-        int panelH = Math.Min(contentH, Math.Max(160, maxPanelH));
-        int clientW = Math.Max(W, panelW + 2 * M);
-        int previewX = (clientW - panelW) / 2; // centre the grid if the window's min width is wider
-
-        LayoutBody(clientW); // final control positions at the real width
-
-        _preview.SetBounds(previewX, M, panelW, panelH);
-        _body.SetBounds(0, M + panelH + PreviewGap, clientW, _bodyHeight);
-        ClientSize = new Size(clientW, _body.Bottom);
-
-        PositionCursorChecks();
-    }
-
-    // Places each tile's enable checkbox over its top-left corner. Locations are in the grid's
-    // content coordinates, so the boxes ride the preview's scroll exactly like the painted tiles.
-    void PositionCursorChecks()
-    {
-        for (int i = 0; i < _cursorChecks.Length; i++)
-        {
-            int col = i % PreviewCols, row = i / PreviewCols;
-            _cursorChecks[i].Location = new Point(col * _cellW + 4, row * _cellH + 4);
-        }
-    }
-
-    void UpdateLabels()
-    {
-        _sizeVal.Text = $"{_working.Size} px";
-        _thickVal.Text = _working.OutlineThickness.ToString("0.0");
-        _radiusVal.Text = _working.CornerRadius.ToString("0.0");
-    }
-
-    void RenderPreview()
-    {
-        foreach (var b in _previews) b?.Dispose();
-        // All cursors at their ACTUAL size. Arrow/Hand from their own renderers; the
-        // composited ones rendered in their "at rest" pose. Each is then trimmed to its
-        // ink so the padded 2x canvas (for the swing) doesn't shrink it in the preview.
-        using var arrowBase = ArrowRenderer.DrawArrow(_working); // base for the composited cursors
-        _previews = new Bitmap?[PreviewKinds.Length];
-        for (int i = 0; i < PreviewKinds.Length; i++)
-        {
-            using Bitmap full = PreviewKinds[i] switch
-            {
-                TestCursor.Arrow => ArrowRenderer.DrawArrow(_working),
-                TestCursor.Hand => HandRenderer.DrawHand(_working),
-                var k => ProgressRenderer.RenderRest(_working, k, arrowBase),
-            };
-            _previews[i] = Trim(full);
-        }
+        bool corner = _working.Placement == NotifierPlacement.Corner;
+        _cornerCap.Enabled = corner;
+        _cornerCombo.Enabled = corner;
     }
 
     void PreviewPaint(object? sender, PaintEventArgs e)
     {
         var g = e.Graphics;
-        g.TranslateTransform(_preview.AutoScrollPosition.X, _preview.AutoScrollPosition.Y); // honour scroll
+        int w = _preview.ClientSize.Width, h = _preview.ClientSize.Height;
+        // Dark left half, light right half — the token's contrast rim flips per side, so it reads on both.
+        using (var dark = new SolidBrush(Color.FromArgb(56, 56, 56)))
+            g.FillRectangle(dark, 0, 0, w / 2, h);
+        using (var light = new SolidBrush(Color.FromArgb(218, 218, 218)))
+            g.FillRectangle(light, w / 2, 0, w - w / 2, h);
 
-        int n = _previews.Length;
-        if (n == 0) return;
-        int cols = PreviewCols;
-        // Mid-grey backdrop over the whole grid (shows a light fill and a dark outline at once).
-        using (var bg = new SolidBrush(Color.FromArgb(122, 122, 122)))
-            g.FillRectangle(bg, 0, 0, cols * _cellW, _rows * _cellH);
-
-        for (int i = 0; i < n; i++)
-        {
-            int col = i % cols, row = i / cols;
-            if (i == _hoverIndex)
-            {
-                // This tile's cursor is borrowed onto the live pointer — leave an empty
-                // dashed pocket so it's obvious where it went (and that hovering did something).
-                var cell = new Rectangle(col * _cellW + 3, row * _cellH + 3, _cellW - 7, _cellH - 7);
-                using (var hole = new SolidBrush(Color.FromArgb(96, 96, 96)))
-                    g.FillRectangle(hole, cell);
-                using (var pen = new Pen(Color.FromArgb(185, 185, 185)) { DashStyle = DashStyle.Dash })
-                    g.DrawRectangle(pen, cell);
-                continue;
-            }
-            var bmp = _previews[i];
-            if (bmp is null) continue;
-            int cx = col * _cellW + _cellW / 2;
-            int cy = row * _cellH + _cellH / 2;
-            int dx = cx - bmp.Width / 2, dy = cy - bmp.Height / 2;
-            if (_working.IsCursorEnabled(PreviewKinds[i]))
-                g.DrawImageUnscaled(bmp, dx, dy);             // enabled: real size, never scaled
-            else
-                g.DrawImage(bmp, new Rectangle(dx, dy, bmp.Width, bmp.Height),
-                            0, 0, bmp.Width, bmp.Height, GraphicsUnit.Pixel, DimAttr); // disabled: faded, reads as "off"
-        }
-    }
-
-    // Draws a disabled tile's cursor at ~25% opacity so an unticked cursor visibly reads as "off".
-    static readonly ImageAttributes DimAttr = MakeDimAttr();
-    static ImageAttributes MakeDimAttr()
-    {
-        var attr = new ImageAttributes();
-        attr.SetColorMatrix(new ColorMatrix { Matrix33 = 0.25f }); // scale alpha to 25%
-        return attr;
-    }
-
-    // Hovering a tile "borrows" that cursor onto the real pointer (live preview); moving
-    // off a tile within the grid (idx < 0) hands the pointer back to the Test-cursor combo.
-    void PreviewMouseMove(object? sender, MouseEventArgs e)
-    {
-        if (_showtimeRunning) return; // showtime owns the cursor — ignore hover-to-try
-        int idx = HitTestPreview(e.Location);
-        if (idx == _hoverIndex) return;
-        _hoverIndex = idx;
-        _setTest(idx >= 0 ? PreviewKinds[idx] : MapTest(_testCombo.SelectedIndex));
-        _preview.Invalidate();
-    }
-
-    // Left the grid entirely: restore whatever the Test-cursor combo last selected.
-    void PreviewMouseLeave(object? sender, EventArgs e)
-    {
-        if (_showtimeRunning) return; // showtime owns the cursor — ignore hover-to-try
-        if (_hoverIndex < 0) return;
-        _hoverIndex = -1;
-        _setTest(MapTest(_testCombo.SelectedIndex));
-        _preview.Invalidate();
-    }
-
-    // ---------- showtime (the hands-free demo cycle) ----------
-    // Click to start: a 3-2-1 lead-in, then every test cursor in turn (one per second),
-    // looping until you click Stop or close the dialog. Move the mouse while it runs so the
-    // motion-driven cursors (rotation, swing, jelly, taffy) animate as they pass by.
-    void ToggleShowtime()
-    {
-        if (_showtimeRunning) { StopShowtime(); return; }
-
-        // Cycle only the enabled cursors (an unticked tile is left out of the demo).
-        _showtimeKinds = Array.FindAll(PreviewKinds, k => _working.IsCursorEnabled(k));
-        if (_showtimeKinds.Length == 0) return; // everything unticked — nothing to show
-
-        _preShowtimeIndex = _testCombo.SelectedIndex; // restore the prior selection on Stop
-        _showtimeRunning = true;
-        _showtimeStep = -1;                           // still in the lead-in
-        _showtimeCountdown = ShowtimeLeadIn;
-        _testCombo.Enabled = false;                   // showtime owns the cursor while it runs
-        SetTestComboSilently(0);                      // normal cursor during the countdown
-        _setTest(TestCursor.Off);
-        _showtimeBtn.Text = $"Starting {_showtimeCountdown}…";
-        _showtime.Interval = 1000;                    // tick the lead-in countdown once per second
-        _showtime.Start();
-    }
-
-    void StopShowtime()
-    {
-        _showtime.Stop();
-        _showtimeRunning = false;
-        _showtimeStep = -1;
-        _showtimeBtn.Text = "▶ Showtime";
-        _testCombo.Enabled = true;
-        int restore = Math.Clamp(_preShowtimeIndex, 0, _testCombo.Items.Count - 1);
-        SetTestComboSilently(restore);
-        _setTest(MapTest(restore));                   // hand the cursor back to the combo's selection
-    }
-
-    void OnShowtimeTick(object? sender, EventArgs e)
-    {
-        // Lead-in: count down 3… 2… 1… before the first cursor appears.
-        if (_showtimeStep < 0)
-        {
-            _showtimeCountdown--;
-            if (_showtimeCountdown > 0) { _showtimeBtn.Text = $"Starting {_showtimeCountdown}…"; return; }
-            _showtimeStep = 0;
-            _showtime.Interval = ShowtimeStepMs;      // lead-in done — slow to the per-cursor dwell
-        }
-        else if (++_showtimeStep >= _showtimeKinds.Length)
-        {
-            if (!_showtimeLoops) { StopShowtime(); return; }
-            _showtimeStep = 0;                        // loop back to the first cursor
-        }
-
-        var kind = _showtimeKinds[_showtimeStep];
-        SetTestComboSilently(Array.IndexOf(PreviewKinds, kind) + 1); // mirror into the combo so its name shows
-        _setTest(kind);
-        _showtimeBtn.Text = $"■ Stop ({_showtimeStep + 1}/{_showtimeKinds.Length})";
-    }
-
-    // Moves the combo selection for display only — showtime drives the cursor itself, so the
-    // combo's change handler must not also force one (and fight the timer).
-    void SetTestComboSilently(int index)
-    {
-        _suppressTestCombo = true;
-        _testCombo.SelectedIndex = index;
-        _suppressTestCombo = false;
-    }
-
-    // Maps a point in the preview panel (client coords) to a cursor-tile index, or -1 for
-    // none. AutoScrollPosition is <= 0 when scrolled, so subtracting it yields content coords
-    // (mirrors the TranslateTransform in PreviewPaint).
-    int HitTestPreview(Point pt)
-    {
-        int x = pt.X - _preview.AutoScrollPosition.X;
-        int y = pt.Y - _preview.AutoScrollPosition.Y;
-        if (x < 0 || y < 0) return -1;
-        int col = x / _cellW, row = y / _cellH;
-        if (col < 0 || col >= PreviewCols) return -1;
-        int idx = row * PreviewCols + col;
-        return idx >= 0 && idx < _previews.Length ? idx : -1;
-    }
-
-    // Crops a bitmap to its non-transparent bounds (so the cursor's big transparent
-    // canvas doesn't dominate the preview layout). Returns a clone if fully transparent.
-    static Bitmap Trim(Bitmap src)
-    {
-        var rect = new Rectangle(0, 0, src.Width, src.Height);
-        var data = src.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-        int stride = data.Stride;
-        var buf = new byte[stride * src.Height];
-        System.Runtime.InteropServices.Marshal.Copy(data.Scan0, buf, 0, buf.Length);
-        src.UnlockBits(data);
-
-        int minX = src.Width, minY = src.Height, maxX = -1, maxY = -1;
-        for (int y = 0; y < src.Height; y++)
-            for (int x = 0; x < src.Width; x++)
-                if (buf[y * stride + x * 4 + 3] > 8) // alpha
-                {
-                    if (x < minX) minX = x;
-                    if (x > maxX) maxX = x;
-                    if (y < minY) minY = y;
-                    if (y > maxY) maxY = y;
-                }
-        if (maxX < minX) return (Bitmap)src.Clone();
-
-        var crop = new Bitmap(maxX - minX + 1, maxY - minY + 1);
-        using var cg = Graphics.FromImage(crop);
-        cg.DrawImage(src, new Rectangle(0, 0, crop.Width, crop.Height),
-                     Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1), GraphicsUnit.Pixel);
-        return crop;
-    }
-
-    void PickColor(Button btn, Action<Color> assign)
-    {
-        using var dlg = new ColorDialog { Color = btn.BackColor, FullOpen = true };
-        if (dlg.ShowDialog(this) == DialogResult.OK)
-        {
-            StyleSwatch(btn, dlg.Color);
-            assign(dlg.Color);
-            OnEdited();
-        }
+        // Draw the token at its real configured size, centred, upright (swing 0).
+        float side = Math.Min(_working.Size, Math.Min(w, h) - 12);
+        NotifierRenderer.DrawToken(g, _working, new[] { "claude-code" }, w / 2f, h / 2f, side, 0f);
     }
 
     void ResetDefaults()
     {
-        _working.CopyFrom(new CursorSettings());
-        _sizeBar.Value = Math.Clamp(_working.Size, _sizeBar.Minimum, _sizeBar.Maximum);
-        _thickBar.Value = Math.Clamp((int)Math.Round(_working.OutlineThickness * 10), _thickBar.Minimum, _thickBar.Maximum);
-        _radiusBar.Value = Math.Clamp((int)Math.Round(_working.CornerRadius * 10), _radiusBar.Minimum, _radiusBar.Maximum);
-        StyleSwatch(_fillBtn, ParseOr(_working.FillColor, Color.White));
-        StyleSwatch(_outlineBtn, ParseOr(_working.OutlineColor, Color.Black));
-        foreach (var cb in _cursorChecks) cb.Checked = true; // Defaults = every cursor themed again
-        _clickFxChk.Checked = _working.ClickFeedback;         // Defaults = click feedback on
-        _ibeamFxChk.Checked = _working.IbeamFeedback;         // Defaults = I-beam bounce on
-        OnEdited();
-    }
+        var d = new CursorSettings();
+        _working.Size = d.Size;
+        _working.Placement = d.Placement;
+        _working.Corner = d.Corner;
+        _working.OutlineColor = d.OutlineColor;
 
-    async void OnCheckUpdates(object? sender, EventArgs e)
-    {
-        _updateBtn.Enabled = false;
-        SetStatus("Checking…", error: false);
-        try
-        {
-            var r = await _updates.CheckAsync();
-            switch (r.Availability)
-            {
-                case UpdateAvailability.NotInstalled:
-                    SetStatus("Dev build — opening Releases…", error: false);
-                    _updates.OpenReleasesPage();
-                    break;
-                case UpdateAvailability.UpToDate:
-                    SetStatus($"Up to date (v{_updates.CurrentVersionText})", error: false);
-                    break;
-                case UpdateAvailability.Available:
-                    SetStatus($"Update v{r.AvailableVersion} — installing, will restart…", error: false);
-                    await _updates.ApplyAsync(r.VelopackInfo!); // downloads + restarts the app
-                    SetStatus("Downloaded, but the restart didn't happen", error: true);
-                    break;
-                case UpdateAvailability.Failed:
-                    SetStatus("Update check failed", error: true);
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            SetStatus("Update error: " + ex.Message, error: true);
-        }
-        finally
-        {
-            _updateBtn.Enabled = true;
-        }
-    }
-
-    void SetStatus(string text, bool error)
-    {
-        _updateStatus.Text = text;
-        _updateStatus.ForeColor = error ? Color.Firebrick : SystemColors.GrayText;
+        _sizeBar.Value = Math.Clamp(d.Size, _sizeBar.Minimum, _sizeBar.Maximum);
+        _followCursorRadio.Checked = d.Placement == NotifierPlacement.Cursor;
+        _cornerRadio.Checked = d.Placement == NotifierPlacement.Corner;
+        _cornerCombo.SelectedIndex = Math.Clamp((int)d.Corner, 0, CornerNames.Length - 1);
+        UpdateLabels();
+        SyncCornerEnabled();
+        _preview.Invalidate();
     }
 
     // Reads the current autostart state for the checkbox (best-effort: a registry hiccup just
@@ -812,8 +254,8 @@ public sealed class PreferencesForm : Form
     }
 
     // Commits the autostart change to the registry the moment the box is toggled (it's a system
-    // pref, not a cursor-appearance edit, so it doesn't ride Apply/Cancel). On failure we warn and
-    // snap the box back to the real state without re-entering this handler.
+    // pref, not an appearance edit, so it doesn't ride Apply/Cancel). On failure we warn and snap
+    // the box back to the real state without re-entering this handler.
     void ToggleAutostart()
     {
         if (_suppressAutostart) return;
@@ -833,15 +275,6 @@ public sealed class PreferencesForm : Form
     }
 
     // ---------- small utilities ----------
-    static Color ParseOr(string hex, Color fallback)
-    {
-        if (string.IsNullOrWhiteSpace(hex)) return fallback;
-        try { return ColorTranslator.FromHtml(hex.Trim()); }
-        catch { return fallback; }
-    }
-
-    static string ToHex(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
-
     static string AppVersion()
     {
         var v = Assembly.GetExecutingAssembly().GetName().Version;
@@ -856,18 +289,12 @@ public sealed class PreferencesForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
-        {
-            _previewDebounce?.Dispose();
-            _showtime?.Dispose();
-            _checkTip?.Dispose();
-            foreach (var b in _previews) b?.Dispose();
-        }
+        if (disposing) _tip?.Dispose();
         base.Dispose(disposing);
     }
 
     /// <summary>A panel that double-buffers its client area so the live preview repaints
-    /// without flicker while sliders are dragged.</summary>
+    /// without flicker while the size slider is dragged.</summary>
     sealed class DoubleBufferedPanel : Panel
     {
         public DoubleBufferedPanel() => DoubleBuffered = true;

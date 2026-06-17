@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace WormsCursor.Core;
 
@@ -10,7 +11,13 @@ namespace WormsCursor.Core;
 /// </summary>
 public static class SettingsStore
 {
-    static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    // Enums as readable names (e.g. "Corner"/"BottomRight"), not bare integers, so the settings
+    // file stays human-editable. The converter also accepts numbers on read, so any legacy value loads.
+    static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() },
+    };
 
     public static string DefaultPath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

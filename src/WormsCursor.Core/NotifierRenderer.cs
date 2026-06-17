@@ -4,62 +4,57 @@ using System.Drawing.Drawing2D;
 namespace WormsCursor.Core;
 
 /// <summary>
-/// Draws the agent-notifier indicator: a single waiting tool's logo (Claude Code's critter, Codex's
-/// OpenAI knot — see <see cref="AgentLogos"/>) hung on the cursor as a bare, free-floating glyph, with
-/// a small "+N" superscript when more than one agent is waiting.
+/// Draws the agent-notifier token: a single waiting tool's logo (Claude Code's critter, Codex's
+/// OpenAI knot — see <see cref="AgentLogos"/>) as a bare, free-floating glyph, with a small "+N"
+/// superscript when more than one agent is waiting.
 ///
-/// It is deliberately drawn at the <b>exact same spot and on the exact same pendulum</b> as the busy
-/// ring / help "?" — the engine passes in that pendulum's bob (<c>ringCX/ringCY</c>) and its swing
-/// angle, so a logo behaves 1:1 with those elements, as if it were simply painted onto them. No tile,
-/// no visible string: just the logo, swinging. Composited onto whatever cursor bitmap is on screen,
-/// so every themed cursor carries it uniformly.
-///
-/// There is intentionally never a fan of logos — multiple waiting agents collapse to one logo plus a
-/// "+N" count, which stays legible on the tiny cursor canvas.
+/// This is UI-agnostic GDI+ drawing only — the host (the tray app's overlay window) decides where the
+/// token lives and how it bounces, then calls <see cref="DrawToken"/> with the computed centre and
+/// swing angle. There is intentionally never a fan of logos — multiple waiting agents collapse to one
+/// logo plus a "+N" count, which stays legible at any size.
 /// </summary>
 public static class NotifierRenderer
 {
     /// <summary>Draws a single logo (the first entry in <paramref name="tools"/>, tool ids like
-    /// "claude-code" / "codex") centred on the pendulum bob (<paramref name="bobX"/>/<paramref
-    /// name="bobY"/>, canvas px) and tilted by <paramref name="swingDeg"/> (0 = upright at rest) — the
-    /// same bob and swing the busy ring / help "?" use. When more than one agent waits, a small "+N"
-    /// superscript (N = the rest) sits at the logo's top-right. Leaves no transform behind.</summary>
-    public static void DrawCharms(Graphics g, CursorSettings s, IReadOnlyList<string> tools,
-                                  float bobX, float bobY, float swingDeg)
+    /// "claude-code" / "codex") of side <paramref name="tokenSidePx"/> centred at
+    /// (<paramref name="centerX"/>/<paramref name="centerY"/>) and tilted by <paramref name="swingDeg"/>
+    /// (0 = upright). When more than one agent waits, a small "+N" superscript (N = the rest) sits at
+    /// the logo's top-right. A thin contrast rim keeps the bare logo legible over any window behind it.
+    /// Leaves no transform behind.</summary>
+    public static void DrawToken(Graphics g, CursorSettings s, IReadOnlyList<string> tools,
+                                 float centerX, float centerY, float tokenSidePx, float swingDeg)
     {
         if (tools is null || tools.Count == 0) return;
         int count = tools.Count;
-        int sz = Math.Max(8, s.Size);
-
+        float box = Math.Max(8f, tokenSidePx);
+        float edge = box * 0.06f;          // contrast rim so a bare logo reads on any background
         var outline = Parse(s.OutlineColor, Color.Black);
-        float box = sz * 0.42f;            // logo footprint (~ the "?" glyph's)
-        float edge = sz * 0.055f;          // contrast rim so a bare logo reads on any background
 
         var saved = g.Save();
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        g.TranslateTransform(bobX, bobY);
-        g.RotateTransform(swingDeg);       // tilt exactly like the "?" on the same string
+        g.TranslateTransform(centerX, centerY);
+        g.RotateTransform(swingDeg);
 
         // Always exactly one logo (the most recent waiting tool); never a fan.
         AgentLogos.Draw(g, tools[0], new RectangleF(-box / 2f, -box / 2f, box, box), edge);
         if (count > 1)
-            DrawPlusN(g, count - 1, box * 0.40f, -box * 0.34f, sz, outline);
+            DrawPlusN(g, count - 1, box * 0.40f, -box * 0.40f, box, outline);
 
         g.Restore(saved);
     }
 
     // A small outlined "+N" (white fill / theme outline, like the other glyphs) standing in for the
     // other waiting agents — a frameless superscript at the single logo's top-right corner.
-    static void DrawPlusN(Graphics g, int extra, float cx, float cy, int sz, Color outline)
+    static void DrawPlusN(Graphics g, int extra, float cx, float cy, float box, Color outline)
     {
         using var path = new GraphicsPath();
-        float em = sz * 0.20f;
+        float em = box * 0.26f;
         using var fam = new FontFamily(System.Drawing.Text.GenericFontFamilies.SansSerif);
         using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         path.AddString("+" + extra, fam, (int)FontStyle.Bold, em, new PointF(cx, cy), fmt);
 
-        using (var po = new Pen(outline, Math.Max(1.5f, sz * 0.03f)) { LineJoin = LineJoin.Round })
+        using (var po = new Pen(outline, Math.Max(1.5f, box * 0.045f)) { LineJoin = LineJoin.Round })
             g.DrawPath(po, path);
         using (var bf = new SolidBrush(Color.White))
             g.FillPath(bf, path);
