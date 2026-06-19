@@ -112,19 +112,50 @@ public static class AgentHookRegistrar
     // ---------- Claude Code (JSON merge) ----------
 
     static string ClaudeMarker => "hook --tool claude-code";
-    static string ClaudeCommand() => $"\"{Exe}\" hook --tool claude-code";
+    static string ClaudeCommand(string? evt = null)
+        => evt is null ? $"\"{Exe}\" hook --tool claude-code"
+                       : $"\"{Exe}\" hook --tool claude-code --event {evt}";
+
+    // Most events register one "*"-matcher hook the bridge normalises by name. Notification is special:
+    // its sub-type says whether the agent is *blocked on your decision* (a persistent token) or just
+    // *idle after a finished turn* (a timed nudge, like Stop). Claude filters Notification hooks by
+    // notification_type via the matcher, so we register one entry per type carrying an explicit --event
+    // the bridge uses verbatim — no dependence on whatever the stdin payload happens to include.
+    //   permission_prompt / elicitation_dialog → awaiting_user (sticky: needs your input to continue)
+    //   idle_prompt                            → turn_complete (timed: "still waiting", auto-clears)
+    static readonly (string Matcher, string Event)[] ClaudeNotifications =
+    {
+        ("permission_prompt",  "awaiting_user"),
+        ("elicitation_dialog", "awaiting_user"),
+        ("idle_prompt",        "turn_complete"),
+    };
+
+    static JsonObject MakeEntry(string matcher, string command) => new()
+    {
+        ["matcher"] = matcher,
+        ["hooks"] = new JsonArray(new JsonObject { ["type"] = "command", ["command"] = command }),
+    };
 
     static HookState ClaudeState()
     {
         var hooks = ReadJsonObject(ClaudePath, throwOnBad: false)?["hooks"] as JsonObject;
         if (hooks is null) return HookState.NotRegistered;
-        // Count how many of the events we *now* register already carry our hook. None → not us;
-        // all → fully registered; some → an older, partial registration that needs a refresh.
-        int present = 0;
+        // None of our hooks → not us; every event present *and* matching today's shape → registered;
+        // anything in between (an older or partial registration) → needs a refresh. Notification also
+        // has to carry the per-type --event routing, so a pre-routing single-matcher entry reads as outdated.
+        bool anyOurs = false, allCurrent = true;
         foreach (var ev in ClaudeEvents)
-            if (hooks[ev] is JsonArray arr && HasOurHook(arr)) present++;
-        if (present == 0) return HookState.NotRegistered;
-        return present == ClaudeEvents.Length ? HookState.Registered : HookState.Outdated;
+        {
+            var arr = hooks[ev] as JsonArray;
+            bool present = arr is not null && HasOurHook(arr);
+            anyOurs |= present;
+            bool current = ev == "Notification"
+                ? arr is not null && ClaudeNotifications.All(n => HasCommandContaining(arr, "--event " + n.Event))
+                : present;
+            allCurrent &= current;
+        }
+        if (!anyOurs) return HookState.NotRegistered;
+        return allCurrent ? HookState.Registered : HookState.Outdated;
     }
 
     static void RegisterClaude()
@@ -132,16 +163,15 @@ public static class AgentHookRegistrar
         var root = ReadJsonObject(ClaudePath, throwOnBad: true) ?? new JsonObject();
         if (root["hooks"] is not JsonObject hooks) { hooks = new JsonObject(); root["hooks"] = hooks; }
 
-        string cmd = ClaudeCommand();
         foreach (var ev in ClaudeEvents)
         {
             if (hooks[ev] is not JsonArray arr) { arr = new JsonArray(); hooks[ev] = arr; }
             RemoveOurHooks(arr); // de-dupe / refresh the exe path
-            arr.Add(new JsonObject
-            {
-                ["matcher"] = ev == "Notification" ? "permission_prompt|idle_prompt" : "*",
-                ["hooks"] = new JsonArray(new JsonObject { ["type"] = "command", ["command"] = cmd }),
-            });
+            if (ev == "Notification")
+                foreach (var (matcher, evt) in ClaudeNotifications)
+                    arr.Add(MakeEntry(matcher, ClaudeCommand(evt)));
+            else
+                arr.Add(MakeEntry("*", ClaudeCommand()));
         }
         BackupAndWrite(ClaudePath, root.ToJsonString(Indented));
     }
@@ -159,26 +189,19 @@ public static class AgentHookRegistrar
         BackupAndWrite(ClaudePath, root.ToJsonString(Indented));
     }
 
-    static bool HasOurHook(JsonArray entries)
-    {
-        foreach (var entry in entries)
-            if (entry is JsonObject eo && eo["hooks"] is JsonArray inner)
-                foreach (var h in inner)
-                    if (h is JsonObject ho && (ho["command"]?.GetValue<string>() ?? "").Contains(ClaudeMarker))
-                        return true;
-        return false;
-    }
+    // True when a hook-entry's inner command list carries a command containing <needle>.
+    static bool EntryCommandContains(JsonNode? entry, string needle)
+        => entry is JsonObject eo && eo["hooks"] is JsonArray inner
+           && inner.Any(h => h is JsonObject ho && (ho["command"]?.GetValue<string>() ?? "").Contains(needle));
+
+    static bool IsOurEntry(JsonNode? entry) => EntryCommandContains(entry, ClaudeMarker);
+    static bool HasOurHook(JsonArray entries) => entries.Any(IsOurEntry);
+    static bool HasCommandContaining(JsonArray entries, string needle) => entries.Any(e => EntryCommandContains(e, needle));
 
     static void RemoveOurHooks(JsonArray entries)
     {
         for (int i = entries.Count - 1; i >= 0; i--)
-            if (entries[i] is JsonObject eo && eo["hooks"] is JsonArray inner)
-            {
-                bool ours = false;
-                foreach (var h in inner)
-                    if (h is JsonObject ho && (ho["command"]?.GetValue<string>() ?? "").Contains(ClaudeMarker)) { ours = true; break; }
-                if (ours) entries.RemoveAt(i);
-            }
+            if (IsOurEntry(entries[i])) entries.RemoveAt(i);
     }
 
     // ---------- Codex (TOML `notify`) ----------

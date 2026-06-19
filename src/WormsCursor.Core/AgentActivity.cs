@@ -26,15 +26,11 @@ public enum AgentEventKind
     SessionEnded,
 }
 
-/// <summary>A one-shot animation accent emitted when a session transitions on a notable event
-/// (turn complete → a logo "pop"; error → a red tint). Distinct from the steady waiting count.</summary>
-public readonly record struct AgentPulse(string Tool, string Key, AgentEventKind Kind);
-
 /// <summary>
 /// Tracks which agent sessions currently <b>need the user's attention</b>, across every connected
 /// tool, and exposes a single count for the cursor to render. UI-agnostic and thread-safe: the
-/// pipe-listener thread calls <see cref="Report"/>; the tray pushes <see cref="WaitingCount"/> into
-/// the engine and forwards <see cref="Pulse"/>s.
+/// pipe-listener thread calls <see cref="Report"/>; the tray reads <see cref="WaitingTools"/> /
+/// <see cref="WaitingCount"/> and pushes them into the overlay.
 ///
 /// "Needs you" is set by <see cref="AgentEventKind.AwaitingUser"/>, <see cref="AgentEventKind.TurnComplete"/>
 /// and <see cref="AgentEventKind.Error"/> (the agent is blocked or done — your move), and cleared by
@@ -73,9 +69,6 @@ public sealed class AgentActivity
     /// <summary>Raised (outside the lock) whenever the waiting count changes, with the new value.</summary>
     public event Action<int>? WaitingCountChanged;
 
-    /// <summary>Raised (outside the lock) for notable one-shot events, for animation accents.</summary>
-    public event Action<AgentPulse>? Pulse;
-
     /// <summary>How many distinct agent sessions currently need the user.</summary>
     public int WaitingCount { get { lock (_gate) return CountNeedsYou(); } }
 
@@ -103,7 +96,6 @@ public sealed class AgentActivity
         if (string.IsNullOrEmpty(tool)) tool = "unknown";
         int before, after;
         var key = Key(tool, sessionId, project);
-        AgentPulse? pulse = null;
         lock (_gate)
         {
             SweepLocked(nowUtc);
@@ -126,12 +118,9 @@ public sealed class AgentActivity
                 // indefinitely (never swept). A finished/errored turn just needs a fresh prompt, so it
                 // stays timed and clears once the idle timeout elapses.
                 e.Sticky = kind == AgentEventKind.AwaitingUser;
-                if (kind is AgentEventKind.TurnComplete or AgentEventKind.Error)
-                    pulse = new AgentPulse(tool, key, kind);
             }
             after = CountNeedsYou();
         }
-        if (pulse is { } p) Pulse?.Invoke(p);
         if (after != before) WaitingCountChanged?.Invoke(after);
     }
 
@@ -148,18 +137,6 @@ public sealed class AgentActivity
             after = CountNeedsYou();
         }
         if (after != before) WaitingCountChanged?.Invoke(after);
-    }
-
-    /// <summary>Forget everything (e.g. when the feature is toggled off).</summary>
-    public void Clear()
-    {
-        bool changed;
-        lock (_gate)
-        {
-            changed = CountNeedsYou() > 0;
-            _sessions.Clear();
-        }
-        if (changed) WaitingCountChanged?.Invoke(0);
     }
 
     void SweepLocked(DateTime nowUtc)

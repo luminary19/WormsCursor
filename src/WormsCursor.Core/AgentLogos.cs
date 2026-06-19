@@ -4,7 +4,7 @@ using System.Drawing.Drawing2D;
 namespace WormsCursor.Core;
 
 /// <summary>
-/// The baked vector logos for the supported agent tools, used as the dangling charm so you can tell
+/// The baked vector logos for the supported agent tools, used as the dangling token so you can tell
 /// at a glance <i>which</i> tool is waiting (Claude Code's pixel critter, Codex's OpenAI knot). Each
 /// logo is parsed once from its SVG path (see <see cref="SvgPath"/>) into a <see cref="GraphicsPath"/>
 /// in its native viewBox, then scaled to fit wherever it's drawn — crisp at any cursor size.
@@ -17,7 +17,7 @@ static class AgentLogos
     sealed class Logo
     {
         public required GraphicsPath Path;
-        public required Color Color;   // brand fill, drawn on the light charm tile
+        public required Color Color;   // brand fill
         public RectangleF Bounds;      // cached native bounds for fitting
         // Rasterised sprites keyed on (on-screen side px, quantised rim width) — built once, blitted
         // every frame instead of re-stroking the vector path. A settings change (new size) just adds
@@ -55,13 +55,10 @@ static class AgentLogos
         return new Logo { Path = path, Color = color, Bounds = path.GetBounds() };
     }
 
-    public static bool IsKnown(string tool) => _byTool.ContainsKey(tool ?? "");
-
     /// <summary>Draws the <paramref name="tool"/> logo to fit inside <paramref name="box"/> (centred,
     /// aspect-preserved), filled in its brand colour with a thin contrast rim (<paramref name="edge"/>
-    /// px wide, auto light/dark vs. the brand colour) so the bare logo reads on any background —
-    /// the same outline-under/fill-over look the rest of the cursor set uses. Unknown tools get a
-    /// filled dot. Leaves no transform behind.</summary>
+    /// px wide, auto light/dark vs. the brand colour) drawn under the fill so the bare logo reads on
+    /// any background. Unknown tools get a filled dot. Leaves no transform behind.</summary>
     public static void Draw(Graphics g, string tool, RectangleF box, float edge)
     {
         var saved = g.Save();
@@ -85,12 +82,11 @@ static class AgentLogos
 
         // The logo content is fixed for a run (brand path + colour + size + rim), so rasterise it
         // ONCE into a small sprite and just blit it here — the per-frame cost drops from stroking +
-        // filling the whole vector path (a widened round-join pen) to a single DrawImage. The swing
-        // rotation is already in g's transform (set by DrawCharms), so the sprite rotates with it,
-        // exactly like the pre-rendered arrow frames.
-        // The sprite is padded all round (see PadFor) so the rim stroke that straddles the logo's
-        // edge isn't clipped — blit it back at the matching negative offset so the logo itself still
-        // lands exactly inside `box`, the rim spilling into the surrounding canvas as it did before.
+        // filling the whole vector path (a widened round-join pen) to a single DrawImage.
+        // The swing rotation is already in g's transform (set by the caller, NotifierRenderer.DrawToken),
+        // so the blitted sprite rotates with it. The sprite is padded all round (see PadFor) so the rim
+        // stroke that straddles the logo's edge isn't clipped — blit it back at the matching negative
+        // offset so the logo itself still lands exactly inside `box`, the rim spilling into the canvas.
         int pad = PadFor(edge);
         var sprite = GetSprite(logo, box.Width, edge);
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;

@@ -278,7 +278,12 @@ public sealed class NotifierOverlay : IDisposable
             get
             {
                 var cp = base.CreateParams;
-                cp.ExStyle |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+                // WS_EX_TOPMOST is set here at creation rather than relying on Form.TopMost: the window
+                // is realised via raw ShowWindow(SW_SHOWNOACTIVATE) (never Form.Show), so WinForms never
+                // issues the SetWindowPos(HWND_TOPMOST) that TopMost would. Without this the token sits in
+                // the normal z-band and is hidden under any always-on-top window (e.g. a full-screen
+                // click-through overlay).
+                cp.ExStyle |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
                 return cp;
             }
         }
@@ -322,7 +327,7 @@ public sealed class NotifierOverlay : IDisposable
     }
 
     // ---------- P/Invoke ----------
-    const int WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20, WS_EX_NOACTIVATE = 0x08000000, WS_EX_TOOLWINDOW = 0x80;
+    const int WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20, WS_EX_NOACTIVATE = 0x08000000, WS_EX_TOOLWINDOW = 0x80, WS_EX_TOPMOST = 0x8;
     const int ULW_ALPHA = 0x02;
     const byte AC_SRC_OVER = 0x00, AC_SRC_ALPHA = 0x01;
     const int SW_SHOWNOACTIVATE = 4;

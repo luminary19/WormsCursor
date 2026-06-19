@@ -28,7 +28,7 @@ public sealed class AgentHooksForm : Form
     /// <param name="applyDisplay">Called with (enabled, timeoutSeconds) whenever a display setting changes.</param>
     /// <param name="preview">Shows a fake waiting count on the live cursor for testing; called with
     /// the count to preview, or <c>null</c> to end the preview and restore the real count.</param>
-    public AgentHooksForm(bool charmsEnabled, int timeoutSeconds, Action<bool, int> applyDisplay, Action<int?> preview)
+    public AgentHooksForm(bool notifierEnabled, int timeoutSeconds, Action<bool, int> applyDisplay, Action<int?> preview)
     {
         _applyDisplay = applyDisplay;
         _preview = preview;
@@ -67,7 +67,7 @@ public sealed class AgentHooksForm : Form
             AutoSize = true,
             Location = new Point(pad, y),
             Text = "Show the bouncing agent token while agents are waiting",
-            Checked = charmsEnabled,
+            Checked = notifierEnabled,
         };
         _enabledChk.CheckedChanged += (_, _) => Apply();
         Controls.Add(_enabledChk);
@@ -230,7 +230,7 @@ public sealed class AgentHooksForm : Form
     {
         SyncEnabled();
         _applyDisplay(_enabledChk.Checked, (int)_timeoutNum.Value);
-        // Keep an in-flight preview honest if the user just turned charms off, or re-render it if
+        // Keep an in-flight preview honest if the user just turned the token off, or re-render it if
         // they're still on.
         if (_previewClear.Enabled)
         {

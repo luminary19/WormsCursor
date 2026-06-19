@@ -132,7 +132,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         // We're still in the ctor (before Application.Run); defer until the message loop pumps.
         _marshal.BeginInvoke(new Action(() =>
         {
-            using var dlg = new ChangelogForm(_updates, current);
+            using var dlg = new ChangelogForm(_updates);
             dlg.ShowDialog();
         }));
     }

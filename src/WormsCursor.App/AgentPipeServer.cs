@@ -9,8 +9,8 @@ namespace WormsCursor.App;
 /// One background accept-loop thread handles one short-lived client at a time; each client streams
 /// newline-delimited JSON (<see cref="AgentEventMessage"/>) which we hand to the callback.
 ///
-/// Lifetime is independent of the cursor engine — it must survive <c>ApplySettings</c>' engine
-/// stop/restart — so the tray owns it like the keyboard hook, not the engine. The pipe is per-user
+/// The tray owns it directly (not the overlay), so it keeps listening across settings changes and
+/// overlay enable/disable toggles. The pipe is per-user
 /// (its name carries the user name) and inherits the default ACL (same-user access only), which is
 /// exactly what we want: the bridge runs as the same user in the same session.
 /// </summary>

@@ -19,7 +19,7 @@ public sealed class ChangelogForm : Form
     readonly UpdateService _updates;
     readonly RichTextBox _notes;
 
-    public ChangelogForm(UpdateService updates, string? highlightVersion = null)
+    public ChangelogForm(UpdateService updates)
     {
         _updates = updates;
 

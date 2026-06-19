@@ -114,8 +114,13 @@ static class AgentHookBridge
         "UserPromptSubmit" or "SessionStart" => "thinking_started",
         // The session ended (/exit, Ctrl+C, /clear, logout) → drop it so its logo doesn't linger.
         "SessionEnd" => "session_end",
-        // Only the notifications that mean "the agent is blocked on you" become awaiting_user.
-        "Notification" => notificationType is "permission_prompt" or "idle_prompt" or "elicitation_dialog"
+        // The agent is blocked on you → awaiting_user (sticky, never swept). Claude's Notification
+        // payload carries NO `notification_type` field — that string is only what the hook *matcher*
+        // filters on, and we register the matcher as `permission_prompt|idle_prompt`. So any
+        // Notification that reaches this bridge is already a blocking prompt: a null type is the
+        // normal case and must map to awaiting_user (else the persistent token never fires). We still
+        // honour an explicit type if a future payload ever includes one, dropping non-blocking kinds.
+        "Notification" => notificationType is null or "permission_prompt" or "idle_prompt" or "elicitation_dialog"
             ? "awaiting_user" : null,
         "Stop" => "turn_complete",
         "StopFailure" => "error",

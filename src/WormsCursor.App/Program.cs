@@ -1,4 +1,5 @@
 using Velopack;
+using WormsCursor.App.Services;
 
 namespace WormsCursor.App;
 
@@ -14,6 +15,21 @@ static class Program
         if (AgentHookBridge.IsHookInvocation(args))
         {
             AgentHookBridge.Run(args);
+            return;
+        }
+
+        // Headless hook (un)registration: `WormsCursor.exe register|unregister [--tool <id>]` writes or
+        // removes our hooks in the tool's config and exits — the same action as the Agent-settings
+        // dialog's buttons, but scriptable and UI-less (setup scripts; refreshing an outdated set).
+        if (args.Length > 0 && args[0] is "register" or "unregister")
+        {
+            string tool = ArgValue(args, "--tool") ?? "claude-code";
+            try
+            {
+                if (args[0] == "register") AgentHookRegistrar.Register(tool);
+                else AgentHookRegistrar.Unregister(tool);
+            }
+            catch { /* config conflict / bad JSON — surfaced in the UI, nothing to do headless */ }
             return;
         }
 
@@ -36,5 +52,12 @@ static class Program
         var tray = new TrayApplicationContext();
         single.StartListening(tray.OpenPreferences);
         Application.Run(tray);
+    }
+
+    static string? ArgValue(string[] args, string name)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+            if (args[i] == name) return args[i + 1];
+        return null;
     }
 }
