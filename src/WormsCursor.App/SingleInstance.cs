@@ -1,5 +1,3 @@
-using System.Threading;
-
 namespace WormsCursor.App;
 
 /// <summary>

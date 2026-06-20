@@ -22,7 +22,7 @@ public enum HookState
 }
 
 /// <summary>A supported agent tool and where its hook config lives.</summary>
-public sealed record HookTool(string Id, string DisplayName, string ConfigPath, string ConfigHint);
+public sealed record HookTool(string Id, string DisplayName, string ConfigHint);
 
 /// <summary>
 /// Registers / unregisters / inspects WormsCursor's <c>hook</c> bridge in each AI agent tool's
@@ -81,7 +81,7 @@ public static class AgentHookRegistrar
     // below, ready to re-list here once we can verify it. Only Claude Code is surfaced in the UI.
     public static IReadOnlyList<HookTool> Tools { get; } = new[]
     {
-        new HookTool("claude-code", "Claude Code", ClaudePath, "~/.claude/settings.json"),
+        new HookTool("claude-code", "Claude Code", "~/.claude/settings.json"),
     };
 
     public static HookState GetState(string toolId) => toolId switch

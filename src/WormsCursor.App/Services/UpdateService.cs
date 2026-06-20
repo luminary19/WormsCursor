@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net.Http;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -9,14 +8,13 @@ using Velopack.Sources;
 namespace WormsCursor.App.Services;
 
 /// <summary>
-/// Thin wrapper over Velopack's <see cref="UpdateManager"/> that knows how to
-/// report the current version and check / download / apply updates published as
-/// GitHub releases on the WormsCursor repo.
+/// Thin wrapper over Velopack's <see cref="UpdateManager"/> that reports the current
+/// version and fetches the GitHub release notes feeding the in-app "What's new" dialog.
+/// Downloading and applying updates is handled by <c>VelopackApp.Build().Run()</c> at
+/// startup; this type only reads metadata.
 ///
-/// Modeled on PowerLink's UpdateService. Guarded to no-op cleanly when the app
-/// is NOT running from a Velopack-managed install (i.e. an ad-hoc dev build out
-/// of bin\Debug): <see cref="IsVelopackInstalled"/> is false there and
-/// <see cref="ApplyAsync"/> refuses to run.
+/// Modeled on PowerLink's UpdateService. <see cref="IsVelopackInstalled"/> is false for an
+/// ad-hoc dev build out of bin\Debug, where version reporting falls back to the assembly version.
 /// </summary>
 public sealed class UpdateService
 {
@@ -61,7 +59,6 @@ public sealed class UpdateService
             .Where(r => !r.Draft)
             .Select(r => new ReleaseNote(
                 Version: (r.TagName ?? r.Name ?? string.Empty).TrimStart('v', 'V'),
-                Title: r.Name ?? r.TagName ?? "(untitled)",
                 Published: r.PublishedAt,
                 Body: (r.Body ?? string.Empty).Trim(),
                 Prerelease: r.Prerelease))
@@ -85,42 +82,6 @@ public sealed class UpdateService
 
     public string ReleasesPageUrl => $"{RepoUrl}/releases/latest";
 
-    // No CancellationToken: Velopack's CheckForUpdatesAsync / DownloadUpdatesAsync
-    // don't accept one, so we'd be lying about cancellation.
-    public async Task<UpdateCheckResult> CheckAsync()
-    {
-        // Dev builds have no Update.exe; CheckForUpdatesAsync would still hit
-        // GitHub but there'd be no way to apply, so short-circuit honestly.
-        if (!IsVelopackInstalled)
-            return new UpdateCheckResult(UpdateAvailability.NotInstalled, null, null);
-
-        try
-        {
-            var info = await _manager.CheckForUpdatesAsync().ConfigureAwait(false);
-            if (info is null)
-                return new UpdateCheckResult(UpdateAvailability.UpToDate, null, null);
-
-            var version = info.TargetFullRelease.Version.ToString();
-            return new UpdateCheckResult(UpdateAvailability.Available, version, info);
-        }
-        catch (Exception ex)
-        {
-            return new UpdateCheckResult(UpdateAvailability.Failed, null, null, ex.Message);
-        }
-    }
-
-    public async Task ApplyAsync(UpdateInfo info)
-    {
-        ArgumentNullException.ThrowIfNull(info);
-        if (!IsVelopackInstalled)
-            throw new InvalidOperationException(
-                "ApplyAsync requires the app to be running from a Velopack-managed " +
-                "install (Setup.exe or Portable.zip). Dev builds out of bin\\ can't update.");
-
-        await _manager.DownloadUpdatesAsync(info).ConfigureAwait(false);
-        _manager.ApplyUpdatesAndRestart(info);
-    }
-
     public void OpenReleasesPage()
     {
         Process.Start(new ProcessStartInfo
@@ -131,23 +92,8 @@ public sealed class UpdateService
     }
 }
 
-public enum UpdateAvailability
-{
-    UpToDate,
-    Available,
-    Failed,
-    // Running from a dev build (no Update.exe) — in-app update can't restart it.
-    NotInstalled,
-}
-
-public sealed record UpdateCheckResult(
-    UpdateAvailability Availability,
-    string? AvailableVersion,
-    UpdateInfo? VelopackInfo,
-    string? ErrorMessage = null);
-
 /// <summary>One published release for the in-app changelog.</summary>
-public sealed record ReleaseNote(string Version, string Title, DateTimeOffset? Published, string Body, bool Prerelease);
+public sealed record ReleaseNote(string Version, DateTimeOffset? Published, string Body, bool Prerelease);
 
 /// <summary>Subset of the GitHub release JSON we read.</summary>
 internal sealed class GithubRelease

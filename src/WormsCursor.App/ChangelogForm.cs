@@ -145,16 +145,10 @@ public sealed class ChangelogForm : Form
             string line = raw.Trim();
             if (line.Length == 0) { FlushBlock(); continue; } // blank line ends the current block
 
-            if (line.StartsWith("# "))
+            if (line.StartsWith("# ") || line.StartsWith("## ") || line.StartsWith("### "))
             {
-                FlushBlock();
-                int sp = line.IndexOf(' ');
-                SetParagraph(0, 0);
-                AppendRun(line[(sp + 1)..], h3, Ink);
-                _notes.AppendText("\n");
-            }
-            else if (line.StartsWith("## ") || line.StartsWith("### "))
-            {
+                // Every header level (#, ##, ###) renders the same: flush, then the text after
+                // the first space in the heading font.
                 FlushBlock();
                 int sp = line.IndexOf(' ');
                 SetParagraph(0, 0);

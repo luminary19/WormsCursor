@@ -28,7 +28,6 @@ public static class NotifierRenderer
         int count = tools.Count;
         float box = Math.Max(8f, tokenSidePx);
         float edge = box * 0.06f;          // contrast rim so a bare logo reads on any background
-        var outline = Parse(s.OutlineColor, Color.Black);
 
         var saved = g.Save();
         g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -39,7 +38,10 @@ public static class NotifierRenderer
         // Always exactly one logo (the most recent waiting tool); never a fan.
         AgentLogos.Draw(g, tools[0], new RectangleF(-box / 2f, -box / 2f, box, box), edge);
         if (count > 1)
+        {
+            var outline = Parse(s.OutlineColor, Color.Black);
             DrawPlusN(g, count - 1, box * 0.40f, -box * 0.40f, box, outline);
+        }
 
         g.Restore(saved);
     }
