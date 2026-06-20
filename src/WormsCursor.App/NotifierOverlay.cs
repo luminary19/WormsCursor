@@ -101,7 +101,12 @@ public sealed class NotifierOverlay : IDisposable
             {
                 if (_active)
                 {
-                    hidden = false;
+                    // Re-assert the top of the always-on-top band on each hidden->shown transition.
+                    // The window sets WS_EX_TOPMOST once at creation and never re-raises itself, so a
+                    // later-created topmost overlay (e.g. the alacritty-blackhole GL overlay) would
+                    // otherwise sit above the token. One raise per appearance is enough — UpdateLayeredWindow
+                    // never touches z-order, so it holds for as long as the token stays visible.
+                    if (hidden) { _window.BringToTop(); hidden = false; }
                     double now = sw.Elapsed.TotalSeconds;
                     float dt = (float)(now - last);
                     last = now;
@@ -290,6 +295,16 @@ public sealed class NotifierOverlay : IDisposable
 
         protected override bool ShowWithoutActivation => true;
 
+        /// <summary>Re-assert this window at the top of the always-on-top band, without moving,
+        /// resizing, or activating it. Called once per token appearance so a topmost overlay created
+        /// after us (e.g. the alacritty-blackhole GL overlay) can't keep the token buried. Safe from
+        /// the animation thread — a plain z-order call, like SetBitmap's UpdateLayeredWindow.</summary>
+        public void BringToTop()
+        {
+            if (!IsHandleCreated) return;
+            SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+
         /// <summary>Blit an ARGB bitmap as the window's content at screen (<paramref name="x"/>,
         /// <paramref name="y"/>), honouring its per-pixel alpha. Safe to call from the animation thread:
         /// it only updates the layered surface (no message pump needed). (Canonical Forms layered-window
@@ -333,6 +348,9 @@ public sealed class NotifierOverlay : IDisposable
     const int SW_SHOWNOACTIVATE = 4;
     const uint MONITOR_DEFAULTTONEAREST = 2;
     const int MDT_EFFECTIVE_DPI = 0;
+    // Re-assert topmost on each token appearance (LayeredWindow.BringToTop): a z-order-only move.
+    static readonly IntPtr HWND_TOPMOST = new(-1);
+    const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010;
 
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int x, y; }
     [StructLayout(LayoutKind.Sequential)] struct SIZE { public int cx, cy; }
@@ -341,6 +359,7 @@ public sealed class NotifierOverlay : IDisposable
 
     [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
     [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);
     [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
     [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(POINT pt, uint flags);
