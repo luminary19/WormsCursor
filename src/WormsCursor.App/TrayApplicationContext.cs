@@ -36,6 +36,16 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         _ = _marshal.Handle; // realise the window handle on the UI thread for BeginInvoke
 
+        // Force the notifier on at every startup: a persisted `false` (e.g. an accidental "Enabled"
+        // toggle, or a stray hand-edit) self-heals back to `true` so the token can never get stuck off
+        // across launches. The tray "Enabled" item still toggles it for the current run — it just no
+        // longer survives a restart. Only persist when we actually changed something.
+        if (!_settings.AgentNotifierEnabled)
+        {
+            _settings.AgentNotifierEnabled = true;
+            SettingsStore.Save(_settings);
+        }
+
         // Self-heal for anyone upgrading from the cursor-theming version: if that older build was
         // force-killed it may have left a themed system cursor via SetSystemCursor. Reload the real
         // scheme once on startup. Harmless when nothing was hijacked; this app never themes cursors.
