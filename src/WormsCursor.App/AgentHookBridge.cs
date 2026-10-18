@@ -46,6 +46,7 @@ static class AgentHookBridge
     {
         string raw = Console.IsInputRedirected ? Console.In.ReadToEnd() : "";
         string? rawEvent = null, notifType = null, sessionId = null, project = null, message = null;
+        bool subagentsRunning = false;
         if (!string.IsNullOrWhiteSpace(raw))
         {
             try
@@ -57,11 +58,12 @@ static class AgentHookBridge
                 sessionId = Str(root, "session_id");
                 project = Str(root, "cwd");
                 message = Str(root, "message");
+                subagentsRunning = HasRunningSubagent(root);
             }
             catch (JsonException) { /* leave fields null; an --event override may still carry us */ }
         }
 
-        string? norm = evOverride ?? NormalizeClaude(rawEvent, notifType);
+        string? norm = evOverride ?? NormalizeClaude(rawEvent, notifType, subagentsRunning);
         if (norm is null) return null; // not an event we surface
 
         return new AgentEventMessage
@@ -108,7 +110,7 @@ static class AgentHookBridge
         };
     }
 
-    static string? NormalizeClaude(string? hookEvent, string? notificationType) => hookEvent switch
+    static string? NormalizeClaude(string? hookEvent, string? notificationType, bool subagentsRunning) => hookEvent switch
     {
         // You submitted a prompt, or (re)opened the session → you're back, the agent isn't waiting.
         "UserPromptSubmit" or "SessionStart" => "thinking_started",
@@ -122,11 +124,25 @@ static class AgentHookBridge
         // honour an explicit type if a future payload ever includes one, dropping non-blocking kinds.
         "Notification" => notificationType is null or "permission_prompt" or "idle_prompt" or "elicitation_dialog"
             ? "awaiting_user" : null,
-        "Stop" => "turn_complete",
+        // Spawning background subagents ends the turn at once (Stop fires right after SubagentStart),
+        // but Claude resumes on its own when they report back — so it isn't your move yet. Stop's
+        // payload lists in-flight work in `background_tasks`; only a Stop with no subagent there is a
+        // real finish.
+        "Stop" => subagentsRunning ? null : "turn_complete",
         "StopFailure" => "error",
         "PreToolUse" or "PostToolUse" => "tool_use",
         _ => null,
     };
+
+    // True when Claude's Stop payload lists a background subagent or workflow, e.g.
+    // "background_tasks": [{ "type": "subagent", "status": "running", ... }]. Claude only lists in-flight
+    // (running/pending) work, so any entry counts. Background shells are deliberately ignored: a dev
+    // server may never exit, so it doesn't mean Claude will come back on its own.
+    static bool HasRunningSubagent(JsonElement root)
+        => root.ValueKind == JsonValueKind.Object
+           && root.TryGetProperty("background_tasks", out var tasks)
+           && tasks.ValueKind == JsonValueKind.Array
+           && tasks.EnumerateArray().Any(t => Str(t, "type") is "subagent" or "workflow");
 
     static void Send(AgentEventMessage msg)
     {

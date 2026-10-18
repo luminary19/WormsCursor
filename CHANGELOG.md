@@ -29,6 +29,9 @@ GitHub releases. The release workflow pulls the matching section into each relea
 
 ### Fixed
 - Preferences layout: the corner picker no longer runs past the window edge.
+- The token no longer pops up when Claude Code hands work to background subagents. Spawning them
+  ends Claude's turn at once, but it picks back up by itself when they report in, so it isn't your
+  move yet. The token now waits for the real finish.
 
 ### Removed
 - The **Check for updates** button in Preferences (the app still records the version for the post-update
