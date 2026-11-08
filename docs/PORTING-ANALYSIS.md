@@ -1,7 +1,7 @@
-# Porting WormsCursor to macOS and Linux — Feasibility Analysis
+# Porting AgentsCursor to macOS and Linux — Feasibility Analysis
 
 > **Obsolete.** This analyses porting the old `SetSystemCursor`-based **cursor-theming engine**, which
-> has since been removed — WormsCursor is now an agent-waiting overlay (no system-cursor theming), so
+> has since been removed — AgentsCursor is now an agent-waiting overlay (no system-cursor theming), so
 > the cross-platform blocker this document is about no longer applies. Kept for historical context; see
 > `CLAUDE.md` / `README.md` for the current architecture.
 
@@ -12,7 +12,7 @@
 
 ## 1. Executive summary (TL;DR)
 
-WormsCursor's core feature — a **global, system-wide** swap of an animated cursor that
+AgentsCursor's core feature — a **global, system-wide** swap of an animated cursor that
 reacts to movement and clicks and is visible across **every** application — rests on the
 Win32 `SetSystemCursor` API, for which **no clean, public equivalent exists on any other
 platform.** On macOS it can only be achieved through undocumented private CoreGraphics
@@ -64,7 +64,7 @@ math (preserved as-is); the rest is GDI+ calls with a near 1:1 mapping to SkiaSh
 `HandShape.cs` (pure `float[]`), `CursorSettings.cs` (POCO) and `SettingsStore.cs`
 (`LocalApplicationData` + `System.Text.Json`) are **100% portable**.
 
-**App layer (`WormsCursor.App`) — needs a rewrite.** Entirely WinForms (`net8.0-windows`,
+**App layer (`AgentsCursor.App`) — needs a rewrite.** Entirely WinForms (`net8.0-windows`,
 `UseWindowsForms`): `NotifyIcon`, `PreferencesForm` (783 lines), `ChangelogForm`. Plus
 Win32/CLR-only: `RegistryAutostart` (`HKCU\…\Run` + `StartupApproved`), `SingleInstance`
 (named `Mutex` + `EventWaitHandle`), `LowLevelKeyboardHook` (`SetWindowsHookEx(WH_KEYBOARD_LL)`),
@@ -318,16 +318,16 @@ cheap option for reduced versions, should they ever be needed.
 
 Files verified to support this report (absolute paths):
 
-- `src/WormsCursor.Core/CursorEngine.cs` — P/Invoke (lines 666–705), `MakeCursor`/HCURSOR
+- `src/AgentsCursor.Core/CursorEngine.cs` — P/Invoke (lines 666–705), `MakeCursor`/HCURSOR
   (637–647), `RestoreDefaultCursors` = `SPI_SETCURSORS` (663–664), idle-query
   `GetCursorInfo` + `LoadCursor` (454–471).
-- `src/WormsCursor.Core/ArrowRenderer.cs` — pure `System.Drawing.Drawing2D`
+- `src/AgentsCursor.Core/ArrowRenderer.cs` — pure `System.Drawing.Drawing2D`
   (GraphicsPath/Pen/SolidBrush/ColorTranslator); geometry separated from the backend.
-- `src/WormsCursor.Core/WormsCursor.Core.csproj` — `net8.0-windows`,
+- `src/AgentsCursor.Core/AgentsCursor.Core.csproj` — `net8.0-windows`,
   `System.Drawing.Common 8.0.10`.
-- `src/WormsCursor.App/WormsCursor.App.csproj` — `net8.0-windows`, `UseWindowsForms`,
+- `src/AgentsCursor.App/AgentsCursor.App.csproj` — `net8.0-windows`, `UseWindowsForms`,
   `Velopack 0.0.1298`.
-- `src/WormsCursor.App/Autostart.cs` — `IAutostart` already abstracted (a ready anchor
+- `src/AgentsCursor.App/Autostart.cs` — `IAutostart` already abstracted (a ready anchor
   point for LaunchAgent/XDG), `RegistryAutostart` = `HKCU\…\Run`.
 
 External research anchors: the **Mousecape** project (`CGSInternal/CGSCursor.h`, issues

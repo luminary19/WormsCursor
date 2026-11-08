@@ -17,13 +17,13 @@ The native renderer retains Pi's spring, high-resolution refresh-rate clock,
 coalesced UI frames, cached logo, and reusable DIB surface. Its frame clock stops
 while hidden. It uses the bundled OpenCode logo instead of Pi's mark.
 
-Like the WormsCursor tray token, the helper stays hidden while a program on the
-**Hide the token while using** list in WormsCursor's Preferences is in front.
+Like the AgentsCursor tray token, the helper stays hidden while a program on the
+**Hide the token while using** list in AgentsCursor's Preferences is in front.
 Dota 2 is on that list by default.
 
 ## Install
 
-Run from the WormsCursor checkout on Windows with Node 24 and the .NET 8 SDK:
+Run from the AgentsCursor checkout on Windows with Node 24 and the .NET 8 SDK:
 
 ```powershell
 powershell -File .\integrations\opencode\Install.ps1
@@ -53,7 +53,7 @@ The registered `plugins` entry points directly to this directory, for example:
 {
   "plugins": [
     {
-      "package": "file:///C:/path/to/WormsCursor/integrations/opencode",
+      "package": "file:///C:/path/to/AgentsCursor/integrations/opencode",
       "options": { "enabled": true, "tokenSize": 64, "lingerSeconds": 30 }
     }
   ]
@@ -65,7 +65,7 @@ selects `index.ts`; configuring the individual file is rejected by this version.
 The host supplies its own `@opencode/plugin` instance. The development dependency
 is pinned to 2.2.0 for verification.
 
-Native builds live in `artifacts/opencode/<source-hash>` under WormsCursor. Source
+Native builds live in `artifacts/opencode/<source-hash>` under AgentsCursor. Source
 and asset changes produce a new immutable build, so another session's running
 executable is never overwritten. There is no helper process launched per event.
 

@@ -1,4 +1,4 @@
-﻿# WormsCursor
+﻿# AgentsCursor
 
 A Windows tray app that shows a **bouncing agent-waiting token**: whenever an AI coding agent
 (Claude Code or Codex) is blocked on your decision or has finished its turn, its tool logo
@@ -11,6 +11,12 @@ WPF control panel, built with WPF-UI to look like Windows 11 Settings.
 > cursors via `SetSystemCursor`). That whole cursor-theming engine was removed; the only thing kept
 > and made the headline feature is the agent-waiting token, now drawn as a standalone overlay so it
 > no longer requires theming any system cursor. The old code is recoverable from git history.
+> It was then called **WormsCursor** until 0.8.2 and renamed **AgentsCursor** (exe, namespaces,
+> `%LocalAppData%` folder, pipe, mutex, Run value, Velopack packId). The GitHub repository and this
+> checkout's folder keep the old name. The only code that still says WormsCursor is the repo URL
+> and the migration from it: the settings carry-over and Run value (see
+> `TrayApplicationContext.MigrateFromWormsCursor`) and the registrar honouring an old
+> `.wormscursor.bak` backup.
 
 ## How it works (the core idea)
 
@@ -22,7 +28,7 @@ while at least one agent is waiting; idle, the thread parks and the token is pai
 a quiet tray burns no CPU.
 
 Which agents are "waiting" is fed in by the same hook → named-pipe plumbing as before:
-`WormsCursor.exe hook …` (fired by the agent's lifecycle hooks) writes one normalised JSON event to
+`AgentsCursor.exe hook …` (fired by the agent's lifecycle hooks) writes one normalised JSON event to
 the running tray over a per-user named pipe; `AgentActivity` tracks which sessions need you; the tray
 pushes that set into the overlay.
 
@@ -54,11 +60,11 @@ a shell string. `Elicitation` carries no `agent_id`, so
 it is keyed by its own id (`mcp_server_name` + `elicitation_id`) and resolved by `ElicitationResult`.
 Never derive a blocked state from Claude's `Notification` — it has no `agent_id` (verified in the
 2.1.x binary); only its `idle_prompt` reminder is used, as a finished nudge. The OpenCode 2 integration has an independent shared helper, based on the
-existing Pi cursor extension; do not route it through throwaway WormsCursor hook processes.
+existing Pi cursor extension; do not route it through throwaway AgentsCursor hook processes.
 
 ## Projects (`src/`)
 
-### `WormsCursor.Core` — the engine (UI-agnostic, GDI+ only, **no WinForms/WPF**)
+### `AgentsCursor.Core` — the engine (UI-agnostic, GDI+ only, **no WinForms/WPF**)
 The reusable heart: token drawing + the agent-activity model. Hostable from a tray app, console, or
 tests.
 - `NotifierRenderer.cs` — `DrawToken(g, settings, TokenFace, ...)`: draws one tool logo at a given
@@ -80,7 +86,8 @@ tests.
   raw-event → `AgentEventKind` mapping.
 - `CursorSettings.cs` — the persisted, tunable settings: token `Size`, `Placement`
   (`Cursor`/`Corner`), `Corner`, the notifier enable + linger timeout, `OutlineColor`, and
-  `SuppressedPrograms`. (Name kept for continuity; it's now just the notifier's settings.)
+  `SuppressedPrograms`, plus the control panel's `Theme` (`ThemePreference` System/Light/Dark).
+  (Name kept for continuity; it's now just the notifier's settings.)
   `SuppressedPrograms` is a read-only list normalized on every assignment and replaced (never mutated)
   on edit, which is what keeps a `Clone()` (member-wise) snapshot independent. `ResetAppearance` /
   `HasDefaultAppearance()` cover the look only (size, placement, corner, outline).
@@ -90,16 +97,18 @@ tests.
   with a stale snapshot. `Current` is a snapshot for reading; `Live` is the instance the overlay reads.
 - `TokenMotion.cs` — the token's self-driven motion as pure functions of time (corner bounce, idle
   bob), shared by the overlay and the control panel's preview.
-- `SettingsStore.cs` — tolerant JSON load / atomic save in `%LocalAppData%\WormsCursor\settings.json`
+- `SettingsStore.cs` — tolerant JSON load / atomic save in `%LocalAppData%\AgentsCursor\settings.json`
   (survives app-folder updates); enums stored as readable names. `Load` (the owning tray app) moves a
   corrupt file aside; `Read` (another process, i.e. the OpenCode helper) never touches the file.
+  `CarryOverLegacy` copies `%LocalAppData%\WormsCursor\settings.json` over once, only while there is
+  no AgentsCursor file yet.
 - `ProgramSuppression.cs` — pure: normalize program names (trim, path → file name, add ".exe",
   case-insensitive dedupe) and match a program against the list. Unit-tested.
 - `WindowPrograms.cs` — Win32: window/process → exe name, and the visible top-level windows the
   "Add a program" picker lists.
 - `ForegroundWatcher.cs` — the event-driven foreground tracker described above.
 
-### `WormsCursor.App` — the tray app (WinForms tray + WPF windows, `net8.0-windows`, AssemblyName `WormsCursor`)
+### `AgentsCursor.App` — the tray app (WinForms tray + WPF windows, `net8.0-windows`, AssemblyName `AgentsCursor`)
 - `Program.cs` — entry point. The `hook` verb short-circuits **first** (throwaway bridge, no UI),
   then `VelopackApp.Build().Run()`, then a single-instance guard, then the tray context.
 - `NotifierOverlay.cs` — the layered overlay window + animation loop. Cursor mode: a springy pendulum
@@ -109,16 +118,22 @@ tests.
 - `TrayApplicationContext.cs` — owns the tray icon (Enabled / Preferences… / Exit), the
   `NotifierOverlay`, the pipe server + sweep timer, the `LiveSettings`, and the one control panel
   window (created on first use, kept for the app's lifetime; it is the panel's `IControlPanelHost`).
-  Every settings change lands in `OnSettingsChanged` (linger TTL, menu check, overlay refresh,
-  status). The "Enabled" item is the master on/off. Reloads the real cursor scheme once on startup
-  (self-heal for anyone upgrading from the cursor-theming version).
+  Every settings change lands in `OnSettingsChanged` (linger TTL, menu check, overlay refresh).
+  The "Enabled" item is the master on/off. On startup, before loading settings,
+  `MigrateFromWormsCursor` carries the settings file and the Start with Windows entry over from the
+  old name (hooks need no step: the registrar reads WormsCursor's as Outdated). Reloads the real
+  cursor scheme once on startup (self-heal for anyone upgrading from the cursor-theming version).
 - `ControlPanel/` — the WPF control panel (WPF-UI, instant-apply, no OK/Cancel):
   - `WpfHost.cs` — creates the one `System.Windows.Application` (`OnExplicitShutdown`, no `Run`) with
     WPF-UI's `ThemesDictionary` + `ControlsDictionary`; the WinForms loop pumps WPF too.
-  - `ControlPanelWindow.xaml` — `FluentWindow` (Mica, `SystemThemeWatcher` for live light/dark), a
+  - `ControlPanelWindow.xaml` — `FluentWindow` (Mica) with its `TitleBar` in its own row above a
     `NavigationView` sidebar (Token, Agents, Apps, About) fed prebuilt pages through an
-    `INavigationViewPageProvider`, and the at-a-glance status in the pane header. Closing hides it;
-    the sidebar folds to icons below 960 DIPs; each page opens scrolled to the top.
+    `INavigationViewPageProvider`. The title bar is deliberately not handed to the NavigationView
+    (that indents it for a back button and pushes the page down); its padding lines the app icon and
+    name up with the sidebar items' icons and labels. The theme follows `CursorSettings.Theme`:
+    System uses `SystemThemeWatcher` (live), Light/Dark apply directly; both go through
+    `ApplicationThemeManager`, so WpfHost's opaque text brushes are re-derived. Closing hides it;
+    the sidebar folds to icons below 860 DIPs; each page opens scrolled to the top.
   - `TokenPage` — master switch, live animated preview (`TokenPreview`: Core renderer → WPF bitmap
     on the UI thread, its own renderer, both faces over dark and light), size, position, corner.
   - `AgentsPage` + `ToolRow` — per-tool hook cards (Register / Update / Unregister, status from the
@@ -126,20 +141,21 @@ tests.
   - `AppsPage` — the hide-while-using list (Remove per row, empty state), an inline "Add a program"
     picker (open windows or a typed exe name), Restore the default list.
   - `AboutPage` — version, Check for updates → download → restart (`UpdateService`), What's new
-    (release notes via `ReleaseNotesFormat`, a pure, tested Markdown reader), Start with Windows, links.
-  - `IControlPanelHost`, `PanelStatus` (pure status wording, tested), `PanelStyles.xaml`,
-    `SettingHeader`, `ToolLogo`, `PanelAssets`.
+    (release notes via `ReleaseNotesFormat`, a pure, tested Markdown reader), Theme, Start with
+    Windows, links.
+  - `IControlPanelHost`, `PanelStyles.xaml`, `SettingHeader`, `ToolLogo`, `PanelAssets`.
 - `AgentPipeServer.cs` — the named-pipe server that `hook` invocations write to (own thread).
 - `AgentHookBridge.cs` — the `hook` verb: normalises a tool's stdin/argv payload → one pipe line;
   **fail-silent** (sub-½ s pipe timeout, errors to `bridge.log`, always exits 0).
-- `Services/AgentHookRegistrar.cs` — writes/removes WormsCursor's `hook` in each tool's config
+- `Services/AgentHookRegistrar.cs` — writes/removes AgentsCursor's `hook` in each tool's config
   (backup + merge, never clobber).
 - `Services/UpdateService.cs` — Velopack `UpdateManager`: check, download, apply-and-restart, release
   notes; updating is unavailable (and says so) for dev builds run from `bin\`.
 - `SingleInstance.cs` (a second launch opens the panel and hands it foreground rights),
-  `Autostart.cs` (per-user `HKCU\…\Run`), `Assets/`.
+  `Autostart.cs` (per-user `HKCU\…\Run` behind the `IStartupEntries` seam; `MigrateLegacy` moves
+  WormsCursor's Run value to ours, only if it was on), `Assets/`.
 
-### `WormsCursor.OpenCodeOverlay` and `integrations/opencode`
+### `AgentsCursor.OpenCodeOverlay` and `integrations/opencode`
 
 The native helper retains Pi's per-client pipe aggregation, singleton ownership, no-client shutdown,
 monitor-rate waitable timer, frame coalescing, cached logo, and persistent DIB surface. It sleeps while
@@ -149,7 +165,7 @@ events and form/permission events, using one persistent pipe connection per plug
 materializations are immutable and content-addressed under `artifacts/opencode/`.
 
 The helper compiles in Core's `CursorSettings`, `SettingsStore`, `ProgramSuppression`,
-`WindowPrograms` and `ForegroundWatcher` as linked source (`<Compile Include="../WormsCursor.Core/…">`,
+`WindowPrograms` and `ForegroundWatcher` as linked source (`<Compile Include="../AgentsCursor.Core/…">`,
 no DLL reference). `FocusSuppression.cs` hides its token while a suppressed program is in front,
 reading the list from the tray's `settings.json` via `SettingsStore.Read` and re-reading it on a focus
 change only when the file's write time moved. `host.ts` hashes those linked files into the content
@@ -161,15 +177,15 @@ older. See `integrations/opencode/README.md` for setup and tests.
 ## Build & run
 
 ```powershell
-dotnet build WormsCursor.sln -c Release      # build everything
-dotnet run --project src/WormsCursor.App     # run the tray app (dev)
+dotnet build AgentsCursor.sln -c Release      # build everything
+dotnet run --project src/AgentsCursor.App     # run the tray app (dev)
 ```
 
 .NET 8 SDK, pinned by `global.json`. The app is `net8.0-windows`, PerMonitorV2 DPI.
 
 To exercise the notifier without a real agent: **Preferences… → Agents → Preview on screen**, or fire a
 hook by hand — `echo '{"hook_event_name":"PermissionRequest","session_id":"t","tool_name":"Bash"}' |
-WormsCursor.exe hook --tool claude-code` (the tray must be running).
+AgentsCursor.exe hook --tool claude-code` (the tray must be running).
 
 ## Releasing
 
@@ -191,7 +207,7 @@ notes are extracted from the matching section. Auto-update wiring lives in `Serv
   page re-reading the settings into its controls is a no-op.
 - Several patterns (settings store, Velopack packaging, delta-on-release) deliberately **mirror the
   sibling PowerLink project**; comments call this out.
-- Settings live in `%LocalAppData%\WormsCursor\` (not next to the exe) so updates don't wipe them.
+- Settings live in `%LocalAppData%\AgentsCursor\` (not next to the exe) so updates don't wipe them.
   JSON load is tolerant; additive fields don't need a schema bump, and an old settings file (with the
   now-removed cursor-theming fields) loads cleanly — the extra fields are ignored.
 - `tools/generate-icon.py` builds the tray/app icon.

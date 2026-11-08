@@ -18,7 +18,7 @@ export interface CursorRuntime {
 export interface NativeMaterialization { hash: string; directory: string; executable: string }
 
 export interface MaterializeOptions {
-  /** Repository root holding global.json and src/WormsCursor.OpenCodeOverlay (default: this checkout). */
+  /** Repository root holding global.json and src/AgentsCursor.OpenCodeOverlay (default: this checkout). */
   root?: string;
   /** Builds the helper project into a directory (default: `dotnet build`). */
   build?: (project: string, directory: string) => Promise<void>;
@@ -50,7 +50,7 @@ async function sourceFiles(directory: string, relative = ""): Promise<string[]> 
 }
 
 // Shared source the helper compiles in from outside its own directory (`<Compile Include="../...">`,
-// e.g. WormsCursor.Core's settings and foreground watcher). It is build input like the helper's own
+// e.g. AgentsCursor.Core's settings and foreground watcher). It is build input like the helper's own
 // files, so it must be part of the content address, or an edit to it would reuse a stale build.
 async function linkedSources(project: string): Promise<string[]> {
   const xml = await readFile(project, "utf8");
@@ -100,7 +100,7 @@ function dotnetBuild(project: string, directory: string): Promise<void> {
 function rememberFailure(directory: string, hash: string, error: unknown, at: number): Error {
   const failure = error instanceof Error ? error : new Error(String(error));
   failedBuilds.set(directory, { error: failure, at });
-  console.error(`WormsCursor: OpenCode cursor helper build ${hash} failed; not rebuilding for `
+  console.error(`AgentsCursor: OpenCode cursor helper build ${hash} failed; not rebuilding for `
     + `${BUILD_RETRY_COOLDOWN_MS / 60_000} minutes or until its sources change: ${failure.message}`);
   return failure;
 }
@@ -110,8 +110,8 @@ export async function materializeNativeHelper(options: MaterializeOptions = {}):
   const root = options.root ?? repository;
   const build = options.build ?? dotnetBuild;
   const now = options.now ?? Date.now;
-  const native = join(root, "src", "WormsCursor.OpenCodeOverlay");
-  const project = join(native, "WormsCursor.OpenCodeOverlay.csproj");
+  const native = join(root, "src", "AgentsCursor.OpenCodeOverlay");
+  const project = join(native, "AgentsCursor.OpenCodeOverlay.csproj");
   const digest = createHash("sha256");
   digest.update(await readFile(join(root, "global.json")));
   for (const name of await sourceFiles(native)) {

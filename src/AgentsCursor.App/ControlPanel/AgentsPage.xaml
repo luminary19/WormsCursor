@@ -1,0 +1,178 @@
+<Page
+    x:Class="AgentsCursor.App.ControlPanel.AgentsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:AgentsCursor.App.ControlPanel"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="Agents">
+
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/AgentsCursor;component/ControlPanel/PanelStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="VisibleWhen" />
+
+            <!--  One card per tool: logo, name + config path, status, actions.  -->
+            <DataTemplate x:Key="ToolCard" DataType="{x:Type local:ToolRow}">
+                <Border Padding="16,12,16,12" Style="{StaticResource Surface}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Image
+                            Width="28"
+                            Height="28"
+                            Margin="0,0,16,0"
+                            VerticalAlignment="Center"
+                            Source="{Binding Logo}" />
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <ui:TextBlock
+                                FontTypography="Body"
+                                Text="{Binding Name}"
+                                TextTrimming="CharacterEllipsis" />
+                            <StackPanel Margin="0,3,0,0" Orientation="Horizontal">
+                                <Ellipse x:Name="Dot" Style="{StaticResource StatusDot}" />
+                                <ui:TextBlock
+                                    FontTypography="Caption"
+                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                    Text="{Binding StatusText}" />
+                            </StackPanel>
+                            <ui:TextBlock
+                                Margin="0,2,0,0"
+                                FontTypography="Caption"
+                                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                Text="{Binding ConfigPath}"
+                                TextTrimming="CharacterEllipsis"
+                                ToolTip="{Binding ConfigPath}" />
+                            <ui:TextBlock
+                                x:Name="Explanation"
+                                Margin="0,6,0,0"
+                                FontTypography="Caption"
+                                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                Text="{Binding Explanation}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel
+                            Grid.Column="2"
+                            Margin="16,0,0,0"
+                            VerticalAlignment="Center"
+                            Orientation="Horizontal">
+                            <ui:Button
+                                Margin="0,0,8,0"
+                                AutomationProperties.Name="{Binding Name, StringFormat='Disconnect {0}'}"
+                                Click="OnDisconnect"
+                                Content="Disconnect"
+                                Visibility="{Binding ShowDisconnect, Converter={StaticResource VisibleWhen}}" />
+                            <ui:Button
+                                x:Name="Primary"
+                                MinWidth="112"
+                                AutomationProperties.HelpText="{Binding Name}"
+                                Click="OnPrimary"
+                                Content="{Binding PrimaryText}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding Tone}" Value="good">
+                        <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Tone}" Value="warn">
+                        <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource SystemFillColorCautionBrush}" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Tone}" Value="error">
+                        <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Tone}" Value="off">
+                        <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding PrimaryIsAccent}" Value="True">
+                        <Setter TargetName="Primary" Property="Appearance" Value="Primary" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Explanation}" Value="">
+                        <Setter TargetName="Explanation" Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                </DataTemplate.Triggers>
+            </DataTemplate>
+        </ResourceDictionary>
+    </Page.Resources>
+
+    <StackPanel Margin="40,28,40,40">
+        <ui:TextBlock Style="{StaticResource PageTitle}" Text="Agents" />
+        <ui:TextBlock Style="{StaticResource PageLead}" Text="Connect your AI tools so they can tell AgentsCursor when they need you." />
+
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Tools" />
+        <ui:InfoBar
+            x:Name="ErrorBar"
+            Margin="0,0,0,8"
+            IsClosable="True"
+            Severity="Error" />
+        <ItemsControl
+            x:Name="ToolList"
+            Focusable="False"
+            ItemTemplate="{StaticResource ToolCard}" />
+        <ui:TextBlock
+            Margin="2,8,0,0"
+            FontTypography="Caption"
+            Style="{StaticResource Secondary}"
+            Text="AgentsCursor backs up each config file before its first change." />
+
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Timing" />
+        <ui:CardControl Icon="{ui:SymbolIcon Timer24}">
+            <ui:CardControl.Header>
+                <local:SettingHeader Title="Clear the token after an agent is done" Description="When an agent needs your answer, the token stays until you respond." />
+            </ui:CardControl.Header>
+            <StackPanel Orientation="Horizontal">
+                <ui:NumberBox
+                    x:Name="TimeoutBox"
+                    Width="132"
+                    AutomationProperties.Name="Seconds before the token clears after an agent is done"
+                    ClearButtonEnabled="False"
+                    LargeChange="60"
+                    MaxDecimalPlaces="0"
+                    SmallChange="5"
+                    SpinButtonPlacementMode="Inline" />
+                <ui:TextBlock
+                    Margin="10,0,0,0"
+                    VerticalAlignment="Center"
+                    Text="seconds" />
+            </StackPanel>
+        </ui:CardControl>
+
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Try it" />
+        <ui:CardControl Icon="{ui:SymbolIcon Play24}">
+            <ui:CardControl.Header>
+                <local:SettingHeader x:Name="PreviewHeader" Title="Preview on screen" />
+            </ui:CardControl.Header>
+            <Grid>
+                <ui:Button
+                    x:Name="TurnOnButton"
+                    MinWidth="104"
+                    HorizontalAlignment="Right"
+                    Appearance="Primary"
+                    Content="Turn on" />
+                <StackPanel x:Name="PreviewControls" Orientation="Horizontal">
+                    <ui:NumberBox
+                        x:Name="PreviewCountBox"
+                        Width="112"
+                        AutomationProperties.Name="Pretend agents to show"
+                        ClearButtonEnabled="False"
+                        MaxDecimalPlaces="0"
+                        SmallChange="1"
+                        SpinButtonPlacementMode="Inline" />
+                    <ui:TextBlock
+                        x:Name="PreviewCountLabel"
+                        Margin="10,0,16,0"
+                        VerticalAlignment="Center"
+                        Text="agents" />
+                    <ui:Button
+                        x:Name="PreviewButton"
+                        MinWidth="104"
+                        Appearance="Primary" />
+                </StackPanel>
+            </Grid>
+        </ui:CardControl>
+    </StackPanel>
+</Page>

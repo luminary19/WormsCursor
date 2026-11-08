@@ -1,6 +1,6 @@
 # Changelog
 
-Notable changes to WormsCursor. Roughly follows
+Notable changes to AgentsCursor (called WormsCursor up to 0.8.2). Roughly follows
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
@@ -8,14 +8,13 @@ GitHub releases. The release workflow pulls the matching section into each relea
 
 ### Added
 - **A new control panel.** **Preferences…** now opens one window in the style of Windows 11
-  Settings: Mica, rounded cards, switches, and it follows your light or dark theme as it changes. A
-  sidebar holds four pages: **Token** (the on/off switch, a live animated preview of both looks over
-  dark and light, size and position), **Agents** (Connect / Update / Disconnect for each tool with a
-  clear status, how long the token stays after an agent is done, and **Preview on screen**), **Apps**
-  (the apps that hide the token, with their icons and names when they're open) and **About** (version,
-  updates, *What's new*, *Start with Windows*, links). The top of the sidebar shows what the token is
-  doing right now, for example "On · 2 agents need you", with a yellow dot only when one is blocked on
-  you.
+  Settings: Mica, rounded cards, switches, and it follows your Windows light or dark mode as it
+  changes, or stays light or dark if you pick that under **About → Theme**. A sidebar holds four pages:
+  **Token** (the on/off switch, a live animated preview of both looks over dark and light, size and
+  position), **Agents** (Connect / Update / Disconnect for each tool with a clear status, how long the
+  token stays after an agent is done, and **Preview on screen**), **Apps** (the apps that hide the
+  token, with their icons and names when they're open) and **About** (version, updates, *What's new*,
+  the theme, *Start with Windows*, links).
   Every change applies the moment you make it, so there is no OK, Apply or Cancel, and an edit in one
   place can never undo one made elsewhere (the tray's **Enabled**, say). It replaces the separate
   Preferences, *Agent settings*, *Add a program* and *What's new* windows, works fully from the
@@ -28,7 +27,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
   runs fullscreen, borderless or windowed. Dota 2 is on the list by default. **Add an app** offers
   the apps that are open now, or takes a typed exe name, and **Remove** takes one off. Your agents are
   still tracked meanwhile, and the token comes back when you switch away while one is still waiting.
-  While hidden it uses no CPU: WormsCursor learns about focus changes from Windows instead of checking
+  While hidden it uses no CPU: AgentsCursor learns about focus changes from Windows instead of checking
   repeatedly. The OpenCode helper follows the same list. Restart OpenCode to pick it up there.
 
 - **You can tell "it needs an answer" from "it's done".** When an agent is blocked on you (a
@@ -39,11 +38,19 @@ GitHub releases. The release workflow pulls the matching section into each relea
   vector shapes, so it looks the same on every machine.
 
 ### Changed
+- **WormsCursor is now AgentsCursor.** The new name says what it does: it shows when your AI agents
+  need you. The app, its exe (`AgentsCursor.exe`), its tray icon tooltip and its settings folder
+  (`%LocalAppData%\AgentsCursor\`) all carry the new name. What you had carries over on the first
+  start: your settings are copied from `%LocalAppData%\WormsCursor\` (the old folder is left alone),
+  and if WormsCursor started with Windows, AgentsCursor now does instead. Hooks connected by WormsCursor
+  show as *Update available* on the **Agents** page: **Update** each tool once and its hooks are
+  replaced in place, not added twice (for Codex, approve the changed hooks with `/hooks`). The GitHub
+  repository keeps its old name, so links and updates still come from the same place.
 - **The "+N" count is now a small pill in the logo's top-right corner.** When the "?" badge is up,
   the pill tucks in beside it, so the two never overlap. That corner faces the cursor, so the count
   can't swing out of view. In a top screen corner the token now sits a little further from the edge,
   which leaves room for the badge while it bounces.
-- **WormsCursor is now just the agent-waiting notifier — the cursor theming is gone.** The token that
+- **It's now just the agent-waiting notifier — the cursor theming is gone.** The token that
   shows when an AI agent needs you no longer rides on a themed system cursor, so you don't have to
   enable any of the *Worms*-style cursors to see it. It's drawn by its own transparent, click-through
   overlay (true per-pixel alpha via `UpdateLayeredWindow`) that touches no system state — nothing to
@@ -56,7 +63,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - **The bounce is fluid.** The token animates on a dedicated high-resolution thread
   (`timeBeginPeriod(1)` + real elapsed delta-time) instead of a coarse UI timer, so the motion is
   smooth and time-correct even while the control panel is busy — no stutter.
-- **The token clears the instant the agent resumes, not at the timeout.** WormsCursor now registers
+- **The token clears the instant the agent resumes, not at the timeout.** AgentsCursor now registers
   Claude's `PreToolUse`/`PostToolUse` hooks, so approving a permission prompt (which fires no
   `UserPromptSubmit`) clears the token as soon as the agent does its next thing, instead of lingering
   until the linger timeout. The trade-off is one short fail-silent hook process per tool call during an
@@ -64,12 +71,12 @@ GitHub releases. The release workflow pulls the matching section into each relea
   and restart your agent session to pick up the new events.
 
 ### Fixed
-- **A failed update no longer closes WormsCursor.** If a download fails its checksum or another update
+- **A failed update no longer closes AgentsCursor.** If a download fails its checksum or another update
   is already running, **About** now says so and offers **Try again**, instead of the tray icon and the
   token disappearing.
 - **Claude Code hooks work on Windows without Git Bash.** Claude Code runs a hook command through
   PowerShell there, which rejected the command WormsCursor registered, and a failing hook blocked
-  every tool call. The hooks now start WormsCursor directly, with no shell. The **Agents** page shows
+  every tool call. The hooks now start AgentsCursor directly, with no shell. The **Agents** page shows
   Claude Code as *Needs update*: **Update** it and restart your Claude Code sessions.
 - **An approval stays on screen until you answer it.** When Claude ran several tools at once and one
   needed your approval, another one finishing first cleared the token while Claude was still waiting
@@ -87,8 +94,8 @@ GitHub releases. The release workflow pulls the matching section into each relea
   longer gets filed under the main agent, and a question from the main agent is no longer cleared by
   background subagents that keep working. Claude's `Notification` hook is now used only for its
   "still waiting for your input" reminder. The **Agents** page shows Claude Code as *Update
-  available* (it also does when the registered hook points at a different `WormsCursor.exe`):
-  **Update** it to pick this up.
+  available* (it also does when the registered hook points at a different exe, such as
+  `WormsCursor.exe`): **Update** it to pick this up.
 - The token no longer pops up when Claude Code hands work to background subagents. Spawning them
   ends Claude's turn at once, but it picks back up by itself when they report in, so it isn't your
   move yet. The token now waits for the real finish.
@@ -98,15 +105,16 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - The tray app no longer crashes when the control panel's preview and the live token draw at the
   same time, and a failed animation frame is logged to `bridge.log` and retried instead of ending the app.
 - A read-only or locked `settings.json` no longer crashes the app. A settings file that doesn't parse
-  is no longer overwritten with defaults: before WormsCursor next saves, it copies the file to
+  is no longer overwritten with defaults: before AgentsCursor next saves, it copies the file to
   `settings.json.corrupt-<time>`, and if that copy fails it doesn't save at all. Trailing commas and
   `//` comments in it are now accepted.
 - Register / Unregister keeps your own hook commands even when they share a matcher group with
-  WormsCursor's. The `.wormscursor.bak` backup now always holds your original file, and a malformed
-  Claude Code `settings.json` shows *Config needs fixing* instead of being partly overwritten.
-- *Start with Windows* only shows as on when the startup entry launches this copy of WormsCursor, so
+  AgentsCursor's. The backup (`.agentscursor.bak`, or the `.wormscursor.bak` WormsCursor already
+  made) always holds your original file, and a malformed Claude Code `settings.json` shows *Config
+  needs fixing* instead of being partly overwritten.
+- *Start with Windows* only shows as on when the startup entry launches this copy of AgentsCursor, so
   an entry left by an old or dev build no longer hides behind a switch that looks on.
-- `WormsCursor.exe register|unregister` now exits non-zero and says why when it fails (including an
+- `AgentsCursor.exe register|unregister` now exits non-zero and says why when it fails (including an
   unknown `--tool`).
 - The OpenCode integration no longer re-runs a failing helper build every few seconds. It reports the
   failure once, then tries again after five minutes, or at once when the helper sources change.

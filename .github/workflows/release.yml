@@ -19,11 +19,11 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Restore
-        run: dotnet restore WormsCursor.sln
+        run: dotnet restore AgentsCursor.sln
 
       - name: Publish App (self-contained win-x64)
         run: >
-          dotnet publish src/WormsCursor.App/WormsCursor.App.csproj
+          dotnet publish src/AgentsCursor.App/AgentsCursor.App.csproj
           -c Release
           -r win-x64
           --self-contained true
@@ -34,9 +34,9 @@ jobs:
       - name: Sanity check payload
         shell: pwsh
         run: |
-          # AssemblyName is 'WormsCursor', so the entry point is WormsCursor.exe.
+          # AssemblyName is 'AgentsCursor', so the entry point is AgentsCursor.exe.
           $required = @(
-            'WormsCursor.exe',
+            'AgentsCursor.exe',
             'Assets/Icon.ico',
             'Assets/icon.png',
             # The WPF control panel: WPF-UI and the self-contained WPF runtime's native renderer.
@@ -96,13 +96,13 @@ jobs:
           }
 
           vpk pack `
-            --packId WormsCursor `
+            --packId AgentsCursor `
             --packVersion ${{ steps.ver.outputs.version }} `
             --packDir artifacts/publish `
-            --mainExe WormsCursor.exe `
-            --packTitle "WormsCursor" `
+            --mainExe AgentsCursor.exe `
+            --packTitle "AgentsCursor" `
             --packAuthors "Dawid Wenderski" `
-            --icon src/WormsCursor.App/Assets/Icon.ico `
+            --icon src/AgentsCursor.App/Assets/Icon.ico `
             --outputDir velopack-output
 
       - uses: actions/upload-artifact@v7

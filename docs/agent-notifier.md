@@ -22,7 +22,7 @@
 ## What & why
 
 AI coding agents (Claude Code, Codex, Cursor, …) fire hooks on lifecycle events
-("thinking started", "awaiting your action", "turn complete"). WormsCursor already lives in
+("thinking started", "awaiting your action", "turn complete"). AgentsCursor already lives in
 your peripheral vision as the cursor — so it's the perfect ambient notifier. When one or more
 agents need you, the cursor **grows dangling charms that hang and swing on the existing
 pendulum physics**, one per waiting agent. No toast spam, no extra window; the answer to "do
@@ -34,8 +34,8 @@ which is guaranteed single-instance — **is** the daemon.
 ## Three decisions (locked)
 
 1. **Transport: named pipe, uniform `command` hook for every tool.** Each tool runs
-   `WormsCursor.exe hook --tool <t> …`; that invocation normalises the payload and writes one
-   JSON line to `\\.\pipe\WormsCursor.<user>`, where the running tray app is listening, then
+   `AgentsCursor.exe hook --tool <t> …`; that invocation normalises the payload and writes one
+   JSON line to `\\.\pipe\AgentsCursor.<user>`, where the running tray app is listening, then
    exits 0. No HTTP listener, no "POST to myself". This extends the existing single-instance
    idea (which already uses a named `EventWaitHandle`) into a real message pipe. The `hook`
    verb is **not** a second app instance — it short-circuits before any tray/engine init.
@@ -48,12 +48,12 @@ which is guaranteed single-instance — **is** the daemon.
 ## Architecture
 
 ```
-Claude Code ─┐  command hook: WormsCursor.exe hook --tool claude-code   (stdin JSON)
+Claude Code ─┐  command hook: AgentsCursor.exe hook --tool claude-code   (stdin JSON)
 Codex CLI ───┤  notify = [..., "hook", "--tool", "codex"]               (argv JSON)
 Cursor ──────┘  .cursor/hooks.json command                              (stdin JSON)
                          │ normalise → 1 JSON line
                          ▼
-              \\.\pipe\WormsCursor.<user>   (named pipe; server in the tray app)
+              \\.\pipe\AgentsCursor.<user>   (named pipe; server in the tray app)
                          │
                          ▼
               AgentActivity (Core, UI-free)  ── needs-you set, count, pulses
@@ -68,9 +68,9 @@ Cursor ──────┘  .cursor/hooks.json command                        
   the single-instance guard): if `args[0] == "hook"`, read the tool's payload (stdin for
   Claude/Cursor, last argv for Codex), normalise to the wire format, connect the pipe with a
   <500 ms timeout, write one line, exit 0. **Fail-silent**: any error → log to
-  `%LocalAppData%\WormsCursor\bridge.log` and exit 0. Never block or crash the agent.
+  `%LocalAppData%\AgentsCursor\bridge.log` and exit 0. Never block or crash the agent.
 - **Pipe server** (`AgentPipeServer`, App): a background `NamedPipeServerStream`
-  (`PipeName = "WormsCursor." + Environment.UserName`, message mode, loop accepting one client
+  (`PipeName = "AgentsCursor." + Environment.UserName`, message mode, loop accepting one client
   at a time) owned by `TrayApplicationContext`. Its lifetime is **independent of the engine**
   (like `_keyHook`) so it survives `ApplySettings`' stop/restart. Each received line →
   `AgentActivity.Report(...)` marshalled onto the UI thread via the existing `_marshal`
@@ -201,7 +201,7 @@ Engine integration (`CursorEngine`):
   without an agent. `Clear`, closing the dialog, or a real agent event ends the preview and
   restores the genuine count (`SetWaitingCount(_agents.WaitingCount)`).
 
-### 6. Installer — `WormsCursor.exe hook`-registration
+### 6. Installer — `AgentsCursor.exe hook`-registration
 
 A small dialog (and/or `hook install --tool <t>`) that, with **backup + merge (never
 overwrite)**, writes the hook into each tool's config using the absolute exe path
@@ -226,7 +226,7 @@ overwrite)**, writes the hook into each tool's config using the absolute exe pat
 - **Fail-silent is sacred** — the `hook` verb must never hang or non-zero-exit; <500 ms pipe
   timeout; all errors swallowed to `bridge.log`.
 - **Minimal PATH** — hooks run with a stripped PATH; always register the **absolute** exe path.
-- **Cold start** — `WormsCursor.exe hook` pays .NET startup (~100-250 ms) per event; fine for
+- **Cold start** — `AgentsCursor.exe hook` pays .NET startup (~100-250 ms) per event; fine for
   fire-and-forget. Short-circuit before Velopack/single-instance to keep it lean.
 - **Notifier lifetime ≠ engine lifetime** — keep the pipe server out of the engine
   stop/restart cycle (own it like `_keyHook`).
@@ -235,7 +235,7 @@ overwrite)**, writes the hook into each tool's config using the absolute exe pat
 ## Verification
 
 - Unit-test `AgentActivity` state transitions + TTL (pure Core, no UI).
-- `echo '{...}' | WormsCursor.exe hook --tool claude-code` → pipe → count changes; with no tray
+- `echo '{...}' | AgentsCursor.exe hook --tool claude-code` → pipe → count changes; with no tray
   running it must still exit 0 silently.
 - Wire a real Claude Code `Stop`/`Notification` hook locally and watch the cursor sprout/clear
   charms; confirm idle CPU stays ~0 at `count == 0`.

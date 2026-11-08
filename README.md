@@ -1,6 +1,6 @@
-﻿# WormsCursor
+﻿# AgentsCursor
 
-<img src="src/WormsCursor.App/Assets/icon.png" width="96" align="right" alt="WormsCursor icon">
+<img src="src/AgentsCursor.App/Assets/icon.png" width="96" align="right" alt="AgentsCursor icon">
 
 A tiny Windows tray utility that shows a **bouncing token when an AI agent is waiting on you**. When
 Claude Code or Codex is blocked on your decision or has finished its turn, its
@@ -19,9 +19,14 @@ and optimized rendering, with the OpenCode logo. Its source and build live in th
 > works **without theming or replacing any of your system cursors**. (The old cursor code lives in git
 > history if you want it.)
 
+> **Renamed from WormsCursor.** The app was called WormsCursor until 0.8.2. On its first start,
+> AgentsCursor copies your settings over from `%LocalAppData%\WormsCursor\` and moves a **Start with
+> Windows** entry across. Hooks connected by WormsCursor show as **Update** on the **Agents** page:
+> press it once per tool and they are replaced in place. The GitHub repository keeps its old name.
+
 ## The token
 
-When an agent needs you, WormsCursor draws the waiting tool's logo as a bouncing, click-through
+When an agent needs you, AgentsCursor draws the waiting tool's logo as a bouncing, click-through
 overlay. It shows one tool logo, and a small **"+N"** pill when several sessions wait at once:
 
 - **Plain logo**: the agent finished its turn and is waiting for your next prompt.
@@ -44,18 +49,18 @@ The token stays hidden while a program on the **Hide the token while using** lis
 of **Preferences…**) is in front, whether it runs fullscreen, borderless or windowed. Dota 2
 (`dota2.exe`) is on the list by default. **Add a program** offers the programs that are open now, or
 takes a typed exe name; **Remove** takes one off. Your agents are still tracked meanwhile. When you switch
-away and one is still waiting, the token comes back. While hidden, the token costs no CPU: WormsCursor
+away and one is still waiting, the token comes back. While hidden, the token costs no CPU: AgentsCursor
 learns about focus changes from Windows instead of checking repeatedly. The OpenCode helper follows
 the same list.
 
 ## How the notifier works
 
 Set it up on the **Agents** page of **Preferences…**: connect **Claude Code** or **Codex** there
-and set how long the token stays after an agent is done (the master switch is on the **Token** page). Connecting writes WormsCursor's
+and set how long the token stays after an agent is done (the master switch is on the **Token** page). Connecting writes AgentsCursor's
 `hook` command into the tool's config — `%CLAUDE_CONFIG_DIR%\settings.json` when that environment
 variable is set, otherwise `%USERPROFILE%\.claude\settings.json`; Codex uses
 `%CODEX_HOME%\hooks.json`, otherwise `%USERPROFILE%\.codex\hooks.json` — with backup-and-merge, so it preserves
-your own hooks. Each event then runs `WormsCursor.exe hook --tool …`, a throwaway process that writes
+your own hooks. Each event then runs `AgentsCursor.exe hook --tool …`, a throwaway process that writes
 one line to the running tray app over a named pipe and exits. It's **fail-silent** (<½ s pipe timeout,
 errors logged to `bridge.log`, always exits 0), so it can never block or break the agent.
 
@@ -95,15 +100,15 @@ new or changed hook commands. Restart existing Codex desktop and CLI sessions af
 or changing hook trust so they load the updated configuration.
 
 Codex runs a Windows hook through PowerShell (`powershell.exe -NoProfile -Command …`, or `pwsh`
-when installed), so WormsCursor registers its Codex hook as `& '<path>\WormsCursor.exe' hook --tool
+when installed), so AgentsCursor registers its Codex hook as `& '<path>\AgentsCursor.exe' hook --tool
 codex` in `commandWindows`. A registration from before this fix used a bare quoted path, which
 PowerShell rejects, so every Codex hook failed; the **Agents** page shows it as *Update available*.
 
 **Codex under Orca.** Orca runs Codex with
 `CODEX_HOME=%APPDATA%\orca\codex-runtime-home\home`. Orca copies your hooks there but trusts only
-its own, so WormsCursor's hooks don't run in Orca-launched Codex until you trust them: open Codex
-from Orca, run `/hooks`, and trust the WormsCursor entries. Do this once, and again whenever the
-hook command changes (after **Update**, or when the WormsCursor exe moves).
+its own, so AgentsCursor's hooks don't run in Orca-launched Codex until you trust them: open Codex
+from Orca, run `/hooks`, and trust the AgentsCursor entries. Do this once, and again whenever the
+hook command changes (after **Update**, or when the AgentsCursor exe moves).
 
 Codex currently has no failure lifecycle hook for model/API errors, and those errors can skip
 `Stop`. Consequently, these failures cannot reliably produce a completion token. Normal completion,
@@ -122,7 +127,7 @@ session id), so the count is simply "how many agents need you right now".
 - **Finished its turn / errored** — the agent is done and just needs a fresh prompt, so the token
   **lingers, then auto-clears** after the **linger timeout** (default 20 s, configurable 10–1800 s).
 
-**Why it's event-driven (and the timeout).** WormsCursor only knows what the hooks tell it over the
+**Why it's event-driven (and the timeout).** AgentsCursor only knows what the hooks tell it over the
 pipe — it never polls the agent or watches its process. That keeps it dead-simple and zero-cost when
 idle, but it means a *finished-turn* session that never sends a closing event would otherwise wait
 forever — so the linger timeout is its backstop. (An approval prompt has no such backstop by design:
@@ -136,7 +141,7 @@ an unanswered asynchronous Codex question.
   over the pipe — it never watches the agent's process. A *clean* exit (`/exit`, `Ctrl+C`, `/clear`,
   logout) fires `SessionEnd` and the token clears immediately, but if the agent is **killed outright**
   (Task Manager "End Task", closing the terminal window, `kill`) no hook runs, so no "session ended"
-  ever reaches WormsCursor. A token left by a **finished turn** is swept by the **linger timeout**
+  ever reaches AgentsCursor. A token left by a **finished turn** is swept by the **linger timeout**
   (default 20 s, set on the **Agents** page). A token left by an **approval prompt** stays
   indefinitely — by design, since an unanswered approval is exactly the case that should persist —
   so to dismiss it, click the tray and toggle the notifier off and on (or just **Exit**).
@@ -144,9 +149,9 @@ an unanswered asynchronous Codex question.
 ## Project structure
 
 ```
-WormsCursor.sln
+AgentsCursor.sln
 ├─ src/
-│  ├─ WormsCursor.Core/      Engine — no UI dependencies
+│  ├─ AgentsCursor.Core/      Engine — no UI dependencies
 │  │   ├─ NotifierRenderer.cs Draws the token (one tool logo, the "?" badge when blocked, a "+N" pill) at a given centre/size/swing
 │  │   ├─ TokenFace.cs        Picks what the token shows: which logo, badge on/off, how many others
 │  │   ├─ AttentionBadge.cs   The yellow "?" badge, shared with the OpenCode helper
@@ -156,18 +161,18 @@ WormsCursor.sln
 │  │   ├─ CursorSettings.cs   Token size / placement / corner / notifier settings / hidden-while-using programs (persisted as JSON)
 │  │   ├─ LiveSettings.cs     The one owner of the running settings: every edit is a small Change, saved at once
 │  │   ├─ TokenMotion.cs      The token's corner bounce and idle bob, shared by the overlay and the panel preview
-│  │   ├─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
+│  │   ├─ SettingsStore.cs    Load/save settings in %LocalAppData%\AgentsCursor\
 │  │   ├─ ProgramSuppression.cs Normalizes program names and matches them against the hidden-while-using list
 │  │   ├─ WindowPrograms.cs   Window/process → exe name; the open programs the "Add a program" picker lists
 │  │   └─ ForegroundWatcher.cs Event-driven foreground-program tracker (WinEvent hook, no polling)
-│  └─ WormsCursor.App/       Tray shell (WinForms tray icon + overlay; WPF control panel)
+│  └─ AgentsCursor.App/       Tray shell (WinForms tray icon + overlay; WPF control panel)
 │      ├─ Program.cs                   Entry point (Velopack + single-instance guard; `hook` verb short-circuits first)
 │      ├─ NotifierOverlay.cs          The layered overlay window + bounce animation (cursor / corner)
 │      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the overlay, pipe server, settings and control panel
 │      ├─ ControlPanel/               The WPF-UI control panel: one window, sidebar pages Token / Agents / Apps / About
 │      ├─ AgentPipeServer.cs          Named-pipe server that receives normalised agent events
 │      ├─ AgentHookBridge.cs          The `hook` verb: normalises a tool's payload → one pipe line, fail-silent
-│      ├─ Services/AgentHookRegistrar.cs Writes/removes WormsCursor's hook in each tool's config (backup + merge)
+│      ├─ Services/AgentHookRegistrar.cs Writes/removes AgentsCursor's hook in each tool's config (backup + merge)
 │      ├─ SingleInstance.cs           One instance only; a 2nd launch opens the control panel
 │      ├─ Autostart.cs                "Start with Windows" via HKCU\…\Run
 │      └─ Services/UpdateService.cs   Velopack check / download / apply updates, release notes
@@ -175,7 +180,7 @@ WormsCursor.sln
    └─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the app/tray glyph
 ```
 
-`src/WormsCursor.OpenCodeOverlay/` contains the independent OpenCode helper;
+`src/AgentsCursor.OpenCodeOverlay/` contains the independent OpenCode helper;
 `integrations/opencode/` contains its V2 plugin, installation script, and lifecycle tests.
 
 The engine (`Core`) is deliberately UI-agnostic (GDI+ only): the WinForms overlay and the WPF control
@@ -183,44 +188,46 @@ panel's preview draw the token with the same renderer.
 
 ## Build & run
 
-Requires the **.NET 8 SDK** (Windows). Open `WormsCursor.sln` in Visual Studio 2022+ and run, or from
+Requires the **.NET 8 SDK** (Windows). Open `AgentsCursor.sln` in Visual Studio 2022+ and run, or from
 a terminal:
 
 ```powershell
-git clone https://github.com/luminary19/WormsCursor.git
+git clone https://github.com/luminary19/WormsCursor.git   # the repository kept its old name
 cd WormsCursor
-dotnet build WormsCursor.sln
-dotnet run --project src/WormsCursor.App
+dotnet build AgentsCursor.sln
+dotnet run --project src/AgentsCursor.App
 ```
 
 A tray icon appears. Right-click it for **Enabled / Preferences… / Exit**; double-click toggles the
 notifier on/off. Only one instance runs — launching it again just opens the control panel.
 
-**Preferences…** opens the control panel, a Windows 11 Settings-style window that follows your light
-or dark theme. Every change applies the moment you make it. Its sidebar has four pages:
+**Preferences…** opens the control panel, a Windows 11 Settings-style window that follows your
+Windows light or dark mode, or the theme you pick under **About**. Every change applies the moment you
+make it. Its sidebar has four pages:
 
 - **Token** — the master switch, a live preview of both looks (done, and the yellow "?" for "needs
   you") on dark and light, the size, and where it shows (next to the pointer, or a screen corner).
 - **Agents** — connect, update or disconnect the hooks for Claude Code and Codex, how long the token
   stays after an agent is done, and **Preview on screen**, which shows pretend agents on the real token.
 - **Apps** — the **Hide the token while using** list.
-- **About** — the version, **Check for updates**, **What's new**, **Start with Windows**, and links.
+- **About** — the version, **Check for updates**, **What's new**, the panel's **Theme** (System,
+  Light or Dark), **Start with Windows**, and links.
 
 Settings are saved to
-`%LocalAppData%\WormsCursor\settings.json` and persist across restarts — and across updates, since
+`%LocalAppData%\AgentsCursor\settings.json` and persist across restarts — and across updates, since
 they live outside the app folder.
 
 To try the token without a real agent, use **Agents → Preview on screen**, or fire a hook by hand
 (the tray must be running):
 
 ```powershell
-'{"hook_event_name":"PermissionRequest","session_id":"test","tool_name":"Bash"}' | WormsCursor.exe hook --tool claude-code
+'{"hook_event_name":"PermissionRequest","session_id":"test","tool_name":"Bash"}' | AgentsCursor.exe hook --tool claude-code
 ```
 
 ### Standalone build (no .NET install on the target)
 
 ```powershell
-dotnet publish src/WormsCursor.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+dotnet publish src/AgentsCursor.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
 > Note: WinForms and WPF don't support trimming/NativeAOT, so a self-contained build is large (about

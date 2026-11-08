@@ -1,9 +1,9 @@
 ---
 name: release
-description: Cut a new WormsCursor release — bump the version, roll the CHANGELOG, tag, and push so the GitHub release workflow builds and publishes it. Use when asked to "release", "ship a version", "bump the version", "cut a release", "tag a release", or "publish an update".
+description: Cut a new AgentsCursor release — bump the version, roll the CHANGELOG, tag, and push so the GitHub release workflow builds and publishes it. Use when asked to "release", "ship a version", "bump the version", "cut a release", "tag a release", or "publish an update".
 ---
 
-# Releasing WormsCursor
+# Releasing AgentsCursor
 
 A release is driven entirely by **pushing a `vX.Y.Z` git tag**. The tag triggers
 `.github/workflows/release.yml`, which packages the app with Velopack and publishes a
@@ -20,7 +20,7 @@ Semver-ish, matching the existing tags:
 
 The **git tag is the source of truth** for the packed version: `release.yml` derives the
 Velopack pack version from the tag (strips the leading `v`). Keep `<Version>` in
-`src/WormsCursor.App/WormsCursor.App.csproj` in sync with it (it's the dev-build / in-app
+`src/AgentsCursor.App/AgentsCursor.App.csproj` in sync with it (it's the dev-build / in-app
 version readout) and commit it as `Release X.Y.Z` — so tag `v0.7.0` ⇄
 `<Version>0.7.0</Version>`. That's the established convention (see the `Release …` commits).
 
@@ -28,7 +28,7 @@ version readout) and commit it as `Release X.Y.Z` — so tag `v0.7.0` ⇄
 
 1. **Pick the version** `X.Y.Z` per the rules above.
 
-2. **Bump the assembly version** in `src/WormsCursor.App/WormsCursor.App.csproj`:
+2. **Bump the assembly version** in `src/AgentsCursor.App/AgentsCursor.App.csproj`:
 
    ```xml
    <Version>X.Y.Z</Version>
@@ -46,13 +46,13 @@ version readout) and commit it as `Release X.Y.Z` — so tag `v0.7.0` ⇄
 4. **Sanity-build before tagging** (the tag triggers a real release):
 
    ```bash
-   dotnet build WormsCursor.sln -c Release
+   dotnet build AgentsCursor.sln -c Release
    ```
 
 5. **Commit** the bump + changelog together:
 
    ```bash
-   git add src/WormsCursor.App/WormsCursor.App.csproj CHANGELOG.md
+   git add src/AgentsCursor.App/AgentsCursor.App.csproj CHANGELOG.md
    git commit -m "Release X.Y.Z"
    ```
 
@@ -76,7 +76,7 @@ version readout) and commit it as `Release X.Y.Z` — so tag `v0.7.0` ⇄
 Triggered on `push` of tags matching `v*`:
 
 - **build** (windows-latest): `dotnet publish` self-contained `win-x64` → sanity-checks the
-  payload (`WormsCursor.exe` + `Assets/`) → installs `vpk` **0.0.1298** (kept in lockstep
+  payload (`AgentsCursor.exe` + `Assets/`) → installs `vpk` **0.0.1298** (kept in lockstep
   with the `Velopack` PackageReference in the csproj) → downloads the latest prior **stable**
   release into `velopack-output/` so `vpk pack` can compute a **delta** (skipped only when
   there is no prior stable release) → `vpk pack` → uploads the `velopack` artifact.
@@ -101,5 +101,5 @@ Triggered on `push` of tags matching `v*`:
 
 - `.github/workflows/release.yml` — the workflow this skill triggers (publish → `vpk pack`
   with a delta vs the prior stable release → GitHub release; notes from the CHANGELOG section).
-- `src/WormsCursor.App/Services/UpdateService.cs` + `Program.cs` (`VelopackApp.Build().Run()`)
+- `src/AgentsCursor.App/Services/UpdateService.cs` + `Program.cs` (`VelopackApp.Build().Run()`)
   — how the in-app updater consumes those releases; it no-ops for dev builds run from `bin\`.

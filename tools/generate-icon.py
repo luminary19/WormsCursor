@@ -1,5 +1,5 @@
 """
-Builds the WormsCursor app/tray icon: a monochrome white silhouette of the
+Builds the AgentsCursor app/tray icon: a monochrome white silhouette of the
 same aim-arrow we use as the rotating cursor, packed into a multi-size ICO
 (plus a PNG for the Store/README).
 
@@ -30,7 +30,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
-ASSETS = ROOT / "src" / "WormsCursor.App" / "Assets"
+ASSETS = ROOT / "src" / "AgentsCursor.App" / "Assets"
 ICO_OUT = ASSETS / "Icon.ico"
 PNG_OUT = ASSETS / "icon.png"
 

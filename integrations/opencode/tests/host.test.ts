@@ -68,11 +68,11 @@ test("stopping during helper materialization cannot launch a late helper", { ski
 });
 
 test("a failed helper build is not re-run until its sources change or the cooldown ends", async () => {
-  const root = await mkdtemp(join(tmpdir(), "wormscursor-materialize-"));
-  const native = join(root, "src", "WormsCursor.OpenCodeOverlay");
+  const root = await mkdtemp(join(tmpdir(), "agentscursor-materialize-"));
+  const native = join(root, "src", "AgentsCursor.OpenCodeOverlay");
   await mkdir(native, { recursive: true });
   await writeFile(join(root, "global.json"), "{}");
-  await writeFile(join(native, "WormsCursor.OpenCodeOverlay.csproj"), "<Project />");
+  await writeFile(join(native, "AgentsCursor.OpenCodeOverlay.csproj"), "<Project />");
   await writeFile(join(native, "Program.cs"), "// v1");
   let builds = 0;
   let clock = 1_000_000;
@@ -101,14 +101,14 @@ test("a failed helper build is not re-run until its sources change or the cooldo
 });
 
 test("editing shared Core source linked into the helper rebuilds it", async () => {
-  const root = await mkdtemp(join(tmpdir(), "wormscursor-materialize-"));
-  const native = join(root, "src", "WormsCursor.OpenCodeOverlay");
-  const core = join(root, "src", "WormsCursor.Core");
+  const root = await mkdtemp(join(tmpdir(), "agentscursor-materialize-"));
+  const native = join(root, "src", "AgentsCursor.OpenCodeOverlay");
+  const core = join(root, "src", "AgentsCursor.Core");
   await mkdir(native, { recursive: true });
   await mkdir(core, { recursive: true });
   await writeFile(join(root, "global.json"), "{}");
-  await writeFile(join(native, "WormsCursor.OpenCodeOverlay.csproj"),
-    '<Project><ItemGroup><Compile Include="../WormsCursor.Core/Shared.cs" Link="Core/Shared.cs" /></ItemGroup></Project>');
+  await writeFile(join(native, "AgentsCursor.OpenCodeOverlay.csproj"),
+    '<Project><ItemGroup><Compile Include="../AgentsCursor.Core/Shared.cs" Link="Core/Shared.cs" /></ItemGroup></Project>');
   await writeFile(join(native, "Program.cs"), "// helper");
   await writeFile(join(core, "Shared.cs"), "// v1");
   let builds = 0;
