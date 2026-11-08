@@ -10,7 +10,10 @@ the helper combines those clients into one cursor token.
 - Input: newline-delimited JSON, for example
   `{"command":"state","display":"waiting","size":64}`.
 - Displays: `hidden`, `waiting`, `completion`; waiting takes priority over
-  completion. The largest visible client's size is used, clamped to 24-256 pixels.
+  completion. `waiting` means a session is blocked on the user, and the mark
+  carries WormsCursor's yellow "?" badge (Core's `AttentionBadge.cs`, compiled
+  in as linked source, so it matches the tray app's token). `completion` shows
+  the plain mark. The largest visible client's size is used, clamped to 24-256 pixels.
 - Disconnect removes only that client's state. The last disconnect exits the
   helper after 750 ms; an unclaimed helper exits after 5 seconds.
 - `--pipe NAME` selects a separate pipe for isolated tests (ASCII letters,

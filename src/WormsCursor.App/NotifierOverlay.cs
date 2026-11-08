@@ -47,7 +47,7 @@ public sealed class NotifierOverlay : IDisposable
     readonly object _gate = new(); // Reevaluate runs on the UI thread and the foreground watcher's
     volatile bool _running = true;
     volatile bool _active;
-    volatile string[] _tools = Array.Empty<string>();
+    volatile TokenFace? _face;       // what the token shows; null = nothing waiting
     volatile bool _entrancePending;  // pop-in bounce when the token first appears
     volatile bool _resetPhysics;     // re-seed the pendulum on (re)appearance
     bool _disposed;
@@ -78,14 +78,13 @@ public sealed class NotifierOverlay : IDisposable
     }
 
     /// <summary>Set which agent sessions currently await the user — one entry per waiting session
-    /// (empty = none), each with its tool and whether it is blocked on you or finished. The token draws
-    /// one logo per session whatever the state. Starts/stops the animation accordingly. Thread-safe
-    /// (just swaps volatile state and wakes the animation thread); call from anywhere.</summary>
+    /// (empty = none), each with its tool and whether it is blocked on you or finished. The token shows
+    /// their <see cref="TokenFace"/>: a blocked session's logo with the "?" badge if any is blocked,
+    /// plus a "+N" count for the rest. Starts/stops the animation accordingly. Thread-safe (just swaps
+    /// an immutable face and wakes the animation thread); call from anywhere.</summary>
     public void SetWaitingAgents(IReadOnlyList<WaitingAgent>? agents)
     {
-        _tools = agents is null
-            ? Array.Empty<string>()
-            : agents.Select(a => a.Tool).Where(t => !string.IsNullOrEmpty(t)).ToArray();
+        _face = TokenFace.For(agents);
         Reevaluate();
     }
 
@@ -100,7 +99,7 @@ public sealed class NotifierOverlay : IDisposable
         lock (_gate)
         {
             bool suppressed = ProgramSuppression.Matches(_foreground.ForegroundProgram, _settings.SuppressedPrograms);
-            bool active = _tools.Length > 0 && _settings.AgentNotifierEnabled && !suppressed;
+            bool active = _face is not null && _settings.AgentNotifierEnabled && !suppressed;
             if (active && !_active) { _entrancePending = true; _resetPhysics = true; } // pop-in fresh
             _active = active;
             _wake.Set();
@@ -165,8 +164,8 @@ public sealed class NotifierOverlay : IDisposable
 
     void Tick(float dt)
     {
-        var tools = _tools;
-        if (tools.Length == 0) return;
+        var face = _face;
+        if (face is null) return;
 
         if (_resetPhysics) { _physInit = false; _t = 0f; _resetPhysics = false; }
         _t += dt;
@@ -182,7 +181,9 @@ public sealed class NotifierOverlay : IDisposable
             var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
             dpi = DpiScaleForPoint(wa.Left + wa.Width / 2, wa.Top + wa.Height / 2);
             float tpx = _settings.Size * dpi;
-            int margin = (int)(tpx * 0.35f) + (int)(16 * dpi);
+            // Room for the bounce (0.22) and the "?" badge's reach past the logo, so the hopping
+            // token stays fully on screen in a top corner.
+            int margin = (int)(tpx * (0.25f + AttentionBadge.Overhang)) + (int)(16 * dpi);
             int half = (int)(tpx / 2f);
             anchorX = _settings.Corner is ScreenCorner.TopLeft or ScreenCorner.BottomLeft
                 ? wa.Left + margin + half : wa.Right - margin - half;
@@ -209,7 +210,7 @@ public sealed class NotifierOverlay : IDisposable
             g.Clear(Color.Transparent);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            _renderer.DrawToken(g, _settings, tools,
+            _renderer.DrawToken(g, _settings, face,
                 canvas / 2f + offX, canvas / 2f + offY, tokenPx, swing);
         }
 

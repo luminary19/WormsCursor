@@ -1,9 +1,9 @@
 # OpenCode cursor notifications
 
 A native OpenCode 2.2 server plugin with the same cursor-following behavior as
-the Pi extension. A 64px OpenCode mark appears while a question/form or permission
-request needs attention, and lingers for 30 seconds when a root session finishes.
-Starting work clears that session's completion. Child-session completions are
+the Pi extension. A 64px OpenCode mark with a yellow "?" badge appears while a
+question/form or permission request needs attention. A plain mark lingers for
+30 seconds when a root session finishes. Starting work clears that session's completion. Child-session completions are
 silent; their questions and permission prompts still need attention.
 
 All OpenCode locations share one independent Windows helper. Each plugin scope

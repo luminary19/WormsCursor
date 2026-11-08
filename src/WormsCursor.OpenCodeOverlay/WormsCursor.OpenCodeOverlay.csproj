@@ -18,10 +18,11 @@
     <None Remove="obj/**" />
     <None Remove="runtime/**" />
   </ItemGroup>
-  <!-- Focus suppression shares the tray app's Core source (compiled in, not a DLL reference), so the
+  <!-- The "?" badge and focus suppression share the tray app's Core source (compiled in, not a DLL reference), so the
        helper stays a single self-contained build. integrations/opencode/host.ts hashes every linked
        file into the build's content address, so editing one of these rebuilds the helper. -->
   <ItemGroup>
+    <Compile Include="../WormsCursor.Core/AttentionBadge.cs" Link="Core/AttentionBadge.cs" />
     <Compile Include="../WormsCursor.Core/CursorSettings.cs" Link="Core/CursorSettings.cs" />
     <Compile Include="../WormsCursor.Core/ForegroundWatcher.cs" Link="Core/ForegroundWatcher.cs" />
     <Compile Include="../WormsCursor.Core/ProgramSuppression.cs" Link="Core/ProgramSuppression.cs" />

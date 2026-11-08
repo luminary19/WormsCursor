@@ -43,6 +43,7 @@ public sealed class PreferencesForm : Form
     // The preview's own renderer (UI thread only) — never the overlay's, whose GDI+ objects belong
     // to the animation thread.
     readonly NotifierRenderer _renderer = new();
+    static readonly TokenFace PreviewFace = new("claude-code", Blocked: false, Others: 0);
 
     readonly Action<CursorSettings> _apply;
     readonly UpdateService _updates;
@@ -289,7 +290,7 @@ public sealed class PreferencesForm : Form
 
         // Draw the token at its real configured size, centred, upright (swing 0).
         float side = Math.Min(_working.Size, Math.Min(w, h) - 12);
-        _renderer.DrawToken(g, _working, new[] { "claude-code" }, w / 2f, h / 2f, side, 0f);
+        _renderer.DrawToken(g, _working, PreviewFace, w / 2f, h / 2f, side, 0f);
     }
 
     void ResetDefaults()

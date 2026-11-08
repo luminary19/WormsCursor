@@ -15,7 +15,18 @@ GitHub releases. The release workflow pulls the matching section into each relea
   While hidden it uses no CPU: WormsCursor learns about focus changes from Windows instead of checking
   repeatedly. The OpenCode helper follows the same list. Restart OpenCode to pick it up there.
 
+- **You can tell "it needs an answer" from "it's done".** When an agent is blocked on you (a
+  permission prompt, an `AskUserQuestion`, an MCP elicitation, a Codex approval or question, or an
+  OpenCode permission or form), its logo now carries a yellow **"?"** badge at the top-right. A plain
+  logo means the agent simply finished its turn. When several sessions wait, one that is blocked on
+  you is the logo shown. This works for Claude Code, Codex and OpenCode alike, and the "?" is drawn as
+  vector shapes, so it looks the same on every machine.
+
 ### Changed
+- **The "+N" count is now a small pill in the logo's top-right corner.** When the "?" badge is up,
+  the pill tucks in beside it, so the two never overlap. That corner faces the cursor, so the count
+  can't swing out of view. In a top screen corner the token now sits a little further from the edge,
+  which leaves room for the badge while it bounces.
 - **WormsCursor is now just the agent-waiting notifier — the cursor theming is gone.** The token that
   shows when an AI agent needs you no longer rides on a themed system cursor, so you don't have to
   enable any of the *Worms*-style cursors to see it. It's drawn by its own transparent, click-through

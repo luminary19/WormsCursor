@@ -165,10 +165,13 @@ internal sealed class OverlayServer : IDisposable
             : clients.Values.Any(state => state.Display == "completion") ? "completion"
             : "hidden";
         var size = visible.Length == 0 ? 64 : visible.Max(state => state.Size);
+        // "waiting" means a session is blocked on the user (a permission or a form), which wears the
+        // "?" badge; "completion" is a finished turn and shows the plain mark.
+        var blocked = display == "waiting";
         overlay.Post(() =>
         {
             if (display == "hidden") overlay.HideToken();
-            else overlay.ShowToken(size);
+            else overlay.ShowToken(size, blocked);
         });
     }
 
@@ -230,6 +233,7 @@ internal sealed class CursorOverlay : Form
     private LogoAsset? logoAsset;
     private LayeredSurface? surface;
     private int size = 64;
+    private bool blocked;    // a client is blocked on the user: draw the "?" badge
     private bool requested;  // some client wants the token shown
     private bool suppressed; // a program on the WormsCursor suppression list is in front
     private bool active;     // the token is actually animating (requested and not suppressed)
@@ -278,9 +282,10 @@ internal sealed class CursorOverlay : Form
         catch (InvalidOperationException) { }
     }
 
-    public void ShowToken(int requestedSize)
+    public void ShowToken(int requestedSize, bool blockedOnUser)
     {
         size = Math.Clamp(requestedSize, 24, 256);
+        blocked = blockedOnUser;
         requested = true;
         UpdateVisibility();
     }
@@ -471,7 +476,7 @@ internal sealed class CursorOverlay : Form
     private void Render(float tailX, float tailY, float renderX, float renderY)
     {
         var tokenPixels = size;
-        var asset = GetLogoAsset(tokenPixels);
+        var asset = GetLogoAsset(tokenPixels, blocked);
         var canvas = Math.Max(16, (int)MathF.Ceiling(tokenPixels * 2.8f));
         var canvasLeft = (int)MathF.Round(tailX - canvas / 2f);
         var canvasTop = (int)MathF.Round(tailY - canvas / 2f);
@@ -504,11 +509,11 @@ internal sealed class CursorOverlay : Form
         return surface;
     }
 
-    private LogoAsset GetLogoAsset(int tokenPixels)
+    private LogoAsset GetLogoAsset(int tokenPixels, bool badged)
     {
-        if (logoAsset is not null && logoAsset.TokenPixels == tokenPixels) return logoAsset;
+        if (logoAsset is not null && logoAsset.TokenPixels == tokenPixels && logoAsset.Badged == badged) return logoAsset;
         logoAsset?.Dispose();
-        logoAsset = LogoAsset.Create(tokenPixels);
+        logoAsset = LogoAsset.Create(tokenPixels, badged);
         return logoAsset;
     }
 
@@ -562,26 +567,43 @@ internal sealed class LogoAsset : IDisposable
 {
     private const int RenderScale = 4;
 
-    private LogoAsset(Bitmap bitmap, int tokenPixels, float width, float height)
+    // The badge's soft shadow reaches this far past its radius (see AttentionBadge.Draw).
+    private const float BadgeShadowReach = 1.3f;
+
+    private LogoAsset(Bitmap bitmap, int tokenPixels, bool badged, float width, float height)
     {
         Bitmap = bitmap;
         TokenPixels = tokenPixels;
+        Badged = badged;
         Width = width;
         Height = height;
     }
 
     public Bitmap Bitmap { get; }
     public int TokenPixels { get; }
+    public bool Badged { get; }
     public float Width { get; }
     public float Height { get; }
 
-    public static LogoAsset Create(int tokenPixels)
+    /// <summary>The mark at <paramref name="tokenPixels"/> tall, with the shared "?" badge on its
+    /// top-right when <paramref name="badged"/>. The bitmap stays centred on the mark (the overlay
+    /// rotates it about its centre), so a badge grows it symmetrically.</summary>
+    public static LogoAsset Create(int tokenPixels, bool badged)
     {
         var logoHeight = (float)tokenPixels;
         var logoWidth = logoHeight * 0.8f;
         var padding = Math.Max(3f, tokenPixels * 0.025f);
-        var width = logoWidth + padding * 2f;
-        var height = logoHeight + padding * 2f;
+        var halfWidth = logoWidth / 2f + padding;
+        var halfHeight = logoHeight / 2f + padding;
+        var (badgeCenter, badgeRadius) = AttentionBadge.Place(
+            new RectangleF(-logoWidth / 2f, -logoHeight / 2f, logoWidth, logoHeight), tokenPixels);
+        if (badged)
+        {
+            halfWidth = Math.Max(halfWidth, MathF.Abs(badgeCenter.X) + badgeRadius * BadgeShadowReach);
+            halfHeight = Math.Max(halfHeight, MathF.Abs(badgeCenter.Y) + badgeRadius * BadgeShadowReach);
+        }
+        var width = halfWidth * 2f;
+        var height = halfHeight * 2f;
         using var supersampled = new Bitmap(
             (int)MathF.Ceiling(width * RenderScale),
             (int)MathF.Ceiling(height * RenderScale),
@@ -591,6 +613,11 @@ internal sealed class LogoAsset : IDisposable
             graphics.Clear(Color.Transparent);
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             DrawLogo(graphics, supersampled.Width / 2f, supersampled.Height / 2f, tokenPixels * RenderScale);
+            if (badged)
+                AttentionBadge.Draw(graphics,
+                    supersampled.Width / 2f + badgeCenter.X * RenderScale,
+                    supersampled.Height / 2f + badgeCenter.Y * RenderScale,
+                    badgeRadius * RenderScale);
         }
 
         var bitmap = new Bitmap(
@@ -609,7 +636,7 @@ internal sealed class LogoAsset : IDisposable
                 new RectangleF(0, 0, width, height),
                 new RectangleF(0, 0, supersampled.Width, supersampled.Height),
                 GraphicsUnit.Pixel);
-            return new LogoAsset(bitmap, tokenPixels, width, height);
+            return new LogoAsset(bitmap, tokenPixels, badged, width, height);
         }
         catch
         {

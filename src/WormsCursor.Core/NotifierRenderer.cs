@@ -4,9 +4,10 @@ using System.Drawing.Drawing2D;
 namespace WormsCursor.Core;
 
 /// <summary>
-/// Draws the agent-notifier token: a single waiting tool's logo (Claude Code's critter, Codex's
-/// OpenAI knot — see <see cref="AgentLogos"/>) as a bare, free-floating glyph, with a small "+N"
-/// superscript when more than one agent is waiting.
+/// Draws the agent-notifier token for a <see cref="TokenFace"/>: one waiting tool's logo (Claude
+/// Code's critter, Codex's OpenAI knot — see <see cref="AgentLogos"/>) as a bare, free-floating glyph,
+/// with the yellow "?" <see cref="AttentionBadge"/> on its top-right when that session is blocked on
+/// you, and a small "+N" count pill on its right edge when other sessions wait too.
 ///
 /// This is UI-agnostic GDI+ drawing only — the host (the tray app's overlay window) decides where the
 /// token lives and how it bounces, then calls <see cref="DrawToken"/> with the computed centre and
@@ -21,19 +22,17 @@ public sealed class NotifierRenderer : IDisposable
 {
     readonly AgentLogos _logos = new();
 
-    /// <summary>Draws a single logo (the first entry in <paramref name="tools"/>, tool ids like
-    /// "claude-code" / "codex") of side <paramref name="tokenSidePx"/> centred at
-    /// (<paramref name="centerX"/>/<paramref name="centerY"/>) and tilted by <paramref name="swingDeg"/>
-    /// (0 = upright). When more than one agent waits, a small "+N" superscript (N = the rest) sits at
-    /// the logo's top-right. A thin contrast rim keeps the bare logo legible over any window behind it.
-    /// Leaves no transform behind.</summary>
-    public void DrawToken(Graphics g, CursorSettings s, IReadOnlyList<string> tools,
-                                 float centerX, float centerY, float tokenSidePx, float swingDeg)
+    /// <summary>Draws <paramref name="face"/>'s logo in a box of side <paramref name="tokenSidePx"/>
+    /// centred at (<paramref name="centerX"/>/<paramref name="centerY"/>) and tilted by
+    /// <paramref name="swingDeg"/> (0 = upright), plus its badges: the "+N" pill when others wait and
+    /// the "?" badge (drawn last, on top) when it is blocked on you. A thin contrast rim keeps the
+    /// bare logo legible over any window behind it. Leaves no transform behind.</summary>
+    public void DrawToken(Graphics g, CursorSettings s, TokenFace face,
+                          float centerX, float centerY, float tokenSidePx, float swingDeg)
     {
-        if (tools is null || tools.Count == 0) return;
-        int count = tools.Count;
         float box = Math.Max(8f, tokenSidePx);
         float edge = box * 0.06f;          // contrast rim so a bare logo reads on any background
+        var square = new RectangleF(-box / 2f, -box / 2f, box, box);
 
         var saved = g.Save();
         g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -41,33 +40,63 @@ public sealed class NotifierRenderer : IDisposable
         g.TranslateTransform(centerX, centerY);
         g.RotateTransform(swingDeg);
 
-        // Always exactly one logo (the most recent waiting tool); never a fan.
-        _logos.Draw(g, tools[0], new RectangleF(-box / 2f, -box / 2f, box, box), edge);
-        if (count > 1)
-        {
-            var outline = Parse(s.OutlineColor, Color.Black);
-            DrawPlusN(g, count - 1, box * 0.40f, -box * 0.40f, box, outline);
-        }
+        _logos.Draw(g, face.Tool, square, edge);
+        var (corner, radius) = AttentionBadge.Place(_logos.Fit(face.Tool, square), box);
+        if (face.Others > 0)
+            DrawCount(g, face.Others, corner, face.Blocked ? radius : 0f, box, Parse(s.OutlineColor, Color.Black));
+        if (face.Blocked)
+            AttentionBadge.Draw(g, corner.X, corner.Y, radius);
 
         g.Restore(saved);
     }
 
     public void Dispose() => _logos.Dispose();
 
-    // A small outlined "+N" (white fill / theme outline, like the other glyphs) standing in for the
-    // other waiting agents — a frameless superscript at the single logo's top-right corner.
-    static void DrawPlusN(Graphics g, int extra, float cx, float cy, float box, Color outline)
+    // The "+N" count for the other waiting sessions: white bold digits on a pill filled with the
+    // theme outline colour, ringed in a light hairline so it reads on dark and light screens. It lives
+    // in the logo's top-right badge corner (the side facing the cursor, so it never swings out of the
+    // canvas). Alone it is centred on that corner; beside the "?" badge (radius > 0) it tucks under the
+    // badge's left edge, the digits centred in the part left showing, so the two read as one cluster.
+    static void DrawCount(Graphics g, int others, PointF corner, float badgeRadius, float box, Color backing)
     {
-        using var path = new GraphicsPath();
-        float em = box * 0.26f;
-        using var fam = new FontFamily(System.Drawing.Text.GenericFontFamilies.SansSerif);
-        using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-        path.AddString("+" + extra, fam, (int)FontStyle.Bold, em, new PointF(cx, cy), fmt);
+        using var text = new GraphicsPath();
+        using (var fam = new FontFamily(System.Drawing.Text.GenericFontFamilies.SansSerif))
+        using (var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+            text.AddString("+" + others, fam, (int)FontStyle.Bold, box * 0.19f, PointF.Empty, fmt);
+        var ink = text.GetBounds();
 
-        using (var po = new Pen(outline, Math.Max(1.5f, box * 0.045f)) { LineJoin = LineJoin.Round })
-            g.DrawPath(po, path);
-        using (var bf = new SolidBrush(Color.White))
-            g.FillPath(bf, path);
+        float h = box * 0.24f;
+        float shown = Math.Max(h, ink.Width + h * 0.62f);     // the pill's visible length
+        // Tucking a full pill height under the badge hides the pill's whole rounded end inside the disc.
+        float tuck = badgeRadius > 0f ? h : 0f;
+        float right = badgeRadius > 0f ? corner.X - badgeRadius + tuck : corner.X + h / 2f;
+        float left = right - tuck - shown;
+        float cy = corner.Y;
+        // Centre the digits' ink (not the font's line box) in the visible part of the pill.
+        using (var m = new Matrix())
+        {
+            m.Translate(left + shown / 2f - (ink.X + ink.Width / 2f), cy - (ink.Y + ink.Height / 2f));
+            text.Transform(m);
+        }
+
+        using var pill = Pill(left, cy - h / 2f, right - left, h);
+        using (var fill = new SolidBrush(backing))
+            g.FillPath(fill, pill);
+        using (var rim = new Pen(Color.FromArgb(230, 255, 255, 255), Math.Max(1f, box * 0.018f)))
+            g.DrawPath(rim, pill);
+        using (var digits = new SolidBrush(Color.White))
+            g.FillPath(digits, text);
+    }
+
+    // A stadium (fully rounded rectangle).
+    static GraphicsPath Pill(float x, float y, float w, float h)
+    {
+        var p = new GraphicsPath();
+        if (w <= h) { p.AddEllipse(x, y, w, h); return p; }
+        p.AddArc(x, y, h, h, 90f, 180f);
+        p.AddArc(x + w - h, y, h, h, 270f, 180f);
+        p.CloseFigure();
+        return p;
     }
 
     static Color Parse(string hex, Color fallback)

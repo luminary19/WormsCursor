@@ -55,8 +55,15 @@ existing Pi cursor extension; do not route it through throwaway WormsCursor hook
 ### `WormsCursor.Core` — the engine (UI-agnostic, GDI+ only, **no WinForms/WPF**)
 The reusable heart: token drawing + the agent-activity model. Hostable from a tray app, console, or
 tests.
-- `NotifierRenderer.cs` — `DrawToken(...)`: draws one tool logo (+ a "+N" badge when several wait) at
-  a given centre/size/swing angle. Pure GDI+; the host decides where it lives and how it bounces.
+- `NotifierRenderer.cs` — `DrawToken(g, settings, TokenFace, ...)`: draws one tool logo at a given
+  centre/size/swing angle, with the yellow "?" `AttentionBadge` on its top-right when that session is
+  blocked on you, and a "+N" pill (tucked beside the badge) when other sessions wait. Pure GDI+; the
+  host decides where it lives and how it bounces. One renderer per drawing thread.
+- `TokenFace.cs` — `TokenFace.For(Waiting)`: the pure selection of what the token shows: the first
+  blocked session's tool (else the first session's), `Blocked`, and `Others` (the "+N").
+- `AttentionBadge.cs` — the "?" badge (`Place` + `Draw`): a vector glyph, stateless, so it is
+  thread-safe. Compiled into the OpenCode helper too, so both overlays draw the identical badge. Its
+  `Overhang` is what the corner placement allows for at the top edge.
 - `AgentLogos.cs` / `SvgPath.cs` — the baked vector tool logos (Claude critter, OpenAI knot) parsed
   from SVG path data and rasterised to cached sprites; `SvgPath` is the tiny path-data parser.
 - `AgentActivity.cs` — tracks which agent sessions currently **need the user** (thread-safe), exposes
@@ -109,7 +116,8 @@ tests.
 
 The native helper retains Pi's per-client pipe aggregation, singleton ownership, no-client shutdown,
 monitor-rate waitable timer, frame coalescing, cached logo, and persistent DIB surface. It sleeps while
-hidden and uses the official compact OpenCode mark. The V2 plugin subscribes to `event.data` lifecycle
+hidden and uses the official compact OpenCode mark. Display `waiting` (a permission or form pending)
+bakes Core's `AttentionBadge` into the cached logo; `completion` shows the plain mark. The V2 plugin subscribes to `event.data` lifecycle
 events and form/permission events, using one persistent pipe connection per plugin host. Build
 materializations are immutable and content-addressed under `artifacts/opencode/`.
 

@@ -85,6 +85,29 @@ sealed class AgentLogos : IDisposable
         return logo;
     }
 
+    /// <summary>The rectangle the <paramref name="tool"/> logo actually covers when drawn into
+    /// <paramref name="box"/> (centred, aspect-preserved; excluding the rim), so a badge can sit on
+    /// the logo itself rather than on the empty part of a wide logo's box.</summary>
+    public RectangleF Fit(string tool, RectangleF box)
+    {
+        var logo = LogoFor(tool);
+        float w, h;
+        if (logo is null || logo.Bounds.Width <= 0 || logo.Bounds.Height <= 0)
+        {
+            w = h = Math.Min(box.Width, box.Height) * DotRatio;
+        }
+        else
+        {
+            float scale = Math.Min(box.Width / logo.Bounds.Width, box.Height / logo.Bounds.Height);
+            w = logo.Bounds.Width * scale;
+            h = logo.Bounds.Height * scale;
+        }
+        return new RectangleF(box.X + (box.Width - w) / 2f, box.Y + (box.Height - h) / 2f, w, h);
+    }
+
+    // The unknown-tool dot's diameter as a fraction of the box.
+    const float DotRatio = 0.7f;
+
     /// <summary>Draws the <paramref name="tool"/> logo to fit inside <paramref name="box"/> (centred,
     /// aspect-preserved), filled in its brand colour with a thin contrast rim (<paramref name="edge"/>
     /// px wide, auto light/dark vs. the brand colour) drawn under the fill so the bare logo reads on
@@ -98,8 +121,7 @@ sealed class AgentLogos : IDisposable
         var logo = LogoFor(tool);
         if (logo is null)
         {
-            float d = Math.Min(box.Width, box.Height) * 0.7f;
-            var dot = new RectangleF(box.X + (box.Width - d) / 2, box.Y + (box.Height - d) / 2, d, d);
+            var dot = Fit(tool, box);
             using (var rim = new Pen(RimFor(Color.Gray), edge))
                 g.DrawEllipse(rim, dot);
             using (var fb = new SolidBrush(Color.Gray))

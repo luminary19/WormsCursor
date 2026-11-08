@@ -15,6 +15,8 @@ var tests = new (string Name, Action Run)[]
     ("Claude events map from their payloads alone", Claude),
     ("Blocked-on-you prompts clear only on their own answer", BlockedAttribution),
     ("Waiting sessions report finished vs blocked", FinishedVersusBlocked),
+    ("The token shows a blocked session first, badged, with the rest counted", TokenFaceSelection),
+    ("The token draws the \"?\" badge only when blocked, clear of the count", BadgeDrawing),
     ("Codex registration merges, refreshes, and unregisters", Registration),
     ("Codex's Windows hook command parses in PowerShell", CodexWindowsCommandShell),
     ("Malformed configs are preserved", MalformedConfigs),
@@ -298,6 +300,65 @@ static void FinishedVersusBlocked()
     Equal("claude-code:Blocked,codex:Blocked", States(activity));
     activity.Report("codex", "four", null, AgentEventKind.InputAnswered, now.AddSeconds(12), new[] { "q-1" });
     Equal("claude-code:Blocked", States(activity));
+}
+
+static void TokenFaceSelection()
+{
+    WaitingAgent Finished(string tool) => new(tool, WaitingState.Finished);
+    WaitingAgent Blocked(string tool) => new(tool, WaitingState.Blocked);
+
+    Equal(null, TokenFace.For(null));
+    Equal(null, TokenFace.For(Array.Empty<WaitingAgent>()));
+    Equal(new TokenFace("codex", false, 0), TokenFace.For(new[] { Finished("codex") }));
+    Equal(new TokenFace("codex", true, 0), TokenFace.For(new[] { Blocked("codex") }));
+    // Blocked beats finished wherever it sits; the others are counted whatever their state.
+    Equal(new TokenFace("codex", true, 2), TokenFace.For(new[] { Finished("claude-code"), Blocked("codex"), Finished("claude-code") }));
+    Equal(new TokenFace("claude-code", false, 1), TokenFace.For(new[] { Finished("claude-code"), Finished("codex") }));
+    // Several blocked: the first one shows.
+    Equal(new TokenFace("claude-code", true, 2), TokenFace.For(new[] { Finished("codex"), Blocked("claude-code"), Blocked("codex") }));
+    // Entries without a tool id are neither shown nor counted.
+    Equal(new TokenFace("codex", true, 0), TokenFace.For(new[] { Blocked(""), Blocked("codex"), Finished("") }));
+    Equal(null, TokenFace.For(new[] { Finished("") }));
+
+    // End to end from hook payloads: one Claude session finished, one Codex session asks for approval.
+    var now = DateTime.UtcNow;
+    var activity = new AgentActivity(TimeSpan.FromSeconds(10));
+    Apply(activity, Parse(new { hook_event_name = "Stop", session_id = "one" }, "claude-code"), now);
+    Equal(new TokenFace("claude-code", false, 0), TokenFace.For(activity.Waiting));
+    Apply(activity, Parse(new { hook_event_name = "PermissionRequest", session_id = "two", tool_name = "shell" }), now);
+    Equal(new TokenFace("codex", true, 1), TokenFace.For(activity.Waiting));
+    // Approving it (the agent's next tool use) drops the badge and hands the token back.
+    Apply(activity, Parse(new { hook_event_name = "PostToolUse", session_id = "two", tool_name = "shell" }), now);
+    Equal(new TokenFace("claude-code", false, 0), TokenFace.For(activity.Waiting));
+}
+
+// Pixels, not just logic: the yellow disc appears only for a blocked face, at the logo's top-right,
+// for every tool and token size, and the "+N" pill beside it never covers it.
+static void BadgeDrawing()
+{
+    var settings = new CursorSettings();
+    using var renderer = new NotifierRenderer();
+    using var logos = new AgentLogos();
+    foreach (var tool in new[] { "claude-code", "codex" })
+        foreach (int side in new[] { 48, 96, 192 })
+            foreach (int others in new[] { 0, 3, 12 })
+            {
+                var logo = logos.Fit(tool, new RectangleF(-side / 2f, -side / 2f, side, side));
+                var (center, r) = AttentionBadge.Place(logo, side);
+                int dim = side * 3, mid = dim / 2;
+                // A spot on the yellow face, left of the "?" glyph.
+                int px = mid + (int)MathF.Round(center.X - r * 0.62f), py = mid + (int)MathF.Round(center.Y + r * 0.1f);
+                foreach (bool blocked in new[] { false, true })
+                {
+                    using var canvas = new Bitmap(dim, dim);
+                    using (var g = Graphics.FromImage(canvas))
+                        renderer.DrawToken(g, settings, new TokenFace(tool, blocked, others), mid, mid, side, 0f);
+                    var c = canvas.GetPixel(px, py);
+                    bool yellow = c.A > 240 && c.R > 230 && c.G > 170 && c.B < 90;
+                    if (yellow != blocked)
+                        throw new InvalidOperationException($"{tool} {side}px +{others} blocked={blocked}: badge pixel was {c}.");
+                }
+            }
 }
 
 static void OverlappingAttention()
@@ -614,7 +675,7 @@ static void UnknownTool() => WithHome(home =>
 static void ConcurrentRendering()
 {
     var settings = new CursorSettings();
-    var tools = new[] { "claude-code", "codex" };
+    var face = new TokenFace("claude-code", Blocked: true, Others: 1);
     int failures = 0, frames = 0;
     var until = DateTime.UtcNow.AddSeconds(1.5);
     var threads = Enumerable.Range(0, 2).Select(_ => new Thread(() =>
@@ -626,7 +687,7 @@ static void ConcurrentRendering()
             try
             {
                 using var g = Graphics.FromImage(canvas);
-                renderer.DrawToken(g, settings, tools, 128f, 128f, 96f, 0f);
+                renderer.DrawToken(g, settings, face, 128f, 128f, 96f, 0f);
                 Interlocked.Increment(ref frames);
             }
             catch (InvalidOperationException) { Interlocked.Increment(ref failures); }

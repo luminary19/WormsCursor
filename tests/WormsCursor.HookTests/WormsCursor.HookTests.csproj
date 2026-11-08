@@ -17,12 +17,14 @@
     <Compile Include="../../src/WormsCursor.Core/AgentActivity.cs" Link="AgentActivity.cs" />
     <Compile Include="../../src/WormsCursor.Core/AgentEventMessage.cs" Link="AgentEventMessage.cs" />
     <Compile Include="../../src/WormsCursor.Core/AgentLogos.cs" Link="AgentLogos.cs" />
+    <Compile Include="../../src/WormsCursor.Core/AttentionBadge.cs" Link="AttentionBadge.cs" />
     <Compile Include="../../src/WormsCursor.Core/CursorSettings.cs" Link="CursorSettings.cs" />
     <Compile Include="../../src/WormsCursor.Core/ForegroundWatcher.cs" Link="ForegroundWatcher.cs" />
     <Compile Include="../../src/WormsCursor.Core/NotifierRenderer.cs" Link="NotifierRenderer.cs" />
     <Compile Include="../../src/WormsCursor.Core/ProgramSuppression.cs" Link="ProgramSuppression.cs" />
     <Compile Include="../../src/WormsCursor.Core/SettingsStore.cs" Link="SettingsStore.cs" />
     <Compile Include="../../src/WormsCursor.Core/SvgPath.cs" Link="SvgPath.cs" />
+    <Compile Include="../../src/WormsCursor.Core/TokenFace.cs" Link="TokenFace.cs" />
     <Compile Include="../../src/WormsCursor.Core/WindowPrograms.cs" Link="WindowPrograms.cs" />
     <Compile Include="../../src/WormsCursor.OpenCodeOverlay/SuppressionListFile.cs" Link="SuppressionListFile.cs" />
   </ItemGroup>

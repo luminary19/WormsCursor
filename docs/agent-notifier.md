@@ -155,6 +155,12 @@ thing hanging there. The tools list (one tool id per waiting agent) comes from
 when several wait, a small frameless **"+N"** superscript (N = the rest) sits at its top-right. There
 is deliberately never a fan of logos — it stays legible on the tiny cursor canvas.
 
+> **Current rendering** (supersedes the count encoding above): `TokenFace.For(AgentActivity.Waiting)`
+> picks the logo, preferring a session that is blocked on you. A blocked session's logo carries a
+> yellow "?" `AttentionBadge` on its top-right; a plain logo means the turn just finished. The "+N"
+> is a small pill in the same corner, tucked beside the badge. The OpenCode helper draws the same
+> badge for its `waiting` display.
+
 Logos are baked from each tool's SVG into vector geometry by `SvgPath` (a tiny path-data parser,
 mirroring `HandShape`) and held by `AgentLogos` (`claude-code` → the orange pixel critter; the
 Codex/OpenAI knot is baked but hidden from the UI until it can be tested); they scale crisply to any

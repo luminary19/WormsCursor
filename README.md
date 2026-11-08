@@ -22,7 +22,13 @@ and optimized rendering, with the OpenCode logo. Its source and build live in th
 ## The token
 
 When an agent needs you, WormsCursor draws the waiting tool's logo as a bouncing, click-through
-overlay — one logo for the waiting tool, with a frameless **"+N"** when several agents wait at once.
+overlay. It shows one tool logo, and a small **"+N"** pill when several sessions wait at once:
+
+- **Plain logo**: the agent finished its turn and is waiting for your next prompt.
+- **Logo with a yellow "?" badge**: the agent is blocked on you. It needs a permission approval, an
+  answer to a question, or an MCP elicitation (OpenCode: a permission or a form). If any waiting
+  session is blocked, its logo is the one shown.
+
 Two placements (set in **Preferences…**):
 
 - **Next to the mouse cursor** — the token hangs off the pointer on a springy pendulum and follows it,
@@ -137,7 +143,9 @@ an unanswered asynchronous Codex question.
 WormsCursor.sln
 ├─ src/
 │  ├─ WormsCursor.Core/      Engine — no UI dependencies
-│  │   ├─ NotifierRenderer.cs Draws the token (one tool logo + a "+N" badge) at a given centre/size/swing
+│  │   ├─ NotifierRenderer.cs Draws the token (one tool logo, the "?" badge when blocked, a "+N" pill) at a given centre/size/swing
+│  │   ├─ TokenFace.cs        Picks what the token shows: which logo, badge on/off, how many others
+│  │   ├─ AttentionBadge.cs   The yellow "?" badge, shared with the OpenCode helper
 │  │   ├─ AgentLogos.cs       Baked tool logos (Claude critter, OpenAI knot); SvgPath.cs parses the path data
 │  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe)
 │  │   ├─ AgentEventMessage.cs The normalised wire format (one JSON line per event)
