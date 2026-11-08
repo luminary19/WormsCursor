@@ -4,7 +4,8 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="clr-namespace:AgentsCursor.App.ControlPanel"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-    Title="Agents">
+    Title="Agents"
+    Foreground="{DynamicResource TextFillColorPrimaryBrush}">
 
     <Page.Resources>
         <ResourceDictionary>
@@ -33,7 +34,6 @@
                             <StackPanel Orientation="Horizontal">
                                 <ui:TextBlock
                                     FontTypography="Body"
-                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                     Text="{Binding Name}"
                                     TextTrimming="CharacterEllipsis" />
                                 <ui:TextBlock

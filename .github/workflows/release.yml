@@ -45,8 +45,10 @@ jobs:
             'wpfgfx_cor3.dll',
             # The token icons' SVG renderer.
             'Svg.dll',
-            # The Pi and OpenCode plugins the Agents page connects (AgentHookRegistrar.PluginDir).
+            # The Pi and OpenCode plugins the Agents page connects (AgentHookRegistrar.PluginDir). Each
+            # package.json names the plugin, which is how the registrar recognises its own entries.
             'integrations/pi/index.ts',
+            'integrations/pi/package.json',
             'integrations/opencode/index.ts',
             'integrations/opencode/package.json',
             'integrations/shared/tray-client.ts'

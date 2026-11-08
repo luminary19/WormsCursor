@@ -52,23 +52,26 @@ On the **Icons** page each agent gets its own look: its **original** logo, one o
 for it (Claude Code: *Waving*, *Party*, *Peekaboo*; Codex: *Buddy*, *Spin*, *Sleepy*; OpenCode:
 *Buddy*, *Brackets*, *Stack*; Pi: *Walker*, *Shades*, *Pie*), or an **SVG of your own** (**Add SVG…**,
 up to 256 KB, 24 per agent). An added file is cleaned before it is kept: scripts, event handlers and
-links to anything outside the file are removed, and a file with a DTD, an `@import` or an outside
-`url()` is refused, so nothing in it can run or fetch anything. It must also draw something; if it
-can't be used, the page says why and the agent keeps its icon. Added icons live in
-`%LocalAppData%\AgentsCursor\icons\`. Every icon gets the same contrast rim, "?" badge and "+N", and
-the page previews both looks over dark and light. **Reset all icons to the originals** puts them back.
+links to anything outside the file are removed, a DOCTYPE is skipped unread, and a file with an
+`@import`, an outside `url()`, or references that loop or would draw too much is refused, so nothing
+in it can run, fetch anything or hang the app. It must also draw something; if it can't be used, the
+page says why and the agent keeps its icon. Removing one of your icons can be undone. Added icons live
+in `%LocalAppData%\AgentsCursor\icons\`. Every icon gets the same contrast rim, "?" badge and "+N",
+and the page previews both looks over dark and light. **Reset all icons to the originals** puts them
+back.
 
 The overlay touches no system state, so there's nothing to restore on exit, and it costs nothing when
 nothing's waiting (the animation only runs while at least one agent needs you).
 
 ### Stays out of your games
 
-The token stays hidden while a program on the **Hide the token while using** list (the **Apps** page
-of **Preferences…**) is in front, whether it runs fullscreen, borderless or windowed. Dota 2
-(`dota2.exe`) is on the list by default. **Add a program** offers the programs that are open now, or
-takes a typed exe name; **Remove** takes one off. Your agents are still tracked meanwhile. When you switch
-away and one is still waiting, the token comes back. While hidden, the token costs no CPU: AgentsCursor
-learns about focus changes from Windows instead of checking repeatedly.
+The token stays hidden while an app on the **Hide the token while using** list (the **Apps** page of
+**Preferences…**) is in front, whether it runs fullscreen, borderless or windowed. Dota 2
+(`dota2.exe`) is on the list by default. **Add an app** offers the apps that are open now, or takes a
+typed file name; **Remove** (the bin) takes one off. This works the same for every agent. Your agents
+are still tracked meanwhile. When you switch away and one is still waiting, the token comes back.
+While hidden, the token costs no CPU: AgentsCursor learns about focus changes from Windows instead of
+checking repeatedly.
 
 ## How the notifier works
 
@@ -124,11 +127,16 @@ when installed), so AgentsCursor registers its Codex hook as `& '<path>\AgentsCu
 codex` in `commandWindows`. A registration from before this fix used a bare quoted path, which
 PowerShell rejects, so every Codex hook failed; the **Agents** page shows it as *Needs update*.
 
-**Codex under Orca.** Orca runs Codex with
-`CODEX_HOME=%APPDATA%\orca\codex-runtime-home\home`. Orca copies your hooks there but trusts only
-its own, so AgentsCursor's hooks don't run in Orca-launched Codex until you trust them: open Codex
-from Orca, run `/hooks`, and trust the AgentsCursor entries. Do this once, and again whenever the
-hook command changes (after **Update**, or when the AgentsCursor exe moves).
+**Under Orca.** Orca runs Codex with `CODEX_HOME=%APPDATA%\orca\codex-runtime-home\home`. Orca copies
+your hooks there but trusts only its own, so AgentsCursor's hooks don't run in Orca-launched Codex
+until you trust them: open Codex from Orca, run `/hooks`, and trust the AgentsCursor entries. Do this
+once, and again whenever the hook command changes (after **Update**, or when the AgentsCursor exe
+moves). Orca runs OpenCode with `OPENCODE_CONFIG_DIR` set to an overlay folder
+(`%APPDATA%\orca\opencode-config-overlays\<hash>\`) whose `opencode.jsonc` is a hard link to your own
+config, so connecting OpenCode reaches Orca's OpenCode too; AgentsCursor rewrites the file in place,
+which keeps the link. AgentsCursor finds every config from its own environment, so start it from the
+Start menu or with Windows, not from a terminal inside Orca, where `CODEX_HOME` and
+`OPENCODE_CONFIG_DIR` point at Orca's copies.
 
 **OpenCode and Pi.** Connecting adds the plugin folder shipped next to `AgentsCursor.exe`
 (`integrations\opencode`, `integrations\pi`) to OpenCode's `opencode.jsonc` `plugins` or Pi's
@@ -137,7 +145,9 @@ that quits or is killed clears its token at once. They never start the tray; whe
 they wait quietly and reconnect when it is. OpenCode reports a permission or form as blocked and a
 finished root session as done, with a subagent's prompts shown on its parent conversation; Pi reports
 any extension prompt raised during a run (approvals, questions) as blocked and a settled run as done.
-See [integrations/README.md](integrations/README.md) for the event mapping.
+Pi needs version 1.3 or later. The Pi plugin replaces the standalone pi-cursor extension, which drew
+its own token: remove that one, or Pi shows two. See [integrations/README.md](integrations/README.md)
+for the event mapping.
 
 **Kept current automatically.** When AgentsCursor starts, it updates every connection you made that
 points at another copy of it or an older setup (the app moved, it was renamed from WormsCursor, a dev
@@ -154,6 +164,22 @@ approval waits, and questions use the native lifecycle hooks described above.
 So it shows up when an agent is *waiting on you* and clears the moment you're clearly back (you
 submitted a prompt) or the session ends. Multiple sessions are tracked independently (keyed by tool +
 session id), so the count is simply "how many agents need you right now".
+
+**The four agents side by side.** The token, its "?" badge and "+N", the linger timeout, each agent's
+icon, the connection card and its startup update, and the hide-while-using list work the same for
+every agent. Where they differ, it is because of what each tool tells AgentsCursor:
+
+| | Claude Code | Codex | OpenCode | Pi |
+|---|---|---|---|---|
+| Reports through | lifecycle hooks | lifecycle hooks | a plugin, one connection per OpenCode location | an extension, one connection per TUI session |
+| **"?"** — blocked on you | a permission request, `AskUserQuestion`, an MCP request for input | a permission request, `request_user_input` / `request_permissions`, an unanswered asynchronous question | a permission, a form | any extension prompt during a run |
+| Plain logo — done | `Stop` (not while background subagents run), `StopFailure`, the idle reminder | `Stop` | the root session's run succeeds or fails | the run settles |
+| You press Escape | no hook runs: a "?" stays until your next prompt | `Interrupt`: clears | clears | clears |
+| The agent is killed | a done token goes after the linger timeout; a "?" stays | the same | clears at once | clears at once |
+| AgentsCursor isn't running | those events are lost | those events are lost | a "?" still open is reported when it starts | a "?" still open is reported when it starts |
+| Subagents | their prompts show on their session; their finishing doesn't | the same | child sessions report under their root; their finishing doesn't | in-process subagents report nothing; their prompts appear in the parent's TUI |
+| Headless runs | `claude -p` shows a done token (the hooks can't tell) | `codex exec` shows a done token (the hooks can't tell) | `opencode run` shows a done token (the plugin can't tell) | print, JSON and RPC modes don't report |
+| After AgentsCursor changes its connection | start a new session | approve the hooks under `/hooks` (also in Orca), then start a new session | `opencode reload`, or a new session | `/reload`, or a new session |
 
 **Two kinds of waiting.** A token isn't all-or-nothing on the timeout:
 
@@ -174,6 +200,11 @@ an unanswered asynchronous Codex question.
 
 ## Known issues
 
+- **Claude Code: pressing Escape while it asks you something leaves the "?" up** until your next
+  prompt. Claude runs no hook when you interrupt it (Codex, OpenCode and Pi report an interrupt).
+- **Headless runs show a done token** when they finish (`claude -p`, `codex exec`, `opencode run`):
+  their hooks and plugin events don't say whether anyone is watching. Pi's print, JSON and RPC modes
+  don't report.
 - **A hard-killed Claude Code or Codex agent's token can linger.** (OpenCode and Pi clear at once:
   their plugin's connection closes with them.) The notifier learns everything from the tool's hooks
   over the pipe — it never watches the agent's process. A *clean* exit (`/exit`, `Ctrl+C`, `/clear`,
@@ -198,6 +229,7 @@ AgentsCursor.sln
 │  │   ├─ IconSource.cs       An icon's SVG text (built-in or added), falling back to the agent's original logo
 │  │   ├─ CustomIconStore.cs  The SVGs you added: sanitised, content-addressed, in %LocalAppData%\AgentsCursor\icons
 │  │   ├─ SvgSanitizer.cs     Makes an untrusted SVG safe to keep and draw (no scripts, no outside references)
+│  │   ├─ SvgReferences.cs    Refuses an SVG whose references loop, nest too deep or draw too much
 │  │   ├─ TokenSprites.cs     Renders icons (SVG.NET) to cached sprites, fitted by visible pixels, with a contrast rim
 │  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe)
 │  │   ├─ AgentEventMessage.cs The normalised wire format (one JSON line per event)
@@ -225,6 +257,8 @@ AgentsCursor.sln
 │  ├─ shared/                The tray connection and message format
 │  ├─ pi/, opencode/         The plugins
 │  └─ tests/                 Their tests and SDK contract checks (npm test, npm run typecheck)
+├─ tests/
+│  └─ AgentsCursor.HookTests/ The C# tests (dotnet run --project tests/AgentsCursor.HookTests -c Release)
 └─ tools/
    └─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the app/tray glyph
 ```
@@ -266,10 +300,11 @@ Settings are saved to
 they live outside the app folder.
 
 To try the token without a real agent, use **Agents → Preview on screen**, or fire a hook by hand
-(the tray must be running):
+from Command Prompt in the app's folder (the tray must be running; Windows PowerShell 5.1 doesn't
+reliably pass piped text to a windowed exe like AgentsCursor):
 
-```powershell
-'{"hook_event_name":"PermissionRequest","session_id":"test","tool_name":"Bash"}' | AgentsCursor.exe hook --tool claude-code
+```bat
+echo {"hook_event_name":"PermissionRequest","session_id":"test","tool_name":"Bash"} | AgentsCursor.exe hook --tool claude-code
 ```
 
 ### Standalone build (no .NET install on the target)

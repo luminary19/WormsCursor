@@ -25,13 +25,19 @@ Open **Preferences… → Agents** and press **Connect** on the **Pi** or **Open
 
 - **Pi**: adds the absolute path of `integrations\pi` to the `extensions` list in
   `%PI_CODING_AGENT_DIR%\settings.json` (else `%USERPROFILE%\.pi\agent\settings.json`). Then run
-  `/reload` in open Pi sessions, or start a new one.
+  `/reload` in open Pi sessions, or start a new one. This plugin replaces the standalone pi-cursor
+  extension, which drew its own token with a helper of its own: remove it from Pi (Pi loads every
+  folder under `extensions\`, so move the folder out), or Pi shows two tokens.
 - **OpenCode**: adds the `file:` URL of `integrations\opencode` to `plugins` in
   `%OPENCODE_CONFIG_DIR%\opencode.jsonc` (else `%USERPROFILE%\.config\opencode\`, or `opencode.json`
   when only that exists). The edit touches only that entry: comments, trailing commas and formatting
   stay as they were. The file is rewritten in place, never replaced, because Orca's OpenCode config
   overlay (`%APPDATA%\orca\opencode-config-overlays\<hash>\opencode.jsonc`) is a hard link to it, so
   Orca picks the change up too. Then run `opencode reload` in open sessions, or start a new one.
+
+The config folders come from AgentsCursor's own environment, as they do for Claude Code and Codex.
+Start AgentsCursor from the Start menu or with Windows, not from a terminal inside Orca: there
+`OPENCODE_CONFIG_DIR` (and `CODEX_HOME`) point at Orca's copies.
 
 Each config is backed up once, before its first change, to `<file>.agentscursor.bak`. **Disconnect**
 removes only AgentsCursor's entry. An entry that points at another copy of AgentsCursor (a moved app,

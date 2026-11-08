@@ -43,11 +43,16 @@ version readout) and commit it as `Release X.Y.Z` — so tag `v0.7.0` ⇄
      matching the `## ` header that contains the version string — so keep the header in
      the `## X.Y.Z - DATE` shape and don't let the same version appear in another header.
 
-4. **Sanity-build before tagging** (the tag triggers a real release):
+4. **Build and test before tagging** (the tag triggers a real release; CI on `main` runs the
+   plugin tests and the build, but not the C# tests):
 
    ```bash
-   dotnet build AgentsCursor.sln -c Release
+   dotnet build AgentsCursor.sln -c Release          # 0 warnings
+   dotnet run --project tests/AgentsCursor.HookTests -c Release
+   cd integrations && npm ci --ignore-scripts && npm test && npm run typecheck
    ```
+
+   A tray running from `src/AgentsCursor.App/bin/Release` locks that folder: exit it first.
 
 5. **Commit** the bump + changelog together:
 
@@ -76,7 +81,8 @@ version readout) and commit it as `Release X.Y.Z` — so tag `v0.7.0` ⇄
 Triggered on `push` of tags matching `v*`:
 
 - **build** (windows-latest): `dotnet publish` self-contained `win-x64` → sanity-checks the
-  payload (`AgentsCursor.exe` + `Assets/`) → installs `vpk` **0.0.1298** (kept in lockstep
+  payload (`AgentsCursor.exe`, `Assets/`, the WPF-UI and SVG renderer DLLs, and the Pi and OpenCode
+  plugins under `integrations/`) → installs `vpk` **0.0.1298** (kept in lockstep
   with the `Velopack` PackageReference in the csproj) → downloads the latest prior **stable**
   release into `velopack-output/` so `vpk pack` can compute a **delta** (skipped only when
   there is no prior stable release) → `vpk pack` → uploads the `velopack` artifact.
@@ -93,7 +99,7 @@ Triggered on `push` of tags matching `v*`:
   `vpk download` fails, rather than shipping a full-only/missing-delta package that could
   brick auto-update on existing installs.
 - **Don't reuse a tag.** To redo a release, bump to the next patch instead of retagging.
-- The in-app updater is **Velopack**; "Check for updates" (tray + Preferences) pulls from the
+- The in-app updater is **Velopack**; **Preferences… → About → Check for updates** pulls from the
   GitHub Releases this workflow publishes. A build run from `bin\` reports as a dev build and
   can't self-update — that's expected.
 

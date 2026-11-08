@@ -79,6 +79,16 @@ subagent), each answer under the root its prompt opened under; a root's run endi
 (`session.execution.succeeded`/`failed`, or status idle / `session.idle`, first one counts) is
 finished. A real `opencode run` emits no status or idle event, only the execution result.
 
+Everything after the event mapping is shared by all four agents: the token, badge and "+N"
+(`TokenFace`), the linger TTL, the per-agent icon, the Agents card and its states, the startup
+refresh, and focus suppression. The README's "four agents side by side" table lists where they
+differ, and each difference is forced by what the tool reports: Claude runs no hook on Escape (Codex
+`Interrupt`, Pi's aborted settle and OpenCode's `session.execution.interrupted` all end the session);
+hook tools can't clear on a kill or replay when the tray starts late (the plugins' leases and
+snapshots do); only Pi can tell a headless run (its `ctx.mode`), so `claude -p`, `codex exec` and
+`opencode run` show a done token. Codex's `SessionStart` is a `tool_use` (not a `thinking_started`
+like Claude's) because a resumed Codex thread can still have open asynchronous questions.
+
 ## Projects (`src/`)
 
 ### `AgentsCursor.Core` — the engine (UI-agnostic, GDI+ only, **no WinForms/WPF**)
@@ -103,21 +113,29 @@ tests.
   gets a solid face plate because the rim fills the knot's gaps), nothing finer than 1/24 of the
   bounds, aspect 0.6-1.6, at most 8 KB, and nothing important at the top-right where the badge sits
   (the critter waves with its left arm). Rendered with SVG.NET (`Svg`, MS-PL) into cached sprites per
-  renderer: fitted by the icon's visible pixels (not its viewBox), with a generic contrast rim (the
-  alpha mask dilated, light for a dark icon, dark for a light one). `Sprite.Visual` is what the badge
+  renderer: fitted by the icon's visible pixels (not its viewBox), with the same two-tone contrast rim
+  for every icon (the alpha mask dilated: a dark band, then a light one; at most 3 px x DPI; a hole
+  inside the icon takes whichever band contrasts with the icon). `NotifierRenderer.IconShape` lets a
+  host size icons of different shapes alike. `Sprite.Visual` is what the badge
   and the "+N" anchor to. An icon that can't be loaded or drawn falls back to the agent's original
   (logged once per icon). SVG.NET never fetches external images, elements or entities
   (`TokenSprites.EnsureConfigured`). Unknown tools get a grey dot. `IconChoices` normalises the
   per-agent choice (`CursorSettings.Icons`).
-- `CustomIconStore.cs` / `SvgSanitizer.cs` — added icons: `%LocalAppData%\AgentsCursor\icons\<tool>\<hash>.svg`
-  holds the sanitised text, named by the first 64 bits of its SHA-256 (the id is `custom:<hash>`),
-  written to a temp name then moved, never rewritten; at most 24 per agent; an icon must draw
-  something at 64 px within 2 s. Removing the icon an agent shows sets that agent back to its original
-  first. The sanitiser rejects >256 KB, malformed XML, a DTD, a non-SVG root, >5,000 elements or depth
-  >64, `@import` and any `url()` outside the file; it removes `script`/`foreignObject`/`iframe`/
+- `CustomIconStore.cs` / `SvgSanitizer.cs` / `SvgReferences.cs` — added icons:
+  `%LocalAppData%\AgentsCursor\icons\<tool>\<hash>.svg` holds the sanitised text, named by the first
+  64 bits of its SHA-256 (the id is `custom:<hash>`), written to a temp name then moved, never
+  rewritten, with the upload's tidied file name kept beside it (shown under the tile); at most 24 per
+  agent; an icon must draw something at 64 px within 2 s. Removing the icon an agent shows sets that
+  agent back to its original first; `Restore` undoes a removal (same id, name, place and selection).
+  The sanitiser rejects >256 KB, malformed XML, a non-SVG root, >5,000 elements or depth >64,
+  `@import` and any `url()` outside the file; a DOCTYPE is skipped unread (entities never expand) and
+  an `<svg>` root without a namespace is read as SVG; it removes `script`/`foreignObject`/`iframe`/
   `audio`/`video`, `on*` attributes and every link but `#fragment` (and inline raster `data:` on
-  `<image>`). `IconSource` re-sanitises on every load. `IconSource.Custom` is the store (tests point
-  it at a temp folder). The store lives in Core, not the App, because the renderer (Core) reads it.
+  `<image>`). `SvgReferences` then reads the file as SVG.NET will draw it and refuses references that
+  loop, nest deeper than 64 once followed, or would draw more than 20,000 elements (SVG.NET follows
+  references unbounded: a loop overflows the stack and kills the process). `IconSource` re-sanitises
+  on every load. `IconSource.Custom` is the store (tests point it at a temp folder). The store lives
+  in Core, not the App, because the renderer (Core) reads it.
 - `AgentActivity.cs` — tracks which agent sessions currently **need the user** (thread-safe), exposes
   `Waiting` (one `WaitingAgent(Tool, State)` per session, `State` = `WaitingState.Blocked` when an
   approval/question/elicitation is pending, `Finished` when the turn just ended) and `WaitingCount`,
@@ -142,13 +160,16 @@ tests.
   with a stale snapshot. `Current` is a snapshot for reading; `Live` is the instance the overlay reads.
 - `TokenMotion.cs` — the token's motion as pure functions, shared by the overlay and the panel's
   preview. Every pointer position is one tether: a spring (k 130, c 3, the old pendulum's) toward
-  pointer + `RestFor(placement)` (below `(0, .42t)`, above `(0, -.62t)`, beside
-  `(14dpi + .5t, 18dpi + .3t)`), a taut string at rest length + 0.30t, tilt measured from the rest
-  direction (so upright at rest; beside clamped to ±35°), idle bob along the string, entrance hop back
-  along it. Near the edges of the pointer's monitor `Edges` mirrors the rest per axis (flips as soon
-  as the token would leave, back only with 0.25t to spare) and `KeepOnScreen` slides it along an edge
-  it would still overhang (an axis with no offset, a corner). `CornerBounce` for corners.
-  `TokenCanvas` sizes the overlay's square canvas for any tilt plus badge, pill and rim.
+  pointer + `RestFor(placement)` (below `(0, 22dpi + (0.5 + badge overhang)t)`, so the token, badge
+  and "+N" hang clear of the arrow; above `(0, -.62t)`; beside `(14dpi + .5t, 18dpi + .3t)`; below and
+  above are each other's mirror, so a flip never lands under the arrow), a taut string at rest length
+  + 0.30t, tilt measured from the rest direction (so upright at rest) and clamped by `MaxSwingFor`
+  (±80° below and above, ±35° beside), idle bob along the string, entrance hop back along it. Near the
+  edges of the pointer's monitor `Edges` mirrors the rest per axis (flips as soon as the token would
+  leave, back only with 0.25t to spare), `KeepOnScreen` slides it along an edge it would still
+  overhang (an axis with no offset, a corner), and the work area is a wall the token stops at.
+  `CornerBounce` for corners. `TokenCanvas` sizes the overlay's square canvas for any tilt plus badge,
+  pill and rim.
 - `SettingsStore.cs` — tolerant JSON load / atomic save in `%LocalAppData%\AgentsCursor\settings.json`
   (survives app-folder updates); enums stored as readable names. `Load` never touches a file (a
   corrupt one is copied aside by the next `Save`). `Load` owns the carry-over from the rename: while
@@ -191,23 +212,29 @@ tests.
     System uses `SystemThemeWatcher` (live), Light/Dark apply directly; both go through
     `ApplicationThemeManager`, so WpfHost's opaque text brushes are re-derived. Closing hides it;
     the sidebar folds to icons below 860 DIPs; each page opens scrolled to the top.
-  - `TokenPage` — master switch, size, position (below / above / beside the pointer, a separator,
-    the four corners; picking a pointer position keeps the last corner), and a wide preview where a
-    drawn pointer glides over dark and light and the token follows it the chosen way (`TokenPreview`
-    with `Roam`: Core renderer + `TokenMotion` → WPF bitmap on the UI thread, its own renderer).
+  - `TokenPage` — first a preview (260 DIPs high, half dark, half light) where a drawn pointer
+    glides across both and the token follows it the chosen way, kept inside the preview
+    (`TokenPreview` with `Roam`: Core renderer + `TokenMotion` → WPF bitmap on the UI thread, its own
+    renderer); then the master switch, size, position (below / above / beside the pointer, a
+    separator, the four corners; picking a pointer position keeps the last corner), and "Reset size
+    and position" (`ResetSizeAndPosition`; icons keep their own reset).
   - `IconsPage` — a preview of the selected agent's icon ("Done", and "Needs you" with the "?" and a
-    "+1"), agent tiles, and that agent's gallery: built-ins, "Your icons" (removable), "Add SVG…"
-    (sanitise + validate + store on a background task with a ProgressRing; a refusal shows in an
-    InfoBar: "That file couldn't be used" + the reason + "<Agent> keeps its current icon."), and
-    "Reset all icons to the originals". Tiles are radio groups (`ChoiceTile` style): Tab reaches the
-    selected one, the arrows move the choice; tiles update in place so focus survives a change.
+    "+1"; the two stack when they don't fit across), agent tiles (a `UniformGrid`, 4 per row, 2 when
+    narrow), and that agent's gallery: built-ins, "Your icons" (each with its file name; the remove
+    "x" shows on hover or keyboard focus, and removing offers Undo), "Add SVG…" (sanitise + validate +
+    store on a background task with a ProgressRing; dimmed with a tooltip when the agent has 24), and
+    "Reset all icons to the originals". A refusal ("That file couldn't be used" + the reason +
+    "<Agent> keeps its current icon.") and Undo show inline under "Your icons", in place of the hint.
+    Tiles are radio groups (`ChoiceTile` style): Tab reaches the selected one, the arrows move the
+    choice, the focus ring shows only after keyboard input; tiles update in place so focus survives a
+    change.
   - `AgentsPage` + `ToolRow` — one card per tool (Claude Code, Codex, OpenCode, Pi), all with the
     same anatomy: status Connected / Needs update / Not connected / Can't read its config, buttons
     Connect / Update (+ Disconnect) / Disconnect / Show file, and after a change made this run the
     tool's `AfterChange` step. Also the linger timeout and "Preview on screen" (fakes blocked agents
     on the real overlay).
-  - `AppsPage` — the hide-while-using list (Remove per row, empty state), an inline "Add a program"
-    picker (open windows or a typed exe name), Restore the default list.
+  - `AppsPage` — the hide-while-using list (Remove per row, empty state), an inline "Add an app"
+    picker (open windows or a typed file name), Restore the default list.
   - `AboutPage` — version, Check for updates → download → restart (`UpdateService`), What's new
     (release notes via `ReleaseNotesFormat`, a pure, tested Markdown reader), Theme, Start with
     Windows, links.
@@ -229,7 +256,10 @@ tests.
   reads as Outdated. The exe path is taken as spelled on disk (`OnDisk`), so a launch with other casing
   doesn't make every connection Outdated. **Configs are written in place** (`File.WriteAllText`, never a renamed temp
   file): Orca's OpenCode overlay `%APPDATA%\orca\opencode-config-overlays\<hash>\opencode.jsonc` is a
-  hard link to the user's config, and a rename would break it.
+  hard link to the user's config, and a rename would break it. Config folders come from the tray's own
+  environment (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`), so a
+  tray started from a terminal inside Orca (whose `CODEX_HOME` and `OPENCODE_CONFIG_DIR` are Orca's)
+  would connect, and refresh at startup, Orca's copies instead of the user's.
 - `Services/UpdateService.cs` — Velopack `UpdateManager`: check, download, apply-and-restart, release
   notes; updating is unavailable (and says so) for dev builds run from `bin\`.
 - `SingleInstance.cs` (a second launch opens the panel and hands it foreground rights),
@@ -260,8 +290,9 @@ dotnet run --project src/AgentsCursor.App     # run the tray app (dev)
 .NET 8 SDK, pinned by `global.json`. The app is `net8.0-windows`, PerMonitorV2 DPI.
 
 To exercise the notifier without a real agent: **Preferences… → Agents → Preview on screen**, or fire a
-hook by hand — `echo '{"hook_event_name":"PermissionRequest","session_id":"t","tool_name":"Bash"}' |
-AgentsCursor.exe hook --tool claude-code` (the tray must be running).
+hook by hand from Git Bash — `echo '{"hook_event_name":"PermissionRequest","session_id":"t","tool_name":"Bash"}' |
+AgentsCursor.exe hook --tool claude-code` (the tray must be running). Not from Windows PowerShell 5.1:
+its pipe often doesn't reach a WinExe's stdin, so the bridge reads nothing and silently sends nothing.
 
 Tests: `dotnet run --project tests/AgentsCursor.HookTests -c Release` (registrar tests run only on
 temp homes via `HomeOverride`, which also ignores `CLAUDE_CONFIG_DIR`/`CODEX_HOME`/
@@ -284,6 +315,10 @@ notes are extracted from the matching section. Auto-update wiring lives in `Serv
   implicit usings, so each file says which stack it uses (WinForms files import `System.Windows.Forms`
   / `System.Drawing` explicitly; WPF files alias GDI+ as `Gdi`). WPF windows shown from the WinForms
   loop need `ElementHost.EnableModelessKeyboardInterop`. New windows reuse `PanelStyles.xaml`.
+- **Every panel page sets `Foreground="{DynamicResource TextFillColorPrimaryBrush}"`.** Text in a
+  page inherits from the page, not the window, and WPF-UI's `Page` style gives it a brush whose
+  colour is resolved once, so without this the page titles and section headings keep the first
+  theme's colour (black after switching to dark).
 - **Settings edits go through `LiveSettings.Change`**, touching only the fields being edited; never
   write back a whole copy. UI controls compare against the live value before changing it, so the
   page re-reading the settings into its controls is a no-op.

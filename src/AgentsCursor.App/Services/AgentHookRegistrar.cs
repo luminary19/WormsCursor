@@ -26,7 +26,7 @@ public enum HookState
 /// apps the connection covers, when that needs saying (empty otherwise). <paramref name="AfterChange"/>
 /// is the step the agent itself needs after AgentsCursor changes that config, before the change takes
 /// effect.</summary>
-public sealed record HookTool(string Id, string DisplayName, string Detail, string ConfigHint, string AfterChange);
+public sealed record HookTool(string Id, string DisplayName, string Detail, string AfterChange);
 
 /// <summary>One connection <see cref="AgentHookRegistrar.RefreshConnected"/> brought up to date:
 /// <paramref name="Error"/> is null when it worked, else why it couldn't be written.</summary>
@@ -134,14 +134,14 @@ public static partial class AgentHookRegistrar
 
     public static IReadOnlyList<HookTool> Tools { get; } = new[]
     {
-        new HookTool("claude-code", "Claude Code", "", "~/.claude/settings.json",
+        new HookTool("claude-code", "Claude Code", "",
             "Start a new Claude Code session to pick it up."),
         // Codex runs a changed hook only after you trust it (Codex: /hooks), separately in Orca.
-        new HookTool("codex", "Codex", "Desktop app and CLI", "CODEX_HOME/hooks.json",
+        new HookTool("codex", "Codex", "Desktop app and CLI",
             "In Codex, approve the changed AgentsCursor hooks under /hooks, also in sessions Orca starts, then start a new session."),
-        new HookTool("opencode", "OpenCode", "", "OPENCODE_CONFIG_DIR/opencode.jsonc",
+        new HookTool("opencode", "OpenCode", "",
             "Run \"opencode reload\" in open OpenCode sessions, or start a new one. Orca picks it up too."),
-        new HookTool("pi", "Pi", "", "PI_CODING_AGENT_DIR/settings.json",
+        new HookTool("pi", "Pi", "",
             "Run /reload in open Pi sessions, or start a new one."),
     };
 

@@ -10,9 +10,14 @@
 > composited onto the *themed system cursors* by `CursorEngine`. The cursor-theming engine has since
 > been **removed**, and the token is now drawn by a standalone transparent overlay window
 > (`NotifierOverlay`) that follows the pointer (below, above or beside it) *or* pins to a screen corner — no `SetSystemCursor`
-> involved. The **transport, wire format, `AgentActivity` state model, and hook registration below are
-> still accurate**; only the "Rendering"/engine-integration parts (and "Coverage: all themed cursors")
-> are historical. See `CLAUDE.md` / `README.md` for the current architecture.
+> involved. Where a section has a **"Current …"** note (transport, wire format, `AgentActivity` state
+> model, rendering, icons), the note is accurate and supersedes the text around it. Everything else is
+> historical: the cursor-engine integration, "Coverage: all themed cursors", the settings dialog, and
+> the installer in section 6 (connections are now made on the control panel's **Agents** page by
+> `AgentHookRegistrar`: Claude Code and Codex hooks, OpenCode and Pi plugins; Codex no longer uses
+> `notify`, and Cursor and Kiro were never shipped). Classes and files named only in the historical
+> parts (`CursorEngine`, `AgentHooksForm`, `SvgPath`, `AgentLogos`) no longer exist. See `CLAUDE.md` /
+> `README.md` for the current architecture.
 
 > Feature branch: `feat/agent-notifier`. Status: MVP built (pipe + `hook` verb, `AgentActivity`,
 > per-tool **logo** charms — Claude Code / Codex — that hang on the same pendulum as the busy ring /

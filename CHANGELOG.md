@@ -30,7 +30,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
   hide-while-using list. A subagent's prompt shows on its parent conversation. When Pi or OpenCode
   quits, or is killed while waiting on you, its token clears at once. The plugins never start
   AgentsCursor: if it isn't running they wait quietly and catch up when it starts. Pi needs version
-  1.3 or later.
+  1.3 or later; the plugin replaces the standalone pi-cursor extension, so remove that one.
 - **Connections stay current by themselves.** When AgentsCursor starts, it updates in place every
   connection you made that points at another copy of it or an older setup (a moved app, the rename
   from WormsCursor, a dev build), and leaves the tools you didn't connect alone. If a tool then needs a
@@ -145,14 +145,12 @@ GitHub releases. The release workflow pulls the matching section into each relea
   `//` comments in it are now accepted.
 - Register / Unregister keeps your own hook commands even when they share a matcher group with
   AgentsCursor's. The backup (`.agentscursor.bak`, or the `.wormscursor.bak` WormsCursor already
-  made) always holds your original file, and a malformed Claude Code `settings.json` shows *Config
-  needs fixing* instead of being partly overwritten.
+  made) always holds your original file, and a malformed Claude Code `settings.json` shows *Can't
+  read its config* instead of being partly overwritten.
 - *Start with Windows* only shows as on when the startup entry launches this copy of AgentsCursor, so
   an entry left by an old or dev build no longer hides behind a switch that looks on.
 - `AgentsCursor.exe register|unregister` now exits non-zero and says why when it fails (including an
   unknown `--tool`).
-- The OpenCode integration no longer re-runs a failing helper build every few seconds. It reports the
-  failure once, then tries again after five minutes, or at once when the helper sources change.
 
 ### Removed
 - The whole cursor-theming engine: the rotating arrow/hand, the animated busy/help/crosshair/

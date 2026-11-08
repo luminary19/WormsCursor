@@ -2,8 +2,9 @@
 
 > **Obsolete.** This analyses porting the old `SetSystemCursor`-based **cursor-theming engine**, which
 > has since been removed — AgentsCursor is now an agent-waiting overlay (no system-cursor theming), so
-> the cross-platform blocker this document is about no longer applies. Kept for historical context; see
-> `CLAUDE.md` / `README.md` for the current architecture.
+> the cross-platform blocker this document is about no longer applies. Kept for historical context:
+> most files and classes it cites (`CursorEngine.cs`, `ArrowRenderer.cs`, `PreferencesForm`,
+> `ChangelogForm`) no longer exist. See `CLAUDE.md` / `README.md` for the current architecture.
 
 > Produced by a multi-agent analysis pass (codebase mapping + platform API research,
 > 2026-06-13). All codebase claims were verified against the source; platform claims
