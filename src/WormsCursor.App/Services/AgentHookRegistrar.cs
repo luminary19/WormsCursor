@@ -16,7 +16,7 @@ public enum HookState
     /// indicator), a different command (an old exe path, or a command form the tool's shell rejects),
     /// or an entry we no longer use. Re-registering refreshes it in place.</summary>
     Outdated,
-    /// <summary>The config is malformed and cannot be merged without discarding user data.</summary>
+    /// <summary>The config is malformed or unreadable, so it cannot be merged without risking user data.</summary>
     ConfigConflict,
 }
 
@@ -353,6 +353,10 @@ public static class AgentHookRegistrar
         catch (JsonException)
         {
             throw new InvalidOperationException($"{Path.GetFileName(path)} isn't valid JSON — fix or remove it, then retry.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException($"{Path.GetFileName(path)} can't be read ({ex.Message}) — check it isn't locked or read-protected, then retry.");
         }
     }
 

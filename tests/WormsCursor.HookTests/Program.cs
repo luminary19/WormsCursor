@@ -600,6 +600,15 @@ static void MalformedConfigs() => WithHome(home =>
         // A non-string command is not ours, and must not make the state check throw.
         File.WriteAllText(path, "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":5}]}]}}");
         Equal(HookState.NotRegistered, AgentHookRegistrar.GetState(tool));
+        // An unreadable (locked) config is a conflict too, never an exception that reaches the panel.
+        using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Equal(HookState.ConfigConflict, AgentHookRegistrar.GetState(tool));
+            bool rejected = false;
+            try { AgentHookRegistrar.Register(tool); }
+            catch (InvalidOperationException) { rejected = true; }
+            Equal(true, rejected);
+        }
     }
 });
 
