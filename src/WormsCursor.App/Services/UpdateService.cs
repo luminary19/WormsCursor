@@ -8,13 +8,14 @@ using Velopack.Sources;
 namespace WormsCursor.App.Services;
 
 /// <summary>
-/// Thin wrapper over Velopack's <see cref="UpdateManager"/> that reports the current
-/// version and fetches the GitHub release notes feeding the in-app "What's new" dialog.
-/// Downloading and applying updates is handled by <c>VelopackApp.Build().Run()</c> at
-/// startup; this type only reads metadata.
+/// Thin wrapper over Velopack's <see cref="UpdateManager"/>: reports the current version, checks
+/// GitHub Releases for a newer one, downloads it and restarts into it, and fetches the release notes
+/// for the in-app "What's new". Nothing updates on its own: the control panel's "Check for updates"
+/// drives every step.
 ///
 /// Modeled on PowerLink's UpdateService. <see cref="IsVelopackInstalled"/> is false for an
-/// ad-hoc dev build out of bin\Debug, where version reporting falls back to the assembly version.
+/// ad-hoc dev build out of bin\, where updating is unavailable and version reporting falls back to the
+/// assembly version.
 /// </summary>
 public sealed class UpdateService
 {
@@ -81,15 +82,39 @@ public sealed class UpdateService
         }
     }
 
+    /// <summary>A newer release on GitHub, or null when this is the latest. Only for an installed copy
+    /// (<see cref="IsVelopackInstalled"/>); throws on a network or feed failure.</summary>
+    public Task<UpdateInfo?> CheckForUpdatesAsync() => _manager.CheckForUpdatesAsync();
+
+    /// <summary>Downloads <paramref name="update"/>, reporting 0-100 through <paramref name="progress"/>.</summary>
+    public Task DownloadAsync(UpdateInfo update, Action<int> progress, CancellationToken cancellationToken = default)
+        => _manager.DownloadUpdatesAsync(update, progress, cancellationToken);
+
+    /// <summary>A release that was downloaded earlier and installs on restart, or null.</summary>
+    public VelopackAsset? PendingRestart => _manager.UpdatePendingRestart;
+
+    /// <summary>Starts Velopack's updater, which waits (up to a minute) for this app to exit, installs
+    /// <paramref name="release"/> and starts the new version. Throws if the updater can't start; the
+    /// caller then exits normally (the tray's <c>RestartToUpdate</c>).</summary>
+    public void InstallOnExit(VelopackAsset release) => _manager.WaitExitThenApplyUpdates(release, silent: false, restart: true);
+
+    public string RepoPageUrl => RepoUrl;
+
     public string ReleasesPageUrl => $"{RepoUrl}/releases/latest";
 
-    public void OpenReleasesPage()
+    public void OpenReleasesPage() => OpenUrl(ReleasesPageUrl);
+
+    public void OpenRepoPage() => OpenUrl(RepoUrl);
+
+    // Opens a page in the default browser. Best-effort: a machine with no browser association just
+    // does nothing, which is logged.
+    static void OpenUrl(string url)
     {
-        Process.Start(new ProcessStartInfo
+        try { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            FileName = ReleasesPageUrl,
-            UseShellExecute = true,
-        });
+            AppLog.Write($"couldn't open {url}: {ex.Message}");
+        }
     }
 }
 

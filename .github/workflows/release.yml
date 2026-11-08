@@ -38,7 +38,11 @@ jobs:
           $required = @(
             'WormsCursor.exe',
             'Assets/Icon.ico',
-            'Assets/icon.png'
+            'Assets/icon.png',
+            # The WPF control panel: WPF-UI and the self-contained WPF runtime's native renderer.
+            'Wpf.Ui.dll',
+            'PresentationFramework.dll',
+            'wpfgfx_cor3.dll'
           )
           $missing = @()
           foreach ($f in $required) {

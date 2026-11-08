@@ -25,6 +25,12 @@ public sealed class CursorSettings
     /// a future load can migrate. Additive changes are handled by tolerant JSON.</summary>
     public int Version { get; set; } = 1;
 
+    /// <summary>The range <see cref="Size"/> is clamped to.</summary>
+    public const int MinSize = 48, MaxSize = 192;
+
+    /// <summary>The range <see cref="AgentNotifierTimeoutSeconds"/> is clamped to.</summary>
+    public const int MinTimeoutSeconds = 10, MaxTimeoutSeconds = 1800;
+
     // ---------- token appearance (preferences UI) ----------
 
     /// <summary>Token size in px (logical, at 96 DPI — scaled up on high-DPI monitors). The logo
@@ -77,28 +83,32 @@ public sealed class CursorSettings
     /// migrated file) so bad input can't break rendering.</summary>
     public void Normalize()
     {
-        Size = Math.Clamp(Size, 48, 192);
-        AgentNotifierTimeoutSeconds = Math.Clamp(AgentNotifierTimeoutSeconds, 10, 1800);
+        Size = Math.Clamp(Size, MinSize, MaxSize);
+        AgentNotifierTimeoutSeconds = Math.Clamp(AgentNotifierTimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds);
+    }
+
+    /// <summary>Puts the token's look back to the defaults: size, placement, corner and outline
+    /// colour. Leaves the notifier switch, the linger timeout and the hidden-while-using list alone.</summary>
+    public void ResetAppearance()
+    {
+        var defaults = new CursorSettings();
+        Size = defaults.Size;
+        Placement = defaults.Placement;
+        Corner = defaults.Corner;
+        OutlineColor = defaults.OutlineColor;
+    }
+
+    /// <summary>True when the look <see cref="ResetAppearance"/> resets is already the default. (A
+    /// method, not a property, so it stays out of the saved JSON.)</summary>
+    public bool HasDefaultAppearance()
+    {
+        var defaults = new CursorSettings();
+        return Size == defaults.Size && Placement == defaults.Placement && Corner == defaults.Corner
+               && string.Equals(OutlineColor, defaults.OutlineColor, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>An independent copy. Every field is a value type, an immutable string, or the read-only
     /// <see cref="SuppressedPrograms"/> list (replaced on edit, never changed in place), so a member-wise
-    /// clone is already a safe working copy for the dialog.</summary>
+    /// clone is already a safe snapshot (<see cref="LiveSettings.Current"/>).</summary>
     public CursorSettings Clone() => (CursorSettings)MemberwiseClone();
-
-    /// <summary>Copy the values the Preferences dialog edits (token appearance and the suppressed
-    /// programs) from <paramref name="other"/> into this instance, so a reference held by the overlay
-    /// sees the change without being replaced. Everything else is deliberately left alone: the
-    /// agent-notifier enable + linger timeout have their own owner (the Agent settings dialog and the
-    /// tray toggle), which may have changed them <i>after</i> the Preferences working copy was cloned —
-    /// copying them here would revert those edits with a stale snapshot. <see cref="LastSeenVersion"/>
-    /// is app state.</summary>
-    public void CopyPreferencesFrom(CursorSettings other)
-    {
-        Size = other.Size;
-        OutlineColor = other.OutlineColor;
-        Placement = other.Placement;
-        Corner = other.Corner;
-        SuppressedPrograms = other.SuppressedPrograms;
-    }
 }

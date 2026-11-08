@@ -102,6 +102,14 @@ public static class AgentHookRegistrar
         new HookTool("codex", "Codex (desktop + CLI)", "CODEX_HOME/hooks.json"),
     };
 
+    /// <summary>The config file <paramref name="toolId"/>'s hooks are written to.</summary>
+    public static string ConfigPath(string toolId) => toolId switch
+    {
+        "claude-code" => ClaudePath,
+        "codex" => CodexPath,
+        _ => throw UnknownTool(toolId),
+    };
+
     public static HookState GetState(string toolId) => toolId switch
     {
         "claude-code" => ClaudeState(),

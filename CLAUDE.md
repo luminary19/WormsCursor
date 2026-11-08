@@ -3,8 +3,9 @@
 A Windows tray app that shows a **bouncing agent-waiting token**: whenever an AI coding agent
 (Claude Code or Codex) is blocked on your decision or has finished its turn, its tool logo
 appears and bounces — either hanging off the mouse pointer and following it, or
-pinned to a screen corner. It ships as a Velopack app (Setup.exe / Portable.zip) that auto-updates
-from GitHub Releases. No main window — everything lives in the system tray.
+pinned to a screen corner. It ships as a Velopack app (Setup.exe / Portable.zip) that updates
+from GitHub Releases (About → Check for updates). No main window: the tray icon (WinForms) opens one
+WPF control panel, built with WPF-UI to look like Windows 11 Settings.
 
 > History: this started life as a *Worms 3D*-style cursor theme (rotating arrow + animated system
 > cursors via `SetSystemCursor`). That whole cursor-theming engine was removed; the only thing kept
@@ -76,7 +77,14 @@ tests.
   (`Cursor`/`Corner`), `Corner`, the notifier enable + linger timeout, `OutlineColor`, and
   `SuppressedPrograms`. (Name kept for continuity; it's now just the notifier's settings.)
   `SuppressedPrograms` is a read-only list normalized on every assignment and replaced (never mutated)
-  on edit, which is what keeps `Clone()` (member-wise) and `CopyPreferencesFrom` independent.
+  on edit, which is what keeps a `Clone()` (member-wise) snapshot independent. `ResetAppearance` /
+  `HasDefaultAppearance()` cover the look only (size, placement, corner, outline).
+- `LiveSettings.cs` — the **single owner** of the running settings and the only write path: every edit
+  (panel or tray) is a `Change(s => …)` that touches just its own fields, then normalizes, saves and
+  raises `Changed`. Nobody edits a copy and writes it back, so no editor can revert another's change
+  with a stale snapshot. `Current` is a snapshot for reading; `Live` is the instance the overlay reads.
+- `TokenMotion.cs` — the token's self-driven motion as pure functions of time (corner bounce, idle
+  bob), shared by the overlay and the control panel's preview.
 - `SettingsStore.cs` — tolerant JSON load / atomic save in `%LocalAppData%\WormsCursor\settings.json`
   (survives app-folder updates); enums stored as readable names. `Load` (the owning tray app) moves a
   corrupt file aside; `Read` (another process, i.e. the OpenCode helper) never touches the file.
@@ -86,31 +94,45 @@ tests.
   "Add a program" picker lists.
 - `ForegroundWatcher.cs` — the event-driven foreground tracker described above.
 
-### `WormsCursor.App` — the tray app (WinForms, `net8.0-windows`, AssemblyName `WormsCursor`)
+### `WormsCursor.App` — the tray app (WinForms tray + WPF windows, `net8.0-windows`, AssemblyName `WormsCursor`)
 - `Program.cs` — entry point. The `hook` verb short-circuits **first** (throwaway bridge, no UI),
   then `VelopackApp.Build().Run()`, then a single-instance guard, then the tray context.
 - `NotifierOverlay.cs` — the layered overlay window + animation loop. Cursor mode: a springy pendulum
   that hangs the token off the pointer and follows it (+ a gentle idle bob). Corner mode: a fixed
   corner with a continuous "ball" bounce. DPI-aware sizing; per-pixel alpha via `UpdateLayeredWindow`.
   Owns a `ForegroundWatcher` and stays hidden + parked while a suppressed program is in front.
-- `TrayApplicationContext.cs` — owns the tray icon, the `NotifierOverlay`, the pipe server + sweep
-  timer, autostart + update menu items. The "Enabled" item is the master on/off (it flips
-  `AgentNotifierEnabled`). Reloads the real cursor scheme once on startup (self-heal for anyone
-  upgrading from the cursor-theming version that may have left a themed cursor behind).
-- `PreferencesForm.cs` — the live editor: a token preview (dark/light split), token-size slider,
-  placement (cursor/corner) + corner picker, the **Hide the token while using** program list
-  (Add… / Remove), autostart, an **Agent settings…** button, and update/version/links.
-- `AddProgramForm.cs` — the "Add a program" picker: programs with a visible window (exe + title), or
-  a typed exe name.
-- `AgentHooksForm.cs` — the "Agent notifications" dialog: enable + linger timeout + a live preview
-  that fakes a waiting count, plus per-tool hook **Register/Unregister** status.
+- `TrayApplicationContext.cs` — owns the tray icon (Enabled / Preferences… / Exit), the
+  `NotifierOverlay`, the pipe server + sweep timer, the `LiveSettings`, and the one control panel
+  window (created on first use, kept for the app's lifetime; it is the panel's `IControlPanelHost`).
+  Every settings change lands in `OnSettingsChanged` (linger TTL, menu check, overlay refresh,
+  status). The "Enabled" item is the master on/off. Reloads the real cursor scheme once on startup
+  (self-heal for anyone upgrading from the cursor-theming version).
+- `ControlPanel/` — the WPF control panel (WPF-UI, instant-apply, no OK/Cancel):
+  - `WpfHost.cs` — creates the one `System.Windows.Application` (`OnExplicitShutdown`, no `Run`) with
+    WPF-UI's `ThemesDictionary` + `ControlsDictionary`; the WinForms loop pumps WPF too.
+  - `ControlPanelWindow.xaml` — `FluentWindow` (Mica, `SystemThemeWatcher` for live light/dark), a
+    `NavigationView` sidebar (Token, Agents, Apps, About) fed prebuilt pages through an
+    `INavigationViewPageProvider`, and the at-a-glance status in the pane header. Closing hides it;
+    the sidebar folds to icons below 960 DIPs; each page opens scrolled to the top.
+  - `TokenPage` — master switch, live animated preview (`TokenPreview`: Core renderer → WPF bitmap
+    on the UI thread, its own renderer, both faces over dark and light), size, position, corner.
+  - `AgentsPage` + `ToolRow` — per-tool hook cards (Register / Update / Unregister, status from the
+    registrar), the linger timeout, and "Preview on screen" (fakes blocked agents on the real overlay).
+  - `AppsPage` — the hide-while-using list (Remove per row, empty state), an inline "Add a program"
+    picker (open windows or a typed exe name), Restore the default list.
+  - `AboutPage` — version, Check for updates → download → restart (`UpdateService`), What's new
+    (release notes via `ReleaseNotesFormat`, a pure, tested Markdown reader), Start with Windows, links.
+  - `IControlPanelHost`, `PanelStatus` (pure status wording, tested), `PanelStyles.xaml`,
+    `SettingHeader`, `ToolLogo`, `PanelAssets`.
 - `AgentPipeServer.cs` — the named-pipe server that `hook` invocations write to (own thread).
 - `AgentHookBridge.cs` — the `hook` verb: normalises a tool's stdin/argv payload → one pipe line;
   **fail-silent** (sub-½ s pipe timeout, errors to `bridge.log`, always exits 0).
 - `Services/AgentHookRegistrar.cs` — writes/removes WormsCursor's `hook` in each tool's config
   (backup + merge, never clobber).
-- `Services/UpdateService.cs` — Velopack `UpdateManager`; no-ops cleanly for dev builds run from `bin\`.
-- `SingleInstance.cs`, `Autostart.cs` (per-user `HKCU\…\Run`), `ChangelogForm.cs`, `Assets/`.
+- `Services/UpdateService.cs` — Velopack `UpdateManager`: check, download, apply-and-restart, release
+  notes; updating is unavailable (and says so) for dev builds run from `bin\`.
+- `SingleInstance.cs` (a second launch opens the panel and hands it foreground rights),
+  `Autostart.cs` (per-user `HKCU\…\Run`), `Assets/`.
 
 ### `WormsCursor.OpenCodeOverlay` and `integrations/opencode`
 
@@ -140,7 +162,7 @@ dotnet run --project src/WormsCursor.App     # run the tray app (dev)
 
 .NET 8 SDK, pinned by `global.json`. The app is `net8.0-windows`, PerMonitorV2 DPI.
 
-To exercise the notifier without a real agent: **Preferences → Agent settings… → Preview**, or fire a
+To exercise the notifier without a real agent: **Preferences… → Agents → Preview on screen**, or fire a
 hook by hand — `echo '{"hook_event_name":"PermissionRequest","session_id":"t","tool_name":"Bash"}' |
 WormsCursor.exe hook --tool claude-code` (the tray must be running).
 
@@ -153,7 +175,15 @@ notes are extracted from the matching section. Auto-update wiring lives in `Serv
 
 ## Conventions & notes
 
-- **Core stays UI-free** — only `System.Drawing`. Keep WinForms out of it.
+- **Core stays UI-free** — only `System.Drawing`. Keep WinForms and WPF out of it.
+- **Tray in WinForms, windows in WPF.** The tray icon/menu and the overlay are WinForms; every window
+  is WPF + WPF-UI (`UseWPF` + `UseWindowsForms`). The WinForms/GDI+ namespaces are removed from the
+  implicit usings, so each file says which stack it uses (WinForms files import `System.Windows.Forms`
+  / `System.Drawing` explicitly; WPF files alias GDI+ as `Gdi`). WPF windows shown from the WinForms
+  loop need `ElementHost.EnableModelessKeyboardInterop`. New windows reuse `PanelStyles.xaml`.
+- **Settings edits go through `LiveSettings.Change`**, touching only the fields being edited; never
+  write back a whole copy. UI controls compare against the live value before changing it, so the
+  page re-reading the settings into its controls is a no-op.
 - Several patterns (settings store, Velopack packaging, delta-on-release) deliberately **mirror the
   sibling PowerLink project**; comments call this out.
 - Settings live in `%LocalAppData%\WormsCursor\` (not next to the exe) so updates don't wipe them.

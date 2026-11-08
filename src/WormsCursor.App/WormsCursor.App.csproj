@@ -5,7 +5,10 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- The tray icon + overlay are WinForms; every window (the control panel) is WPF with the
+         WPF-UI Fluent library. Both stacks share the one UI thread and message loop. -->
     <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
     <RootNamespace>WormsCursor.App</RootNamespace>
     <AssemblyName>WormsCursor</AssemblyName>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
@@ -17,6 +20,26 @@
     <!-- Installer + auto-update. Pinned to the same major/build PowerLink ships
          (0.0.1298) so the vpk CLI tool and the runtime library stay in lockstep. -->
     <PackageReference Include="Velopack" Version="0.0.1298" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Windows 11 Fluent controls, Mica and live light/dark theming for the WPF control panel. -->
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+  <!-- WinForms and WPF both define Application, Button, Image, Color, Point… Keep the WinForms /
+       GDI+ namespaces out of the implicit global usings so each file names the stack it uses. -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <!-- The WPF SDK drops System.IO (its Path clashes with System.Windows.Shapes.Path) and
+       System.Net.Http from the implicit usings. The non-UI code relies on both, and no file here
+       imports System.Windows.Shapes, so bring them back. -->
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
   </ItemGroup>
 
   <ItemGroup>

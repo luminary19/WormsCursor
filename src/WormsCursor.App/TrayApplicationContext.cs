@@ -1,17 +1,23 @@
+using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Windows.Forms;
+using System.Windows.Forms.Integration;
+using Velopack;
+using WormsCursor.App.ControlPanel;
 using WormsCursor.App.Services;
 using WormsCursor.Core;
 
 namespace WormsCursor.App;
 
 /// <summary>
-/// Tray-only application context: there is no main window. It owns the tray icon and the agent-notifier
-/// overlay (the bouncing tool logo shown while an AI agent is waiting for you), and the named-pipe
-/// plumbing that feeds it.
+/// Tray-only application context: there is no main window. It owns the tray icon (WinForms), the
+/// agent-notifier overlay (the bouncing tool logo shown while an AI agent is waiting for you), the
+/// named-pipe plumbing that feeds it, the one <see cref="LiveSettings"/> every edit goes through, and
+/// the WPF control panel, which it creates on first use and keeps for the app's lifetime.
 /// </summary>
-public sealed class TrayApplicationContext : ApplicationContext
+public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHost
 {
-    readonly CursorSettings _settings = SettingsStore.Load();
+    readonly LiveSettings _settings;
     readonly NotifierOverlay _overlay;
     readonly NotifyIcon _tray;
     readonly Icon _appIcon;
@@ -20,10 +26,10 @@ public sealed class TrayApplicationContext : ApplicationContext
     readonly ToolStripMenuItem _enabledItem;
 
     // A hidden, handle-backed control bound to the UI thread. Cross-process signals
-    // (single-instance guard) BeginInvoke through it to hop onto the UI thread before
-    // touching WinForms. We force its handle now, while we're on the STA UI thread.
+    // (single-instance guard) and other threads BeginInvoke through it to hop onto the UI thread
+    // before touching WinForms or WPF. We force its handle now, while we're on the STA UI thread.
     readonly Control _marshal = new();
-    bool _preferencesOpen;
+    ControlPanelWindow? _panel;
 
     // Agent notifier: tracks how many agents await the user (fed by the pipe), pushes the waiting set
     // into the overlay, and reflects the count in the tray tooltip. The pipe server + sweep timer live
@@ -36,36 +42,36 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         _ = _marshal.Handle; // realise the window handle on the UI thread for BeginInvoke
 
+        _settings = new LiveSettings(SettingsStore.Load(), Persist);
+
         // Force the notifier on at every startup: a persisted `false` (e.g. an accidental "Enabled"
         // toggle, or a stray hand-edit) self-heals back to `true` so the token can never get stuck off
         // across launches. The tray "Enabled" item still toggles it for the current run — it just no
         // longer survives a restart. Only persist when we actually changed something.
-        if (!_settings.AgentNotifierEnabled)
-        {
-            _settings.AgentNotifierEnabled = true;
-            Persist();
-        }
+        if (!_settings.Live.AgentNotifierEnabled) _settings.Change(s => s.AgentNotifierEnabled = true);
 
         // Self-heal for anyone upgrading from the cursor-theming version: if that older build was
         // force-killed it may have left a themed system cursor via SetSystemCursor. Reload the real
         // scheme once on startup. Harmless when nothing was hijacked; this app never themes cursors.
         try { SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0); } catch { /* best effort */ }
 
-        _overlay = new NotifierOverlay(_settings);
+        _overlay = new NotifierOverlay(_settings.Live);
+        // Focus changes arrive on the foreground watcher's thread; the status lives on the UI thread.
+        _overlay.HiddenByChanged += () => { if (_marshal.IsHandleCreated) _marshal.BeginInvoke(RaiseStatusChanged); };
         _appIcon = LoadAppIcon();
 
         _enabledItem = new ToolStripMenuItem("Enabled", null, OnToggleEnabled)
         {
             CheckOnClick = false, // we manage Checked ourselves so double-click can't desync it
-            Checked = _settings.AgentNotifierEnabled,
+            Checked = _settings.Live.AgentNotifierEnabled,
         };
 
-        // The tray menu is deliberately minimal — Enabled / Preferences… / Exit. Autostart, the
-        // agent-notifications dialog, and update checks all live inside Preferences.
+        // The tray menu is deliberately minimal — Enabled / Preferences… / Exit. Everything else
+        // (the token's look, agent hooks, hidden-while-using apps, updates, autostart) lives in the panel.
         var menu = new ContextMenuStrip();
         menu.Items.Add(_enabledItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Preferences…", null, OnPreferences);
+        menu.Items.Add("Preferences…", null, (_, _) => OpenPreferences());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, OnExit);
 
@@ -82,9 +88,51 @@ public sealed class TrayApplicationContext : ApplicationContext
         // dispose it cleanly so the layered window goes away promptly.
         Application.ApplicationExit += (_, _) => _overlay.Dispose();
 
+        _settings.Changed += OnSettingsChanged;
         StartAgentNotifier();
         MaybeShowWhatsNew();
     }
+
+    // ---------- IControlPanelHost ----------
+
+    public LiveSettings Settings => _settings;
+    public IAutostart Autostart => _autostart;
+    public UpdateService Updates => _updates;
+
+    public PanelStatus Status
+    {
+        get
+        {
+            var waiting = _agents.Waiting;
+            return new PanelStatus(_settings.Live.AgentNotifierEnabled, waiting.Count,
+                waiting.Count(a => a.State == WaitingState.Blocked), _overlay.HiddenBy);
+        }
+    }
+
+    public event Action? StatusChanged;
+
+    // Drives the live token for the panel's "Preview on screen": a non-null value fakes that many
+    // waiting agents (one logo + "+N"); null ends the preview and restores the real set (so a real
+    // agent event arriving mid-preview, or just hiding the panel, leaves the genuine token on screen).
+    static readonly WaitingAgent PreviewAgent = new("claude-code", WaitingState.Blocked);
+    public void Preview(int? waitingAgents)
+    {
+        if (waitingAgents is not int n) { _overlay.SetWaitingAgents(_agents.Waiting); return; }
+        _overlay.SetWaitingAgents(Enumerable.Repeat(PreviewAgent, Math.Max(0, n)).ToArray());
+    }
+
+    /// <summary>Hands <paramref name="release"/> to Velopack's updater, then exits the normal way; the
+    /// updater installs it once we're gone and starts the new version. If the updater can't start, it
+    /// throws before anything is taken down. Settings are already saved: every change is.</summary>
+    public void RestartToUpdate(VelopackAsset release)
+    {
+        _updates.InstallOnExit(release);
+        OnExit(this, EventArgs.Empty);
+    }
+
+    void RaiseStatusChanged() => StatusChanged?.Invoke();
+
+    // ---------- agent notifier ----------
 
     // Brings up the agent-notifier plumbing: the named-pipe server that `WormsCursor.exe hook`
     // invocations write to, a periodic sweep that evicts stale sessions, and the wiring that turns
@@ -92,7 +140,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     void StartAgentNotifier()
     {
         _agents.WaitingChanged += OnWaitingChanged;
-        _agents.Ttl = TimeSpan.FromSeconds(_settings.AgentNotifierTimeoutSeconds);
+        _agents.Ttl = TimeSpan.FromSeconds(_settings.Live.AgentNotifierTimeoutSeconds);
 
         _agentPipe = new AgentPipeServer(msg =>
         {
@@ -122,6 +170,47 @@ public sealed class TrayApplicationContext : ApplicationContext
         _tray.Text = count > 0
             ? $"WormsCursor — {count} agent{(count == 1 ? "" : "s")} waiting"
             : "WormsCursor";
+        RaiseStatusChanged();
+    }
+
+    // Every settings change, from the panel or the tray, lands here: push the linger timeout into the
+    // activity model, mirror the master switch in the menu, and let the overlay re-read size,
+    // placement, the switch and the hidden-while-using list (it reads them live; no restart).
+    void OnSettingsChanged()
+    {
+        _agents.Ttl = TimeSpan.FromSeconds(_settings.Live.AgentNotifierTimeoutSeconds);
+        _enabledItem.Checked = _settings.Live.AgentNotifierEnabled;
+        _overlay.RefreshSettings();
+        RaiseStatusChanged();
+    }
+
+    // Master on/off for the notifier (the tray "Enabled" item + double-click).
+    void OnToggleEnabled(object? sender, EventArgs e)
+        => _settings.Change(s => s.AgentNotifierEnabled = !s.AgentNotifierEnabled);
+
+    // ---------- the control panel ----------
+
+    /// <summary>Shows the control panel where it was left (the Token page the first time), or brings
+    /// it to the front. Safe to call from any thread (e.g. the single-instance signal handler): it
+    /// marshals onto the UI thread, where both the WinForms tray and the WPF panel live.</summary>
+    public void OpenPreferences() => OpenPanel(null);
+
+    void OpenPanel(PanelSection? section)
+    {
+        if (_marshal.InvokeRequired)
+        {
+            _marshal.BeginInvoke(() => OpenPanel(section));
+            return;
+        }
+        if (_panel is null)
+        {
+            WpfHost.EnsureStarted();
+            _panel = new ControlPanelWindow(this);
+            // The WinForms message loop pumps this WPF window; route its keyboard input (Tab, arrows,
+            // access keys) through WPF so it is fully keyboard-usable.
+            ElementHost.EnableModelessKeyboardInterop(_panel);
+        }
+        _panel.Open(section);
     }
 
     // First launch after an update: show the new version's "What's new" notes once. Compares
@@ -131,117 +220,24 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         if (!_updates.IsVelopackInstalled) return; // dev build out of bin\ — don't pop
         string current = _updates.CurrentVersionText;
-        string lastSeen = _settings.LastSeenVersion;
+        string lastSeen = _settings.Live.LastSeenVersion;
         if (string.Equals(lastSeen, current, StringComparison.OrdinalIgnoreCase)) return;
 
-        _settings.LastSeenVersion = current; // record now, so it pops only once even if the dialog fails
-        Persist();
+        _settings.Change(s => s.LastSeenVersion = current); // record now, so it pops only once
 
         if (string.IsNullOrEmpty(lastSeen)) return; // nothing recorded yet (first run): just remember, don't pop
 
         // We're still in the ctor (before Application.Run); defer until the message loop pumps.
-        _marshal.BeginInvoke(new Action(() =>
-        {
-            using var dlg = new ChangelogForm(_updates);
-            dlg.ShowDialog();
-        }));
+        _marshal.BeginInvoke(() => OpenPanel(PanelSection.WhatsNew));
     }
 
-    // Master on/off for the notifier (the tray "Enabled" item + double-click). Flips
-    // AgentNotifierEnabled, persists it, and re-evaluates the overlay live.
-    void OnToggleEnabled(object? sender, EventArgs e)
+    // Every settings save goes through here (LiveSettings calls it after each change). Persisting is
+    // best-effort: a read-only or locked settings.json must never crash the tray (some saves run in the
+    // constructor, before the message loop, where a throw would end the app with no tray icon). The
+    // in-memory settings stay live for this run; the failure is logged so it can be diagnosed.
+    static void Persist(CursorSettings settings)
     {
-        _settings.AgentNotifierEnabled = !_settings.AgentNotifierEnabled;
-        Persist();
-        _enabledItem.Checked = _settings.AgentNotifierEnabled;
-        _overlay.RefreshSettings();
-    }
-
-    void OnPreferences(object? sender, EventArgs e) => OpenPreferences();
-
-    /// <summary>Shows the "Agent notifications" settings panel (display + hook registration).
-    /// Opened from Preferences (the "Agent settings…" button); marshals onto the UI thread so it's
-    /// safe to call from anywhere.</summary>
-    public void OpenAgentHooks()
-    {
-        if (_marshal.InvokeRequired) { _marshal.BeginInvoke(OpenAgentHooks); return; }
-        using var dlg = new AgentHooksForm(
-            _settings.AgentNotifierEnabled, _settings.AgentNotifierTimeoutSeconds, ApplyAgentDisplay, PreviewWaitingCount);
-        dlg.ShowDialog();
-    }
-
-    // Drives the live token for the "Preview" test in a dialog: a non-null value fakes that many
-    // waiting agents (one logo + "+N"); null ends the preview and restores the real set (so a real
-    // agent event arriving mid-preview, or just closing the dialog, leaves the genuine token on screen).
-    static readonly WaitingAgent PreviewAgent = new("claude-code", WaitingState.Blocked);
-    void PreviewWaitingCount(int? testCount)
-    {
-        if (testCount is not int n) { _overlay.SetWaitingAgents(_agents.Waiting); return; }
-        _overlay.SetWaitingAgents(Enumerable.Repeat(PreviewAgent, Math.Max(0, n)).ToArray());
-    }
-
-    // The overlay reads AgentNotifierEnabled live each frame and AgentActivity holds the linger
-    // timeout, so a display change takes effect immediately — push the TTL, persist, and re-evaluate.
-    void ApplyAgentDisplay(bool enabled, int timeoutSeconds)
-    {
-        _settings.AgentNotifierEnabled = enabled;
-        _settings.AgentNotifierTimeoutSeconds = timeoutSeconds;
-        _settings.Normalize(); // clamp the timeout into range
-        _agents.Ttl = TimeSpan.FromSeconds(_settings.AgentNotifierTimeoutSeconds);
-        Persist();
-        _enabledItem.Checked = _settings.AgentNotifierEnabled;
-        _overlay.RefreshSettings();
-    }
-
-    /// <summary>
-    /// Shows the Preferences dialog and applies any changes. Safe to call from a
-    /// background thread (e.g. the single-instance signal handler): it marshals onto
-    /// the UI thread, since WinForms dialogs may only be shown there. Re-entrancy is
-    /// guarded so a second signal while the dialog is already open is ignored.
-    /// </summary>
-    public void OpenPreferences()
-    {
-        if (_marshal.InvokeRequired)
-        {
-            _marshal.BeginInvoke(OpenPreferences);
-            return;
-        }
-
-        if (_preferencesOpen) return; // already showing; bring no second dialog up
-        _preferencesOpen = true;
-        try
-        {
-            using var dlg = new PreferencesForm(_settings.Clone(), _updates, ApplySettings, _autostart, OpenAgentHooks);
-            var result = dlg.ShowDialog();
-            if (result == DialogResult.OK) ApplySettings(dlg.Settings);
-        }
-        finally
-        {
-            _preferencesOpen = false;
-        }
-    }
-
-    /// <summary>
-    /// Apply edited settings — used by both Preferences "Apply" and "OK". Takes only the fields
-    /// Preferences owns (appearance + suppressed programs; the agent-notifier enable/timeout belong to
-    /// ApplyAgentDisplay and the tray toggle, and may have changed while the dialog was open), persists,
-    /// and re-reads them into the live overlay (size/placement/corner take effect on the next frame, a
-    /// changed program list re-checks the foreground app at once; no restart).
-    /// </summary>
-    void ApplySettings(CursorSettings source)
-    {
-        _settings.CopyPreferencesFrom(source);
-        Persist();
-        _overlay.RefreshSettings();
-    }
-
-    // Every settings save goes through here. Persisting is best-effort: a read-only or locked
-    // settings.json must never crash the tray (some saves run in the constructor, before the message
-    // loop, where a throw would end the app with no tray icon). The in-memory settings stay live for
-    // this run; the failure is logged so it can be diagnosed.
-    void Persist()
-    {
-        try { SettingsStore.Save(_settings); }
+        try { SettingsStore.Save(settings); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             AppLog.Write("couldn't save settings: " + ex.Message);
@@ -250,11 +246,20 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     void OnExit(object? sender, EventArgs e)
     {
+        StopEverything();
+        ExitThread();
+    }
+
+    // Takes down everything visible and every background listener: the panel, the tray icon, the
+    // pipe, the sweep and the overlay. Used on Exit and before restarting into an update.
+    void StopEverything()
+    {
+        _panel?.Shutdown();
+        _panel = null;
         _tray.Visible = false;
         _agentSweep?.Dispose();
         _agentPipe?.Dispose();
         _overlay.Dispose();
-        ExitThread();
     }
 
     // Loads the monochrome arrow built by tools/generate-icon.py, copied next to

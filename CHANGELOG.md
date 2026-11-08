@@ -7,10 +7,23 @@ GitHub releases. The release workflow pulls the matching section into each relea
 ## Unreleased
 
 ### Added
+- **A new control panel.** **Preferences…** now opens one window in the style of Windows 11
+  Settings: Mica, rounded cards, switches, and it follows your light or dark theme as it changes. A
+  sidebar holds four pages: **Token** (the on/off switch, a live animated preview of both looks over
+  dark and light, size and position), **Agents** (Register / Update / Unregister for each tool with a
+  clear status, how long a finished notice stays, and **Preview on screen**), **Apps** (the programs
+  that hide the token) and **About** (version, updates, *What's new*, *Start with Windows*, links).
+  The top of the sidebar shows what the token is doing right now, for example "On · 2 agents need you".
+  Every change applies the moment you make it, so there is no OK, Apply or Cancel, and an edit in one
+  place can never undo one made elsewhere (the tray's **Enabled**, say). It replaces the separate
+  Preferences, *Agent settings*, *Add a program* and *What's new* windows, works fully from the
+  keyboard, and stays sharp at any display scale. On a narrow window the sidebar folds to icons.
+- **Check for updates works.** **About → Check for updates** looks for a newer release, downloads it
+  and restarts into it. A copy built from source says that updates come with the released app.
 - **The token stays out of your games.** While a program on the new **Hide the token while using**
-  list in Preferences is in front, the token stays hidden. This works whether the program runs
-  fullscreen, borderless or windowed. Dota 2 is on the list by default. **Add…** picks from the
-  programs that are open now, or takes a typed exe name, and **Remove** takes one off. Your agents are
+  list (**Preferences… → Apps**) is in front, the token stays hidden. This works whether the program
+  runs fullscreen, borderless or windowed. Dota 2 is on the list by default. **Add a program** offers
+  the programs that are open now, or takes a typed exe name, and **Remove** takes one off. Your agents are
   still tracked meanwhile, and the token comes back when you switch away while one is still waiting.
   While hidden it uses no CPU: WormsCursor learns about focus changes from Windows instead of checking
   repeatedly. The OpenCode helper follows the same list. Restart OpenCode to pick it up there.
@@ -32,26 +45,26 @@ GitHub releases. The release workflow pulls the matching section into each relea
   enable any of the *Worms*-style cursors to see it. It's drawn by its own transparent, click-through
   overlay (true per-pixel alpha via `UpdateLayeredWindow`) that touches no system state — nothing to
   restore on exit, and it's invisible/zero-cost when no agent is waiting.
-- **The token bounces, and you choose where.** In **Preferences** pick **Next to the mouse cursor**
-  (it hangs off the pointer on a springy pendulum and follows it, with a gentle idle bob) or **Pinned
-  to a screen corner** (it sits in the corner you choose and bounces in place). Plus a **token size**
-  slider and a live preview. The DPI of the monitor it's shown on is honoured, so the token keeps a
+- **The token bounces, and you choose where.** On the **Token** page pick **Follow the pointer**
+  (it hangs off the pointer on a springy pendulum and follows it, with a gentle idle bob) or **Screen
+  corner** (it sits in the corner you choose and bounces in place). Plus a **size** slider and a live
+  preview. The DPI of the monitor it's shown on is honoured, so the token keeps a
   consistent size across mixed-DPI setups — which also retires the old mixed-DPI cursor flicker.
 - **The bounce is fluid.** The token animates on a dedicated high-resolution thread
   (`timeBeginPeriod(1)` + real elapsed delta-time) instead of a coarse UI timer, so the motion is
-  smooth and time-correct even while a dialog is open — no stutter.
+  smooth and time-correct even while the control panel is busy — no stutter.
 - **The token clears the instant the agent resumes, not at the timeout.** WormsCursor now registers
   Claude's `PreToolUse`/`PostToolUse` hooks, so approving a permission prompt (which fires no
   `UserPromptSubmit`) clears the token as soon as the agent does its next thing, instead of lingering
   until the linger timeout. The trade-off is one short fail-silent hook process per tool call during an
-  active turn. **Re-register from Preferences → Agent settings…** ("Update available" → "Re-register")
+  active turn. **Update the registration on Preferences… → Agents** ("Update available" → **Update**)
   and restart your agent session to pick up the new events.
 
 ### Fixed
 - **Codex hooks work on Windows again.** Codex runs Windows hook commands in PowerShell, which
   rejected the command WormsCursor registered (a quoted exe path followed by arguments), so every
   Codex hook failed and the token never showed for Codex. The command now uses PowerShell's call
-  operator. *Agent settings…* shows Codex as *Update available*: **Re-register** it, approve the
+  operator. The **Agents** page shows Codex as *Update available*: **Update** it, approve the
   changed hooks in Codex (`/hooks`), and restart open Codex sessions.
 - **The token knows when an agent is blocked on you, and who asked.** Every "waiting for your
   answer" state now comes from a Claude Code hook that says which agent asked and has a matching
@@ -59,42 +72,36 @@ GitHub releases. The release workflow pulls the matching section into each relea
   server requests for input (`Elicitation` / `ElicitationResult`). A question from a subagent no
   longer gets filed under the main agent, and a question from the main agent is no longer cleared by
   background subagents that keep working. Claude's `Notification` hook is now used only for its
-  "still waiting for your input" reminder. *Agent settings…* shows Claude Code as *Update available*
-  (it also does when the registered hook points at a different `WormsCursor.exe`): **Re-register**
-  it to pick this up.
-- Preferences layout: the corner picker no longer runs past the window edge.
+  "still waiting for your input" reminder. The **Agents** page shows Claude Code as *Update
+  available* (it also does when the registered hook points at a different `WormsCursor.exe`):
+  **Update** it to pick this up.
 - The token no longer pops up when Claude Code hands work to background subagents. Spawning them
   ends Claude's turn at once, but it picks back up by itself when they report in, so it isn't your
   move yet. The token now waits for the real finish.
 - A permission prompt in one subagent is no longer cleared by another subagent that keeps working.
   Approvals are now tracked per agent, and Claude Code's come from its `PermissionRequest` hook.
-  **Re-register Claude Code** in *Agent settings…* (it shows *Update available*) to pick this up.
-- The tray app no longer crashes when the Preferences preview and the live token draw at the same
-  time, and a failed animation frame is logged to `bridge.log` and retried instead of ending the app.
-- Clicking OK or Apply in Preferences no longer undoes changes made in *Agent settings…* while
-  Preferences was open (the linger timeout or the on/off toggle).
-- Closing *What's new* before the release notes finish loading no longer shows an error dialog.
+  **Update Claude Code** on the **Agents** page (it shows *Update available*) to pick this up.
+- The tray app no longer crashes when the control panel's preview and the live token draw at the
+  same time, and a failed animation frame is logged to `bridge.log` and retried instead of ending the app.
 - A read-only or locked `settings.json` no longer crashes the app. A settings file that doesn't parse
   is no longer overwritten with defaults: before WormsCursor next saves, it copies the file to
   `settings.json.corrupt-<time>`, and if that copy fails it doesn't save at all. Trailing commas and
   `//` comments in it are now accepted.
 - Register / Unregister keeps your own hook commands even when they share a matcher group with
   WormsCursor's. The `.wormscursor.bak` backup now always holds your original file, and a malformed
-  Claude Code `settings.json` shows *Manual setup needed* instead of being partly overwritten.
-- *Start with Windows* only shows as ticked when the startup entry launches this copy of WormsCursor,
-  so an entry left by an old or dev build no longer hides behind a ticked box.
+  Claude Code `settings.json` shows *Config needs fixing* instead of being partly overwritten.
+- *Start with Windows* only shows as on when the startup entry launches this copy of WormsCursor, so
+  an entry left by an old or dev build no longer hides behind a switch that looks on.
 - `WormsCursor.exe register|unregister` now exits non-zero and says why when it fails (including an
   unknown `--tool`).
 - The OpenCode integration no longer re-runs a failing helper build every few seconds. It reports the
   failure once, then tries again after five minutes, or at once when the helper sources change.
 
 ### Removed
-- The **Check for updates** button in Preferences (the app still records the version for the post-update
-  "What's new" pop-up; the *What's new* link and version still show).
 - The whole cursor-theming engine: the rotating arrow/hand, the animated busy/help/crosshair/
   I-beam/resize/move/unavailable cursors, click & typing feedback, the preview grid + per-cursor
   toggles + Showtime, and the `WormsCursor.Preview` showcase tool. The hook → pipe plumbing, the tray,
-  Preferences, autostart, single-instance and auto-update are all unchanged.
+  autostart and single-instance are unchanged.
 
 ## 0.8.2 - 2026-06-16
 

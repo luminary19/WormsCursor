@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Windows.Forms;
 using WormsCursor.Core;
 
 namespace WormsCursor.App;
@@ -50,6 +52,7 @@ public sealed class NotifierOverlay : IDisposable
     volatile TokenFace? _face;       // what the token shows; null = nothing waiting
     volatile bool _entrancePending;  // pop-in bounce when the token first appears
     volatile bool _resetPhysics;     // re-seed the pendulum on (re)appearance
+    volatile string? _hiddenBy;      // the suppressed program in front, if any
     bool _disposed;
 
     // --- animation state (touched only by the animation thread) ---
@@ -93,17 +96,33 @@ public sealed class NotifierOverlay : IDisposable
     /// this flips the animation on/off when the enable toggle or the suppression outcome changed.</summary>
     public void RefreshSettings() => Reevaluate();
 
+    /// <summary>The program on <see cref="CursorSettings.SuppressedPrograms"/> that is in front right
+    /// now and so keeps the token hidden, or null. Safe to read from any thread.</summary>
+    public string? HiddenBy => _hiddenBy;
+
+    /// <summary>Raised when <see cref="HiddenBy"/> changes — on the foreground watcher's thread for a
+    /// focus change, or on the caller's thread for a settings change. Handlers must be quick and
+    /// marshal to their own thread.</summary>
+    public event Action? HiddenByChanged;
+
     // Called from the UI thread (agents, settings) and the foreground watcher's thread (focus changes).
     void Reevaluate()
     {
+        bool hiddenByChanged;
         lock (_gate)
         {
-            bool suppressed = ProgramSuppression.Matches(_foreground.ForegroundProgram, _settings.SuppressedPrograms);
+            string? foreground = _foreground.ForegroundProgram;
+            bool suppressed = ProgramSuppression.Matches(foreground, _settings.SuppressedPrograms);
             bool active = _face is not null && _settings.AgentNotifierEnabled && !suppressed;
             if (active && !_active) { _entrancePending = true; _resetPhysics = true; } // pop-in fresh
             _active = active;
             _wake.Set();
+
+            string? hiddenBy = suppressed ? foreground : null;
+            hiddenByChanged = !string.Equals(hiddenBy, _hiddenBy, StringComparison.OrdinalIgnoreCase);
+            _hiddenBy = hiddenBy;
         }
+        if (hiddenByChanged) HiddenByChanged?.Invoke(); // outside the lock: handlers may call back in
     }
 
     // The animation thread: a high-resolution loop that advances the physics by the real elapsed time
@@ -260,19 +279,19 @@ public sealed class NotifierOverlay : IDisposable
             dx = _bx - ax; dy = _by - ay;
         }
 
-        float idle = -tokenPx * 0.05f * MathF.Abs(MathF.Sin(_t * 3.2f)); // alive even when the mouse is still
+        float idle = TokenMotion.IdleBob(_t, tokenPx); // alive even when the mouse is still
         offX = dx;
         offY = dy + idle;
         swing = MathF.Atan2(dy, dx) * 180f / MathF.PI - 90f; // 0 = hanging straight down
     }
 
-    // The corner badge: a continuous "ball" bounce (|sin| hops it up from the anchor and back down)
-    // with a tiny sway + tilt so it reads as alive without the cursor driving it.
+    // The corner badge's bounce (shared with the control panel's preview).
     void ComputeCornerBounce(float tokenPx, out float offX, out float offY, out float swing)
     {
-        offY = -tokenPx * 0.22f * MathF.Abs(MathF.Sin(_t * 3.0f));
-        offX = tokenPx * 0.04f * MathF.Sin(_t * 1.6f);
-        swing = 3f * MathF.Sin(_t * 1.6f);
+        var pose = TokenMotion.CornerBounce(_t, tokenPx);
+        offX = pose.OffsetX;
+        offY = pose.OffsetY;
+        swing = pose.SwingDeg;
     }
 
     void EnsureBuffer(int canvas)

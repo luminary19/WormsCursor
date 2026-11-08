@@ -13,6 +13,8 @@
     <Compile Include="../../src/WormsCursor.App/AgentPipeServer.cs" Link="AgentPipeServer.cs" />
     <Compile Include="../../src/WormsCursor.App/AppLog.cs" Link="AppLog.cs" />
     <Compile Include="../../src/WormsCursor.App/Autostart.cs" Link="Autostart.cs" />
+    <Compile Include="../../src/WormsCursor.App/ControlPanel/PanelStatus.cs" Link="PanelStatus.cs" />
+    <Compile Include="../../src/WormsCursor.App/ControlPanel/ReleaseNotesFormat.cs" Link="ReleaseNotesFormat.cs" />
     <Compile Include="../../src/WormsCursor.App/Services/AgentHookRegistrar.cs" Link="AgentHookRegistrar.cs" />
     <Compile Include="../../src/WormsCursor.Core/AgentActivity.cs" Link="AgentActivity.cs" />
     <Compile Include="../../src/WormsCursor.Core/AgentEventMessage.cs" Link="AgentEventMessage.cs" />
@@ -20,6 +22,7 @@
     <Compile Include="../../src/WormsCursor.Core/AttentionBadge.cs" Link="AttentionBadge.cs" />
     <Compile Include="../../src/WormsCursor.Core/CursorSettings.cs" Link="CursorSettings.cs" />
     <Compile Include="../../src/WormsCursor.Core/ForegroundWatcher.cs" Link="ForegroundWatcher.cs" />
+    <Compile Include="../../src/WormsCursor.Core/LiveSettings.cs" Link="LiveSettings.cs" />
     <Compile Include="../../src/WormsCursor.Core/NotifierRenderer.cs" Link="NotifierRenderer.cs" />
     <Compile Include="../../src/WormsCursor.Core/ProgramSuppression.cs" Link="ProgramSuppression.cs" />
     <Compile Include="../../src/WormsCursor.Core/SettingsStore.cs" Link="SettingsStore.cs" />

@@ -29,7 +29,7 @@ overlay. It shows one tool logo, and a small **"+N"** pill when several sessions
   answer to a question, or an MCP elicitation (OpenCode: a permission or a form). If any waiting
   session is blocked, its logo is the one shown.
 
-Two placements (set in **Preferences…**):
+Two placements (set on the **Token** page of **Preferences…**):
 
 - **Next to the mouse cursor** — the token hangs off the pointer on a springy pendulum and follows it,
   swinging as you move and settling (with a gentle idle bob) when you stop.
@@ -40,18 +40,18 @@ nothing's waiting (the animation only runs while at least one agent needs you).
 
 ### Stays out of your games
 
-The token stays hidden while a program on the **Hide the token while using** list in
-**Preferences…** is in front, whether it runs fullscreen, borderless or windowed. Dota 2
-(`dota2.exe`) is on the list by default. Use **Add…** to pick from the programs that are open now, or
-type an exe name; **Remove** takes one off. Your agents are still tracked meanwhile. When you switch
+The token stays hidden while a program on the **Hide the token while using** list (the **Apps** page
+of **Preferences…**) is in front, whether it runs fullscreen, borderless or windowed. Dota 2
+(`dota2.exe`) is on the list by default. **Add a program** offers the programs that are open now, or
+takes a typed exe name; **Remove** takes one off. Your agents are still tracked meanwhile. When you switch
 away and one is still waiting, the token comes back. While hidden, the token costs no CPU: WormsCursor
 learns about focus changes from Windows instead of checking repeatedly. The OpenCode helper follows
 the same list.
 
 ## How the notifier works
 
-Set it up from **Preferences… → Agent settings…**: register **Claude Code** or **Codex** there,
-toggle the token, and set the "clear a stuck logo after" timeout. Registering writes WormsCursor's
+Set it up on the **Agents** page of **Preferences…**: register **Claude Code** or **Codex** there
+and set how long a finished notice stays (the master switch is on the **Token** page). Registering writes WormsCursor's
 `hook` command into the tool's config — `%CLAUDE_CONFIG_DIR%\settings.json` when that environment
 variable is set, otherwise `%USERPROFILE%\.claude\settings.json`; Codex uses
 `%CODEX_HOME%\hooks.json`, otherwise `%USERPROFILE%\.codex\hooks.json` — with backup-and-merge, so it preserves
@@ -93,7 +93,7 @@ or changing hook trust so they load the updated configuration.
 Codex runs a Windows hook through PowerShell (`powershell.exe -NoProfile -Command …`, or `pwsh`
 when installed), so WormsCursor registers its Codex hook as `& '<path>\WormsCursor.exe' hook --tool
 codex` in `commandWindows`. A registration from before this fix used a bare quoted path, which
-PowerShell rejects, so every Codex hook failed; *Agent settings…* shows it as *Update available*.
+PowerShell rejects, so every Codex hook failed; the **Agents** page shows it as *Update available*.
 
 **Codex under Orca.** Orca runs Codex with
 `CODEX_HOME=%APPDATA%\orca\codex-runtime-home\home`. Orca copies your hooks there but trusts only
@@ -133,7 +133,7 @@ an unanswered asynchronous Codex question.
   logout) fires `SessionEnd` and the token clears immediately, but if the agent is **killed outright**
   (Task Manager "End Task", closing the terminal window, `kill`) no hook runs, so no "session ended"
   ever reaches WormsCursor. A token left by a **finished turn** is swept by the **linger timeout**
-  (default 20 s, set in *Agent settings…*). A token left by an **approval prompt** stays
+  (default 20 s, set on the **Agents** page). A token left by an **approval prompt** stays
   indefinitely — by design, since an unanswered approval is exactly the case that should persist —
   so to dismiss it, click the tray and toggle the notifier off and on (or just **Exit**).
 
@@ -150,24 +150,23 @@ WormsCursor.sln
 │  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe)
 │  │   ├─ AgentEventMessage.cs The normalised wire format (one JSON line per event)
 │  │   ├─ CursorSettings.cs   Token size / placement / corner / notifier settings / hidden-while-using programs (persisted as JSON)
+│  │   ├─ LiveSettings.cs     The one owner of the running settings: every edit is a small Change, saved at once
+│  │   ├─ TokenMotion.cs      The token's corner bounce and idle bob, shared by the overlay and the panel preview
 │  │   ├─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
 │  │   ├─ ProgramSuppression.cs Normalizes program names and matches them against the hidden-while-using list
 │  │   ├─ WindowPrograms.cs   Window/process → exe name; the open programs the "Add a program" picker lists
 │  │   └─ ForegroundWatcher.cs Event-driven foreground-program tracker (WinEvent hook, no polling)
-│  └─ WormsCursor.App/       Tray shell (WinForms, no main window)
+│  └─ WormsCursor.App/       Tray shell (WinForms tray icon + overlay; WPF control panel)
 │      ├─ Program.cs                   Entry point (Velopack + single-instance guard; `hook` verb short-circuits first)
 │      ├─ NotifierOverlay.cs          The layered overlay window + bounce animation (cursor / corner)
-│      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the overlay + pipe server
-│      ├─ PreferencesForm.cs          Live settings dialog (token preview, size, placement, hidden-while-using programs, autostart, updates)
-│      ├─ AddProgramForm.cs           "Add a program" picker (open programs, or a typed exe name)
-│      ├─ AgentHooksForm.cs           Agent-notifier settings + per-tool hook registration UI
+│      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the overlay, pipe server, settings and control panel
+│      ├─ ControlPanel/               The WPF-UI control panel: one window, sidebar pages Token / Agents / Apps / About
 │      ├─ AgentPipeServer.cs          Named-pipe server that receives normalised agent events
 │      ├─ AgentHookBridge.cs          The `hook` verb: normalises a tool's payload → one pipe line, fail-silent
 │      ├─ Services/AgentHookRegistrar.cs Writes/removes WormsCursor's hook in each tool's config (backup + merge)
-│      ├─ SingleInstance.cs           One instance only; a 2nd launch opens Preferences
+│      ├─ SingleInstance.cs           One instance only; a 2nd launch opens the control panel
 │      ├─ Autostart.cs                "Start with Windows" via HKCU\…\Run
-│      ├─ ChangelogForm.cs            "What's new" dialog (from CHANGELOG.md)
-│      └─ Services/UpdateService.cs   Velopack check / download / apply updates
+│      └─ Services/UpdateService.cs   Velopack check / download / apply updates, release notes
 └─ tools/
    └─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the app/tray glyph
 ```
@@ -175,8 +174,8 @@ WormsCursor.sln
 `src/WormsCursor.OpenCodeOverlay/` contains the independent OpenCode helper;
 `integrations/opencode/` contains its V2 plugin, installation script, and lifecycle tests.
 
-The engine (`Core`) is deliberately UI-agnostic (GDI+ only), so the tray shell could later be swapped
-for WPF/WinUI without touching the token/activity logic.
+The engine (`Core`) is deliberately UI-agnostic (GDI+ only): the WinForms overlay and the WPF control
+panel's preview draw the token with the same renderer.
 
 ## Build & run
 
@@ -191,16 +190,23 @@ dotnet run --project src/WormsCursor.App
 ```
 
 A tray icon appears. Right-click it for **Enabled / Preferences… / Exit**; double-click toggles the
-notifier on/off. Only one instance runs — launching it again just opens **Preferences**.
+notifier on/off. Only one instance runs — launching it again just opens the control panel.
 
-**Preferences…** opens a live editor with a token preview, a **token size** slider, a **placement**
-choice (next to the cursor, or pinned to a screen corner of your choice), the **Hide the token while
-using** program list, a **Start with Windows** toggle, an **Agent settings…** button, and a **Check
-for updates** button. Settings are saved to
+**Preferences…** opens the control panel, a Windows 11 Settings-style window that follows your light
+or dark theme. Every change applies the moment you make it. Its sidebar has four pages:
+
+- **Token** — the master switch, a live preview of both looks (done, and the yellow "?" for "needs
+  you") on dark and light, the size, and where it shows (next to the pointer, or a screen corner).
+- **Agents** — register, update or unregister the hooks for Claude Code and Codex, how long a
+  finished notice stays, and **Preview on screen**, which shows pretend agents on the real token.
+- **Apps** — the **Hide the token while using** list.
+- **About** — the version, **Check for updates**, **What's new**, **Start with Windows**, and links.
+
+Settings are saved to
 `%LocalAppData%\WormsCursor\settings.json` and persist across restarts — and across updates, since
 they live outside the app folder.
 
-To try the token without a real agent, use **Agent settings… → Preview**, or fire a hook by hand
+To try the token without a real agent, use **Agents → Preview on screen**, or fire a hook by hand
 (the tray must be running):
 
 ```powershell
@@ -213,7 +219,8 @@ To try the token without a real agent, use **Agent settings… → Preview**, or
 dotnet publish src/WormsCursor.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
-> Note: WinForms doesn't support trimming/NativeAOT, so a self-contained build is several tens of MB.
+> Note: WinForms and WPF don't support trimming/NativeAOT, so a self-contained build is large (about
+> 170 MB unpacked, about 75 MB as the Velopack package).
 > A framework-dependent build is tiny but needs the *.NET 8 Desktop Runtime* installed.
 
 ## Releases
@@ -221,7 +228,9 @@ dotnet publish src/WormsCursor.App -c Release -r win-x64 --self-contained true -
 Installers and standalone builds are produced by [Velopack](https://velopack.io): pushing a `v*` tag
 runs the release workflow (`.github/workflows/release.yml`), which publishes a **`Setup.exe`**
 installer, a **`Portable.zip`** standalone, and delta packages to the repo's GitHub Releases. The app
-auto-updates from these releases (tray → **Check for updates…**, or the button in Preferences).
+updates from these releases when you ask it to: **Preferences… → About → Check for updates** finds a
+newer version, downloads it, and restarts into it. A copy built from source can't update itself, and
+the About page says so.
 
 ## License
 

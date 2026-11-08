@@ -97,6 +97,9 @@ public sealed class SingleInstance : IDisposable
         {
             if (EventWaitHandle.TryOpenExisting(EventName, out var handle))
             {
+                // This launch came from the user, so it may bring a window to the front; pass that
+                // right on, or Windows keeps the running instance's panel behind the active window.
+                AllowSetForegroundWindow(ASFW_ANY);
                 using (handle) handle.Set();
             }
         }
@@ -105,6 +108,9 @@ public sealed class SingleInstance : IDisposable
             // If the first instance is mid-teardown the handle may be gone; nothing to do.
         }
     }
+
+    const int ASFW_ANY = -1;
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int processId);
 
     public void Dispose()
     {

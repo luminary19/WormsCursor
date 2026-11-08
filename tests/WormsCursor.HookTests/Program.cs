@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using WormsCursor.App;
+using WormsCursor.App.ControlPanel;
 using WormsCursor.App.Services;
 using WormsCursor.Core;
 using OpenCodeCursorOverlay;
@@ -25,7 +26,9 @@ var tests = new (string Name, Action Run)[]
     ("Claude registration keeps user commands and the original backup", ClaudeRegistration),
     ("Unknown tool ids are rejected", UnknownTool),
     ("Renderers on two threads draw concurrently without sharing GDI+ objects", ConcurrentRendering),
-    ("Applying Preferences keeps the agent-notifier settings", PreferencesKeepAgentSettings),
+    ("Each settings edit changes only its own fields, clamped and saved", LiveSettingsEdits),
+    ("The control panel's status reads at a glance", PanelStatusText),
+    ("Release notes parse headings, bullets, soft-wrapped paragraphs and bold", ReleaseNotesParsing),
     ("Corrupt and unwritable settings files are never destroyed", SettingsPersistence),
     ("Autostart only counts a Run entry that launches this exe", AutostartTarget),
     ("Suppressed program names normalize and match case-insensitively", SuppressionMatching),
@@ -699,19 +702,72 @@ static void ConcurrentRendering()
     Equal(true, frames > 100);
 }
 
-static void PreferencesKeepAgentSettings()
+static void LiveSettingsEdits()
 {
-    var live = new CursorSettings();
-    var working = live.Clone(); // Preferences opens on a snapshot…
-    live.AgentNotifierEnabled = false;       // …then Agent settings… changes the notifier
-    live.AgentNotifierTimeoutSeconds = 120;
-    working.Size = 150;
-    working.Placement = NotifierPlacement.Corner;
-    live.CopyPreferencesFrom(working);        // OK / Apply in Preferences
-    Equal(150, live.Size);
-    Equal(NotifierPlacement.Corner, live.Placement);
-    Equal(false, live.AgentNotifierEnabled);
-    Equal(120, live.AgentNotifierTimeoutSeconds);
+    var saves = new List<CursorSettings>();
+    var live = new LiveSettings(new CursorSettings(), s => saves.Add(s.Clone()));
+    int changed = 0;
+    live.Changed += () => changed++;
+
+    var snapshot = live.Current;                       // the panel reads a copy...
+    live.Change(s => s.AgentNotifierEnabled = false);  // ...the tray switches the token off...
+    live.Change(s => s.Size = 150);                    // ...then the panel changes the size
+    Equal(false, live.Live.AgentNotifierEnabled);      // the size edit didn't bring the switch back
+    Equal(150, live.Live.Size);
+    Equal(true, snapshot.AgentNotifierEnabled);        // and the copy never moved
+    Equal(96, snapshot.Size);
+    Equal(2, changed);
+    Equal(2, saves.Count);
+    Equal(false, saves[^1].AgentNotifierEnabled);
+    Equal(150, saves[^1].Size);
+
+    // Out-of-range values are clamped before they are saved or seen.
+    live.Change(s => { s.Size = 999; s.AgentNotifierTimeoutSeconds = 1; });
+    Equal(CursorSettings.MaxSize, saves[^1].Size);
+    Equal(CursorSettings.MinTimeoutSeconds, live.Live.AgentNotifierTimeoutSeconds);
+
+    // Resetting the look leaves the switch, the timeout and the program list alone.
+    live.Change(s => { s.Placement = NotifierPlacement.Corner; s.Corner = ScreenCorner.TopLeft; s.SuppressedPrograms = new[] { "cs2.exe" }; });
+    Equal(false, live.Live.HasDefaultAppearance());
+    live.Change(s => s.ResetAppearance());
+    Equal(true, live.Live.HasDefaultAppearance());
+    Equal(NotifierPlacement.Cursor, live.Live.Placement);
+    Equal(false, live.Live.AgentNotifierEnabled);
+    Equal(CursorSettings.MinTimeoutSeconds, live.Live.AgentNotifierTimeoutSeconds);
+    Equal("cs2.exe", Joined(live.Live.SuppressedPrograms));
+
+    // A method, so it never lands in settings.json.
+    Equal(false, JsonSerializer.Serialize(live.Live).Contains("Appearance"));
+}
+
+static void PanelStatusText()
+{
+    Equal("Off", new PanelStatus(false, 3, 1, "dota2.exe").Text);
+    Equal(StatusTone.Off, new PanelStatus(false, 3, 1, null).Tone);
+    Equal("On · No agents waiting", new PanelStatus(true, 0, 0, null).Text);
+    Equal(StatusTone.Idle, new PanelStatus(true, 0, 0, null).Tone);
+    Equal("On · 1 agent is done", new PanelStatus(true, 1, 0, null).Text);
+    Equal("On · 3 agents are done", new PanelStatus(true, 3, 0, null).Text);
+    Equal("On · 1 agent needs you", new PanelStatus(true, 3, 1, null).Text);
+    Equal("On · 2 agents need you", new PanelStatus(true, 2, 2, null).Text);
+    Equal(StatusTone.Attention, new PanelStatus(true, 2, 2, null).Tone);
+    Equal("Hidden while dota2.exe is in front", new PanelStatus(true, 2, 1, "dota2.exe").Text);
+    Equal(StatusTone.Paused, new PanelStatus(true, 0, 0, "dota2.exe").Tone);
+}
+
+static void ReleaseNotesParsing()
+{
+    const string CrLf = "\r\n"; // release bodies can carry Windows line ends
+    var blocks = ReleaseNotesFormat.Parse(string.Join(CrLf,
+        "### Added", "- **The token** stays out of", "  your games.", "- Second", "",
+        "A plain", "paragraph.", "## Fixed", "* Star bullet"));
+    string Show(NoteBlock b) => b.Kind + ":" + string.Concat(b.Runs.Select(r =>
+        r.Code ? "<" + r.Text + ">" : r.Bold ? "[" + r.Text + "]" : r.Text));
+    Equal("Heading:Added|Bullet:[The token] stays out of your games.|Bullet:Second|Paragraph:A plain paragraph.|Heading:Fixed|Bullet:Star bullet",
+        string.Join("|", blocks.Select(Show)));
+    Equal(0, ReleaseNotesFormat.Parse("").Count);
+    Equal("Bullet:[Clears on ]</clear> and <**not bold**>.", Show(ReleaseNotesFormat.Parse("- **Clears on `/clear`** and `**not bold**`.").Single()));
+    Equal("Paragraph:[unclosed bold]", Show(ReleaseNotesFormat.Parse("**unclosed bold").Single()));
 }
 
 static void SettingsPersistence() => WithHome(home =>
@@ -875,11 +931,12 @@ static void SuppressionCopies()
     working.SuppressedPrograms = working.SuppressedPrograms.Append("cs2.exe").ToArray();
     Equal("dota2.exe", Joined(live.SuppressedPrograms));
 
-    // Applying Preferences carries the list; editing the dialog's copy afterwards doesn't leak.
-    live.CopyPreferencesFrom(working);
+    // An edit through LiveSettings replaces the live list; a copy taken earlier keeps its own.
+    var owner = new LiveSettings(live, _ => { });
+    var before = owner.Current;
+    owner.Change(s => s.SuppressedPrograms = s.SuppressedPrograms.Append("cs2.exe").ToArray());
     Equal("dota2.exe|cs2.exe", Joined(live.SuppressedPrograms));
-    working.SuppressedPrograms = Array.Empty<string>();
-    Equal("dota2.exe|cs2.exe", Joined(live.SuppressedPrograms));
+    Equal("dota2.exe", Joined(before.SuppressedPrograms));
 
     // An array handed to the setter is copied, so changing that array later changes nothing.
     var source = new[] { "a.exe" };

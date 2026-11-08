@@ -1,0 +1,123 @@
+<ui:FluentWindow
+    x:Class="WormsCursor.App.ControlPanel.ControlPanelWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:WormsCursor.App.ControlPanel"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="WormsCursor"
+    Width="1040"
+    Height="720"
+    MinWidth="760"
+    MinHeight="540"
+    ExtendsContentIntoTitleBar="True"
+    FontFamily="Segoe UI Variable Text, Segoe UI"
+    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+    UseLayoutRounding="True"
+    WindowBackdropType="Mica"
+    WindowCornerPreference="Round"
+    WindowStartupLocation="CenterScreen">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <ui:NavigationView
+            x:Name="Navigation"
+            Grid.Row="1"
+            FrameMargin="0"
+            IsBackButtonVisible="Collapsed"
+            IsPaneToggleVisible="False"
+            OpenPaneLength="280"
+            PaneDisplayMode="Left"
+            TitleBar="{Binding ElementName=TitleBar, Mode=OneWay}"
+            Transition="FadeInWithSlide">
+
+            <!--  At a glance: who this is and what the token is doing.  -->
+            <ui:NavigationView.PaneHeader>
+                <Grid
+                    x:Name="PaneHeaderPanel"
+                    Margin="12,4,12,20"
+                    AutomationProperties.Name="Status">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border
+                        Width="52"
+                        Height="52"
+                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12">
+                        <Image
+                            x:Name="AppIcon"
+                            Width="30"
+                            Height="30"
+                            RenderOptions.BitmapScalingMode="HighQuality" />
+                    </Border>
+                    <StackPanel
+                        Grid.Column="1"
+                        Margin="12,0,0,0"
+                        VerticalAlignment="Center">
+                        <ui:TextBlock
+                            FontFamily="Segoe UI Variable Display, Segoe UI"
+                            FontTypography="Subtitle"
+                            Text="WormsCursor" />
+                        <Grid Margin="0,2,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Ellipse
+                                x:Name="StatusDot"
+                                Width="8"
+                                Height="8"
+                                Margin="1,5,8,0"
+                                VerticalAlignment="Top" />
+                            <ui:TextBlock
+                                x:Name="StatusText"
+                                Grid.Column="1"
+                                FontTypography="Caption"
+                                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </Grid>
+                    </StackPanel>
+                </Grid>
+            </ui:NavigationView.PaneHeader>
+
+            <ui:NavigationView.MenuItems>
+                <ui:NavigationViewItem
+                    x:Name="TokenItem"
+                    Content="Token"
+                    Icon="{ui:SymbolIcon CursorHover24}"
+                    TargetPageType="{x:Type local:TokenPage}" />
+                <ui:NavigationViewItem
+                    Content="Agents"
+                    Icon="{ui:SymbolIcon Bot24}"
+                    TargetPageType="{x:Type local:AgentsPage}" />
+                <ui:NavigationViewItem
+                    Content="Apps"
+                    Icon="{ui:SymbolIcon EyeOff24}"
+                    TargetPageType="{x:Type local:AppsPage}" />
+            </ui:NavigationView.MenuItems>
+            <ui:NavigationView.FooterMenuItems>
+                <ui:NavigationViewItem
+                    Content="About"
+                    Icon="{ui:SymbolIcon Info24}"
+                    TargetPageType="{x:Type local:AboutPage}" />
+            </ui:NavigationView.FooterMenuItems>
+        </ui:NavigationView>
+
+        <ui:TitleBar
+            x:Name="TitleBar"
+            Title="WormsCursor"
+            Grid.Row="0"
+            ShowMaximize="True">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon x:Name="TitleIcon" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
+    </Grid>
+</ui:FluentWindow>

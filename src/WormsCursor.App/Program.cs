@@ -1,3 +1,4 @@
+using System.Windows.Forms;
 using Velopack;
 using WormsCursor.App.Services;
 
