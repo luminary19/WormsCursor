@@ -171,7 +171,8 @@ public sealed class AgentHooksForm : Form
             MaximumSize = new Size(innerW, 0),
             ForeColor = SystemColors.GrayText,
             Location = new Point(pad, y),
-            Text = "Registering takes effect for new agent sessions; each config is backed up (.bak) first.",
+            Text = "Each config is backed up (.bak) before registration. In Codex, review and approve "
+                 + "the WormsCursor commands in Hooks before starting a new session.",
         };
         Controls.Add(hint);
         y = hint.Bottom + 16;

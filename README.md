@@ -1,14 +1,18 @@
-# WormsCursor
+﻿# WormsCursor
 
 <img src="src/WormsCursor.App/Assets/icon.png" width="96" align="right" alt="WormsCursor icon">
 
 A tiny Windows tray utility that shows a **bouncing token when an AI agent is waiting on you**. When
-Claude Code is blocked on your decision (a permission/idle prompt) or has finished its turn, a small
-Claude logo appears and bounces — either hanging off your mouse pointer and following it, or pinned to
+Claude Code or Codex is blocked on your decision or has finished its turn, its
+logo appears and bounces — either hanging off your mouse pointer and following it, or pinned to
 a screen corner. Reply (or the session ends) and it disappears. It's an ambient, peripheral-vision
 nudge: no toast, no extra window to manage.
 
 It runs in the background from the system tray, with no main window.
+
+The [OpenCode 2 plugin](integrations/opencode/README.md) uses an independent shared native helper,
+following Pi's cursor extension: the same motion, completion linger, persistent pipe ownership,
+and optimized rendering, with the OpenCode logo. Its source and build live in this repository.
 
 > This project began as a *Worms 3D*-style rotating-cursor theme. That cursor-theming engine has been
 > removed; the agent-waiting token is now the whole app, drawn as its own transparent overlay — so it
@@ -30,10 +34,11 @@ nothing's waiting (the animation only runs while at least one agent needs you).
 
 ## How the notifier works
 
-Set it up from **Preferences… → Agent settings…**: register a tool there (currently **Claude Code**),
+Set it up from **Preferences… → Agent settings…**: register **Claude Code** or **Codex** there,
 toggle the token, and set the "clear a stuck logo after" timeout. Registering writes WormsCursor's
 `hook` command into the tool's config — `%CLAUDE_CONFIG_DIR%\settings.json` when that environment
-variable is set, otherwise `~/.claude/settings.json` — with backup-and-merge, so it never overwrites
+variable is set, otherwise `%USERPROFILE%\.claude\settings.json`; Codex uses
+`%CODEX_HOME%\hooks.json`, otherwise `%USERPROFILE%\.codex\hooks.json` — with backup-and-merge, so it preserves
 your own hooks. Each event then runs `WormsCursor.exe hook --tool …`, a throwaway process that writes
 one line to the running tray app over a named pipe and exits. It's **fail-silent** (<½ s pipe timeout,
 errors logged to `bridge.log`, always exits 0), so it can never block or break the agent.
@@ -43,11 +48,26 @@ tracks whether the ball is in *your* court:
 
 | The agent… | Claude hook | Token |
 |---|---|---|
-| is blocked on you (permission / idle prompt) | `Notification` | **appears — stays until you reply** |
+| is blocked on you (permission / elicitation prompt) | `Notification` | **appears — stays until you reply** |
+| sends an idle reminder | `Notification` (`idle_prompt`) | **appears — clears after the timeout** |
 | finished its turn | `Stop` | **appears — clears after the timeout** |
 | ended on an error | `StopFailure` | **appears — clears after the timeout** |
 | started on your prompt, or you reopened the session | `UserPromptSubmit` / `SessionStart` | **clears** |
+| resumes tool work after approval | `PreToolUse` / `PostToolUse` | **clears** |
 | exited cleanly (`/exit`, `Ctrl+C`, `/clear`, logout) | `SessionEnd` | **clears at once** |
+
+Codex desktop and CLI use the same shared lifecycle hooks: `Stop` shows completion,
+`PermissionRequest` shows approval waits, and user-input tools show question waits.
+`UserPromptSubmit`, `SessionStart`, resumed tool work, `Interrupt`, and `SessionEnd` clear the
+corresponding state. Asynchronous questions remain pending while Codex continues working; answering
+an individual question clears that question, and a fresh ordinary prompt clears the pending set.
+Subagent completion hooks are not registered. Codex's hook trust approval applies when enabling
+new or changed hook commands. Restart existing Codex desktop and CLI sessions after registering
+or changing hook trust so they load the updated configuration.
+
+Codex currently has no failure lifecycle hook for model/API errors, and those errors can skip
+`Stop`. Consequently, these failures cannot reliably produce a completion token. Normal completion,
+approval waits, and questions use the native lifecycle hooks described above.
 
 So it shows up when an agent is *waiting on you* and clears the moment you're clearly back (you
 submitted a prompt) or the session ends. Multiple sessions are tracked independently (keyed by tool +
@@ -66,9 +86,8 @@ pipe — it never polls the agent or watches its process. That keeps it dead-sim
 idle, but it means a *finished-turn* session that never sends a closing event would otherwise wait
 forever — so the linger timeout is its backstop. (An approval prompt has no such backstop by design:
 the agent really is still blocked on you, so its token persists until you reply.) The tool-call hooks
-(`PreToolUse` / `PostToolUse`) are deliberately *not* registered — they'd spawn a hook process on
-every single tool call — so "you replied" is inferred from your next prompt, not from the agent
-resuming work.
+(`PreToolUse` / `PostToolUse`) clear ordinary blocking waits when work resumes. They do not dismiss
+an unanswered asynchronous Codex question.
 
 ## Known issues
 
@@ -109,6 +128,9 @@ WormsCursor.sln
 └─ tools/
    └─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the app/tray glyph
 ```
+
+`src/WormsCursor.OpenCodeOverlay/` contains the independent OpenCode helper;
+`integrations/opencode/` contains its V2 plugin, installation script, and lifecycle tests.
 
 The engine (`Core`) is deliberately UI-agnostic (GDI+ only), so the tray shell could later be swapped
 for WPF/WinUI without touching the token/activity logic.

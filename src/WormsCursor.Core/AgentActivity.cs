@@ -1,7 +1,7 @@
 namespace WormsCursor.Core;
 
 /// <summary>The normalised lifecycle event a bridge reports for one agent session. Tool-specific
-/// raw events (Claude's <c>Stop</c>, Codex's <c>agent-turn-complete</c>, …) are mapped to these
+/// raw events (Claude's and Codex's <c>Stop</c>, etc.) are mapped to these
 /// by the <c>hook</c> bridge before they reach the pipe; this enum is the source of truth.</summary>
 public enum AgentEventKind
 {
@@ -13,7 +13,7 @@ public enum AgentEventKind
     /// it stays until you respond (the session reports work again) or it ends.</summary>
     AwaitingUser,
     /// <summary>The agent finished its turn; the ball is in your court (Claude <c>Stop</c>,
-    /// Codex <c>agent-turn-complete</c>). Sets "needs you" and fires a celebratory pulse. Unlike
+    /// Codex <c>Stop</c>). Sets "needs you" and fires a celebratory pulse. Unlike
     /// <see cref="AwaitingUser"/> this just needs a fresh prompt, so its logo lingers then auto-clears
     /// once the idle timeout elapses.</summary>
     TurnComplete,
@@ -24,6 +24,11 @@ public enum AgentEventKind
     /// <summary>The session ended (Claude <c>SessionEnd</c> — /exit, Ctrl+C, /clear, logout). Drops
     /// the session entirely so its logo disappears at once instead of lingering until the TTL.</summary>
     SessionEnded,
+    /// <summary>Questions were displayed while the agent continues working. Tool activity and turn
+    /// completion do not answer them; they remain pending until user input arrives.</summary>
+    InputRequested,
+    /// <summary>The user answered specific asynchronous questions.</summary>
+    InputAnswered,
 }
 
 /// <summary>
@@ -48,7 +53,15 @@ public enum AgentEventKind
 public sealed class AgentActivity
 {
     // Sticky == this wait is the agent blocking on your approval; it survives the idle sweep entirely.
-    sealed class Entry { public bool NeedsYou; public bool Sticky; public DateTime LastUtc; public string Tool = ""; }
+    sealed class Entry
+    {
+        public bool NeedsYou;
+        public bool Sticky;
+        public DateTime LastUtc;
+        public string Tool = "";
+        public readonly HashSet<string> PendingInputs = new(StringComparer.Ordinal);
+        public bool IsWaiting => NeedsYou || PendingInputs.Count > 0;
+    }
 
     readonly object _gate = new();
     readonly Dictionary<string, Entry> _sessions = new();
@@ -66,8 +79,9 @@ public sealed class AgentActivity
         set { lock (_gate) _ttl = value; }
     }
 
-    /// <summary>Raised (outside the lock) whenever the waiting count changes, with the new value.</summary>
-    public event Action<int>? WaitingCountChanged;
+    /// <summary>Raised outside the lock when the waiting logos change, with the current count.
+    /// Replacing a Claude session with a Codex session also refreshes the display at the same count.</summary>
+    public event Action<int>? WaitingChanged;
 
     /// <summary>How many distinct agent sessions currently need the user.</summary>
     public int WaitingCount { get { lock (_gate) return CountNeedsYou(); } }
@@ -82,7 +96,7 @@ public sealed class AgentActivity
             lock (_gate)
             {
                 var list = new List<string>();
-                foreach (var e in _sessions.Values) if (e.NeedsYou) list.Add(e.Tool);
+                foreach (var e in _sessions.Values) if (e.IsWaiting) list.Add(e.Tool);
                 return list;
             }
         }
@@ -91,15 +105,17 @@ public sealed class AgentActivity
     /// <summary>Apply one normalised event for a session. <paramref name="sessionId"/> may be null
     /// (we then key by tool+project). <paramref name="nowUtc"/> is injected so callers/tests stay
     /// deterministic. Safe to call from any thread.</summary>
-    public void Report(string tool, string? sessionId, string? project, AgentEventKind kind, DateTime nowUtc)
+    public void Report(string tool, string? sessionId, string? project, AgentEventKind kind, DateTime nowUtc,
+        IReadOnlyList<string>? inputIds = null)
     {
         if (string.IsNullOrEmpty(tool)) tool = "unknown";
-        int before, after;
+        int after;
+        bool changed;
         var key = Key(tool, sessionId, project);
         lock (_gate)
         {
+            var before = WaitingTools;
             SweepLocked(nowUtc);
-            before = CountNeedsYou();
             if (kind == AgentEventKind.SessionEnded)
             {
                 _sessions.Remove(key); // the session is gone — forget it, don't wait on it
@@ -109,19 +125,33 @@ public sealed class AgentActivity
                 if (!_sessions.TryGetValue(key, out var e)) { e = new Entry(); _sessions[key] = e; }
                 e.Tool = tool;
                 e.LastUtc = nowUtc;
-                e.NeedsYou = kind switch
+                if (kind == AgentEventKind.InputRequested)
                 {
-                    AgentEventKind.AwaitingUser or AgentEventKind.TurnComplete or AgentEventKind.Error => true,
-                    _ => false, // ThinkingStarted / ToolUse: the agent is working again
-                };
-                // An approval/idle prompt means the agent is *blocked* on you, so keep its logo up
-                // indefinitely (never swept). A finished/errored turn just needs a fresh prompt, so it
-                // stays timed and clears once the idle timeout elapses.
-                e.Sticky = kind == AgentEventKind.AwaitingUser;
+                    if (inputIds is not null) e.PendingInputs.UnionWith(inputIds);
+                }
+                else if (kind == AgentEventKind.InputAnswered)
+                {
+                    if (inputIds is not null) e.PendingInputs.ExceptWith(inputIds);
+                    // Answering a question acknowledges a finished turn, but does not answer an
+                    // independent approval prompt. Async questions and approvals can overlap.
+                    if (!e.Sticky) e.NeedsYou = false;
+                }
+                else
+                {
+                    if (kind == AgentEventKind.ThinkingStarted) e.PendingInputs.Clear();
+                    e.NeedsYou = kind switch
+                    {
+                        AgentEventKind.AwaitingUser or AgentEventKind.TurnComplete or AgentEventKind.Error => true,
+                        _ => false, // ThinkingStarted / ToolUse: the agent is working again
+                    };
+                    // Approval prompts remain sticky; completion and error notices expire.
+                    e.Sticky = kind == AgentEventKind.AwaitingUser;
+                }
             }
             after = CountNeedsYou();
+            changed = !before.SequenceEqual(WaitingTools);
         }
-        if (after != before) WaitingCountChanged?.Invoke(after);
+        if (changed) WaitingChanged?.Invoke(after);
     }
 
     /// <summary>Evict <i>timed</i> sessions (finished turn / error) idle longer than the TTL. Call
@@ -136,14 +166,14 @@ public sealed class AgentActivity
             SweepLocked(nowUtc);
             after = CountNeedsYou();
         }
-        if (after != before) WaitingCountChanged?.Invoke(after);
+        if (after != before) WaitingChanged?.Invoke(after);
     }
 
     void SweepLocked(DateTime nowUtc)
     {
         List<string>? dead = null;
         foreach (var kv in _sessions)
-            if (!kv.Value.Sticky && nowUtc - kv.Value.LastUtc > _ttl) // sticky = blocked on your approval, never sweep
+            if (!kv.Value.Sticky && kv.Value.PendingInputs.Count == 0 && nowUtc - kv.Value.LastUtc > _ttl)
                 (dead ??= new()).Add(kv.Key);
         if (dead is not null)
             foreach (var k in dead) _sessions.Remove(k);
@@ -152,7 +182,7 @@ public sealed class AgentActivity
     int CountNeedsYou()
     {
         int n = 0;
-        foreach (var e in _sessions.Values) if (e.NeedsYou) n++;
+        foreach (var e in _sessions.Values) if (e.IsWaiting) n++;
         return n;
     }
 

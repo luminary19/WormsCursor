@@ -1,8 +1,8 @@
-# WormsCursor
+﻿# WormsCursor
 
 A Windows tray app that shows a **bouncing agent-waiting token**: whenever an AI coding agent
-(Claude Code) is blocked on your decision or has finished its turn, a small tool logo (Claude's
-pixel critter) appears and bounces — either hanging off the mouse pointer and following it, or
+(Claude Code or Codex) is blocked on your decision or has finished its turn, its tool logo
+appears and bounces — either hanging off the mouse pointer and following it, or
 pinned to a screen corner. It ships as a Velopack app (Setup.exe / Portable.zip) that auto-updates
 from GitHub Releases. No main window — everything lives in the system tray.
 
@@ -16,14 +16,19 @@ from GitHub Releases. No main window — everything lives in the system tray.
 The token is drawn by an **owner-drawn layered overlay window** (`NotifierOverlay`), not by touching
 the system cursor — so it shows over whatever the real cursor is, with no `SetSystemCursor` and
 nothing to restore on exit. The window is transparent, click-through, no-activate and top-most, and
-painted with `UpdateLayeredWindow` (true per-pixel alpha). It only animates (a ~60 fps WinForms
-timer) while at least one agent is waiting; idle, the timer is stopped and the token painted away, so
+painted with `UpdateLayeredWindow` (true per-pixel alpha). Its animation thread runs
+while at least one agent is waiting; idle, the thread parks and the token is painted away, so
 a quiet tray burns no CPU.
 
 Which agents are "waiting" is fed in by the same hook → named-pipe plumbing as before:
 `WormsCursor.exe hook …` (fired by the agent's lifecycle hooks) writes one normalised JSON event to
 the running tray over a per-user named pipe; `AgentActivity` tracks which sessions need you; the tray
 pushes that set into the overlay.
+
+Codex desktop and CLI use `%CODEX_HOME%/hooks.json` through the same shared engine hooks.
+Keep asynchronous question state separate from ordinary tool activity: a tool returning does not
+mean the user answered. The OpenCode 2 integration has an independent shared helper, based on the
+existing Pi cursor extension; do not route it through throwaway WormsCursor hook processes.
 
 ## Projects (`src/`)
 
@@ -35,7 +40,7 @@ tests.
 - `AgentLogos.cs` / `SvgPath.cs` — the baked vector tool logos (Claude critter, OpenAI knot) parsed
   from SVG path data and rasterised to cached sprites; `SvgPath` is the tiny path-data parser.
 - `AgentActivity.cs` — tracks which agent sessions currently **need the user** (thread-safe), exposes
-  `WaitingTools`/`WaitingCount`, raises `WaitingCountChanged`, and sweeps stale sessions after a TTL.
+  `WaitingTools`/`WaitingCount`, raises `WaitingChanged`, and sweeps stale sessions after a TTL.
 - `AgentEventMessage.cs` — the normalised wire format (one JSON line per event) + the
   raw-event → `AgentEventKind` mapping.
 - `CursorSettings.cs` — the persisted, tunable settings: token `Size`, `Placement`
@@ -67,9 +72,20 @@ tests.
 - `Services/UpdateService.cs` — Velopack `UpdateManager`; no-ops cleanly for dev builds run from `bin\`.
 - `SingleInstance.cs`, `Autostart.cs` (per-user `HKCU\…\Run`), `ChangelogForm.cs`, `Assets/`.
 
+### `WormsCursor.OpenCodeOverlay` and `integrations/opencode`
+
+The native helper retains Pi's per-client pipe aggregation, singleton ownership, no-client shutdown,
+monitor-rate waitable timer, frame coalescing, cached logo, and persistent DIB surface. It sleeps while
+hidden and uses the official compact OpenCode mark. The V2 plugin subscribes to `event.data` lifecycle
+events and form/permission events, using one persistent pipe connection per plugin host. Build
+materializations are immutable and content-addressed under `artifacts/opencode/`.
+
+Use the installed OpenCode V2 SDK as the event contract: the local OpenCode source checkout can be
+older. See `integrations/opencode/README.md` for setup and tests.
+
 ## Build & run
 
-```bash
+```powershell
 dotnet build WormsCursor.sln -c Release      # build everything
 dotnet run --project src/WormsCursor.App     # run the tray app (dev)
 ```

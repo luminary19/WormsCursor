@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>OpenCodeCursorOverlay</AssemblyName>
+  </PropertyGroup>
+  <!-- Generated build and runtime outputs live below this project but are never source inputs. -->
+  <ItemGroup>
+    <Compile Remove="obj/**" />
+    <Compile Remove="obj\**\*.cs" />
+    <Compile Remove="runtime/**" />
+    <Compile Remove="runtime\**\*.cs" />
+    <EmbeddedResource Remove="obj/**" />
+    <EmbeddedResource Remove="runtime/**" />
+    <None Remove="obj/**" />
+    <None Remove="runtime/**" />
+  </ItemGroup>
+</Project>

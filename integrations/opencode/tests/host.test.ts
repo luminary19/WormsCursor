@@ -1,0 +1,65 @@
+import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer, type Socket } from "node:net";
+import test from "node:test";
+import { NativeCursorRuntime } from "../host.ts";
+import { DEFAULT_SETTINGS } from "../state.ts";
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+async function until(check: () => boolean, timeout = 5000): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (!check()) { if (Date.now() > deadline) throw new Error("test condition timed out"); await delay(10); }
+}
+
+test("one persistent connection coalesces bursts and replays state after pipe failure", { skip: process.platform !== "win32" }, async () => {
+  const pipeName = `OpenCodeCursorTest-${process.pid}-${Date.now()}`;
+  const sockets: Socket[] = [];
+  const lines: string[] = [];
+  const server = createServer((socket) => {
+    sockets.push(socket);
+    let pending = "";
+    socket.on("data", (chunk) => {
+      pending += String(chunk);
+      for (;;) { const end = pending.indexOf("\n"); if (end < 0) break; lines.push(pending.slice(0, end)); pending = pending.slice(end + 1); }
+    });
+  });
+  server.listen(`\\\\.\\pipe\\${pipeName}`);
+  await once(server, "listening");
+  const runtime = new NativeCursorRuntime({ pipeName, materialize: async () => { throw new Error("must use existing helper"); } });
+  try {
+    await runtime.start({ ...DEFAULT_SETTINGS });
+    const pending = Array.from({ length: 100 }, (_, index) => runtime.apply(index % 2 ? "waiting" : "completion", { ...DEFAULT_SETTINGS }));
+    await Promise.all(pending);
+    await until(() => lines.at(-1)?.includes('"waiting"') ?? false);
+    assert.equal(sockets.length, 1);
+    assert.ok(lines.length < 10, `coalesced ${lines.length} writes`);
+    sockets[0].destroy();
+    await until(() => sockets.length === 2 && lines.length >= 3);
+    assert.equal(JSON.parse(lines.at(-1)!).display, "waiting");
+    await runtime.stop();
+    await until(() => sockets.every((socket) => socket.destroyed));
+  } finally {
+    await runtime.stop();
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("stopping during helper materialization cannot launch a late helper", { skip: process.platform !== "win32" }, async () => {
+  let release!: () => void;
+  let building = false;
+  const runtime = new NativeCursorRuntime({
+    pipeName: `OpenCodeCursorTest-stop-${process.pid}-${Date.now()}`,
+    materialize: async () => {
+      building = true;
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { hash: "test", directory: "missing", executable: "C:\\definitely-missing-cursor-helper.exe" };
+    },
+  });
+  const starting = runtime.start({ ...DEFAULT_SETTINGS });
+  await until(() => building);
+  await runtime.stop();
+  release();
+  await starting;
+  assert.equal(runtime.getStatus(), "Disconnected");
+});

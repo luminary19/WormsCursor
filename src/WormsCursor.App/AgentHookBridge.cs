@@ -36,15 +36,17 @@ static class AgentHookBridge
         string tool = ArgValue(args, "--tool") ?? "unknown";
         string? evOverride = ArgValue(args, "--event"); // Cursor/Kiro register an explicit normalised event
 
-        // Codex hands the event as a single JSON argv (the last arg); everyone else uses stdin.
-        return tool == "codex" ? FromCodex(args, tool) : FromStdin(tool, evOverride);
+        string raw = Console.IsInputRedirected ? Console.In.ReadToEnd() : "";
+        return Parse(tool, raw, evOverride);
     }
+
+    internal static AgentEventMessage? Parse(string tool, string raw, string? evOverride = null)
+        => tool == "codex" ? FromCodex(raw) : FromStdin(tool, raw, evOverride);
 
     // Claude Code / Cursor: payload arrives on stdin as JSON. We map Claude's hook_event_name
     // (+ notification_type) ourselves; Cursor passes the normalised event via --event.
-    static AgentEventMessage? FromStdin(string tool, string? evOverride)
+    static AgentEventMessage? FromStdin(string tool, string raw, string? evOverride)
     {
-        string raw = Console.IsInputRedirected ? Console.In.ReadToEnd() : "";
         string? rawEvent = null, notifType = null, sessionId = null, project = null, message = null;
         bool subagentsRunning = false;
         if (!string.IsNullOrWhiteSpace(raw))
@@ -78,36 +80,116 @@ static class AgentHookBridge
         };
     }
 
-    // Codex: notify = ["<abs>", "hook", "--tool", "codex"] and Codex appends the event JSON as the
-    // final argv. Only agent-turn-complete exists today — no native "awaiting", so we don't fake it.
-    static AgentEventMessage? FromCodex(string[] args, string tool)
+    // Codex desktop and CLI share hooks.json and the same stdin lifecycle payloads.
+    // Subagent completions use SubagentStop and must not ask the human to take over.
+    static AgentEventMessage? FromCodex(string json)
     {
-        string? json = args.Length > 0 && args[^1].StartsWith('{') ? args[^1] : null;
-        if (json is null) return null;
-
-        string? type = null, session = null, project = null, message = null;
         try
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            type = Str(root, "type");
-            session = Str(root, "thread-id");
-            project = Str(root, "cwd");
-            message = Str(root, "last-assistant-message");
+            string? rawEvent = Str(root, "hook_event_name");
+            string? toolName = Str(root, "tool_name");
+            string[]? inputIds = null;
+            string? norm = rawEvent switch
+            {
+                "UserPromptSubmit" => "thinking_started",
+                // Resuming a session clears a finish notice, but is not an answer to a question.
+                "SessionStart" => "tool_use",
+                "SessionEnd" or "Interrupt" => "session_end",
+                "PermissionRequest" => "awaiting_user",
+                "PreToolUse" when toolName is "request_user_input" or "request_permissions" => "awaiting_user",
+                "PreToolUse" or "PostToolUse" => "tool_use",
+                "Stop" => "turn_complete",
+                _ => null,
+            };
+            if (norm is null) return null;
+
+            // The async tool finishes immediately; PostToolUse means the questions were displayed,
+            // not answered. Track their actual app IDs until corresponding user-input hooks arrive.
+            if (rawEvent == "PostToolUse" && toolName == "request_user_input_async")
+            {
+                inputIds = AsyncQuestionIds(root);
+                if (inputIds.Length > 0) norm = "input_requested";
+            }
+            else if (rawEvent == "UserPromptSubmit")
+            {
+                inputIds = AnsweredQuestionIds(Str(root, "prompt"));
+                if (inputIds is not null) norm = "input_answered";
+            }
+
+            return new AgentEventMessage
+            {
+                Tool = "codex",
+                Event = norm,
+                RawEvent = rawEvent,
+                SessionId = Str(root, "session_id"),
+                Project = Str(root, "cwd"),
+                Message = Str(root, "last_assistant_message"),
+                InputIds = inputIds is { Length: > 0 } ? inputIds : null,
+                Ts = DateTime.UtcNow.ToString("o"),
+            };
         }
         catch (JsonException) { return null; }
+    }
 
-        if (type != "agent-turn-complete") return null;
-        return new AgentEventMessage
+    static string[] AsyncQuestionIds(JsonElement root)
+    {
+        string? callId = Str(root, "tool_use_id");
+        if (string.IsNullOrEmpty(callId)
+            || !root.TryGetProperty("tool_input", out var input)
+            || input.ValueKind != JsonValueKind.Object
+            || !input.TryGetProperty("questions", out var questions)
+            || questions.ValueKind != JsonValueKind.Array
+            || !root.TryGetProperty("tool_response", out var response)) return Array.Empty<string>();
+
+        // FunctionToolOutput serializes its body as a string containing {"accepted":true}.
+        if (response.ValueKind != JsonValueKind.String) return Array.Empty<string>();
+        using var accepted = JsonDocument.Parse(response.GetString()!);
+        if (accepted.RootElement.ValueKind != JsonValueKind.Object
+            || !accepted.RootElement.TryGetProperty("accepted", out var ok)
+            || ok.ValueKind != JsonValueKind.True) return Array.Empty<string>();
+
+        return Enumerable.Range(0, questions.GetArrayLength())
+            .Select(index => JsonSerializer.Serialize(new object[] { "request_user_input_async", callId, index }))
+            .ToArray();
+    }
+
+    static string[]? AnsweredQuestionIds(string? prompt)
+    {
+        if (prompt is null) return null;
+        string text = prompt.Trim();
+        const string idePrefix = "# Context from my IDE setup:\n", requestDelimiter = "\n## My request for Codex:\n";
+        if (text.StartsWith(idePrefix, StringComparison.Ordinal))
         {
-            Tool = tool,
-            Event = "turn_complete",
-            RawEvent = type,
-            SessionId = session,
-            Project = project,
-            Message = message,
-            Ts = DateTime.UtcNow.ToString("o"),
-        };
+            int start = text.LastIndexOf(requestDelimiter, StringComparison.Ordinal);
+            if (start < 0) return null;
+            text = text[(start + requestDelimiter.Length)..].Trim();
+        }
+        const string open = "<send_user_message_question_reply>", close = "</send_user_message_question_reply>";
+        if (!text.StartsWith(open, StringComparison.Ordinal) || !text.EndsWith(close, StringComparison.Ordinal)) return null;
+        try
+        {
+            using var reply = JsonDocument.Parse(text[open.Length..^close.Length]);
+            var root = reply.RootElement;
+            var replies = root.ValueKind == JsonValueKind.Array ? root.EnumerateArray().ToArray() : new[] { root };
+            if (replies.Length == 0) return null;
+            var ids = new List<string>();
+            foreach (var item in replies)
+            {
+                string? id = Str(item, "questionItemId");
+                if (id is null || Str(item, "question") is null || Str(item, "answer") is null) return null;
+                using var parsed = JsonDocument.Parse(id);
+                var parts = parsed.RootElement;
+                if (parts.ValueKind == JsonValueKind.Array && parts.GetArrayLength() == 3
+                    && parts[0].ValueKind == JsonValueKind.String && parts[0].GetString() == "request_user_input_async"
+                    && parts[1].ValueKind == JsonValueKind.String && parts[2].ValueKind == JsonValueKind.Number
+                    && parts[2].TryGetInt32(out int index) && index >= 0)
+                    ids.Add(JsonSerializer.Serialize(new object[] { "request_user_input_async", parts[1].GetString()!, index }));
+            }
+            return ids.ToArray();
+        }
+        catch (JsonException) { return null; }
     }
 
     static string? NormalizeClaude(string? hookEvent, string? notificationType, bool subagentsRunning) => hookEvent switch

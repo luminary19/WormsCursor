@@ -1,4 +1,9 @@
-# Agent Notifier — design
+﻿# Agent Notifier — historical design
+
+> This is an archived design note. The current implementation also replaces the old Codex `notify`
+> integration with shared desktop/CLI lifecycle hooks, tracks asynchronous questions, and includes
+> an independent OpenCode 2 helper. Use [README.md](../README.md) and the
+> [OpenCode integration guide](../integrations/opencode/README.md) for current behavior and setup.
 
 > **Superseded (rendering only).** This doc describes the original design where the notifier was
 > composited onto the *themed system cursors* by `CursorEngine`. The cursor-theming engine has since

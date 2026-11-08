@@ -1,7 +1,6 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 
 namespace WormsCursor.App.Services;
 
@@ -16,8 +15,7 @@ public enum HookState
     /// version registered a smaller set (e.g. before <c>SessionEnd</c> was added, so /clear and /exit
     /// no longer clear the indicator). Re-registering refreshes it to the full set.</summary>
     Outdated,
-    /// <summary>The tool already has a conflicting custom hook we won't overwrite (Codex's single
-    /// <c>notify</c>). The user must clear it before we can register.</summary>
+    /// <summary>The config is malformed and cannot be merged without discarding user data.</summary>
     ConfigConflict,
 }
 
@@ -42,6 +40,11 @@ public static class AgentHookRegistrar
     // StopFailure / Notification raise it; SessionEnd drops the session on exit so it doesn't linger.
     static readonly string[] ClaudeEvents =
         { "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "StopFailure", "SessionStart", "SessionEnd" };
+
+    // These lifecycle hooks are shared by Codex desktop and CLI. Keep them synchronous so a late
+    // notification cannot arrive after the tool-resumed event that clears it.
+    static readonly string[] CodexEvents =
+        { "SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop", "Interrupt", "SessionEnd" };
 
     // Relaxed encoder so the exe-path quotes serialise as \" (not ") and the file stays
     // readable — it's a config a human may open. Still valid JSON.
@@ -75,13 +78,19 @@ public static class AgentHookRegistrar
             return Path.Combine(Home, ".claude", "settings.json");
         }
     }
-    public static string CodexPath => Path.Combine(Home, ".codex", "config.toml");
+    public static string CodexPath
+    {
+        get
+        {
+            string? configDir = HomeOverride is null ? Environment.GetEnvironmentVariable("CODEX_HOME") : null;
+            return Path.Combine(string.IsNullOrWhiteSpace(configDir) ? Path.Combine(Home, ".codex") : configDir, "hooks.json");
+        }
+    }
 
-    // Codex is hidden for now (untested end-to-end). Its Register/Unregister/State plumbing stays
-    // below, ready to re-list here once we can verify it. Only Claude Code is surfaced in the UI.
     public static IReadOnlyList<HookTool> Tools { get; } = new[]
     {
         new HookTool("claude-code", "Claude Code", "~/.claude/settings.json"),
+        new HookTool("codex", "Codex (desktop + CLI)", "CODEX_HOME/hooks.json"),
     };
 
     public static HookState GetState(string toolId) => toolId switch
@@ -204,46 +213,115 @@ public static class AgentHookRegistrar
             if (IsOurEntry(entries[i])) entries.RemoveAt(i);
     }
 
-    // ---------- Codex (TOML `notify`) ----------
+    // ---------- Codex (hooks.json merge) ----------
 
-    // TOML literal (single-quoted) strings don't process escapes — ideal for a Windows path.
-    static string CodexNotifyLine() => $"notify = ['{Exe}', 'hook', '--tool', 'codex']";
-    static readonly Regex NotifyKey = new(@"^\s*notify\s*=", RegexOptions.Compiled);
-    static bool IsOurNotify(string line) => line.Contains("--tool") && line.Contains("codex") && line.Contains("hook");
+    const string CodexMarker = "hook --tool codex";
+    static string CodexCommand => $"\"{Exe}\" {CodexMarker}";
+
+    static JsonObject CodexHandler() => new()
+    {
+        ["type"] = "command",
+        ["command"] = CodexCommand,
+        ["commandWindows"] = CodexCommand,
+        ["timeout"] = 2,
+    };
+
+    static string? StringValue(JsonNode? node)
+        => node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
+    static bool IsCodexHandler(JsonNode? node)
+        => node is JsonObject hook
+           && (StringValue(hook["command"])?.Contains(CodexMarker, StringComparison.Ordinal) == true
+               || StringValue(hook["commandWindows"])?.Contains(CodexMarker, StringComparison.Ordinal) == true);
+
+    static bool MatchesAll(JsonObject group)
+        => group["matcher"] is null || StringValue(group["matcher"]) is "" or "*";
+
+    // Validate before any edits so a malformed event/handler never gets replaced with a fresh array.
+    static JsonObject? CodexHooks(JsonObject root)
+    {
+        if (!root.ContainsKey("hooks")) return null;
+        if (root["hooks"] is not JsonObject hooks) throw new InvalidOperationException("Codex hooks.json: hooks must be an object.");
+        foreach (var ev in hooks)
+        {
+            if (ev.Value is not JsonArray groups) throw new InvalidOperationException($"Codex hooks.json: {ev.Key} must be an array.");
+            foreach (var group in groups)
+                if (group is not JsonObject obj || obj["hooks"] is not JsonArray handlers || handlers.Any(h => h is not JsonObject))
+                    throw new InvalidOperationException($"Codex hooks.json: {ev.Key} contains an invalid hook group.");
+        }
+        return hooks;
+    }
 
     static HookState CodexState()
     {
-        if (!File.Exists(CodexPath)) return HookState.NotRegistered;
-        foreach (var raw in File.ReadAllLines(CodexPath))
+        try
         {
-            string line = raw.Trim();
-            if (line.StartsWith('#')) continue;
-            if (NotifyKey.IsMatch(line)) return IsOurNotify(line) ? HookState.Registered : HookState.ConfigConflict;
+            var root = ReadJsonObject(CodexPath, throwOnBad: true);
+            var hooks = root is null ? null : CodexHooks(root);
+            if (hooks is null) return HookState.NotRegistered;
+            bool anyOurs = hooks.Any(ev => ((JsonArray)ev.Value!).Any(g => ((JsonArray)g!["hooks"]!).Any(IsCodexHandler)));
+            if (!anyOurs) return HookState.NotRegistered;
+            bool current = CodexEvents.All(ev => hooks[ev] is JsonArray groups
+                && groups.Sum(g => ((JsonArray)g!["hooks"]!).Count(IsCodexHandler)) == 1
+                && groups.Any(g => g is JsonObject group
+                    && MatchesAll(group)
+                    && ((JsonArray)group["hooks"]!).Any(h => JsonNode.DeepEquals(h, CodexHandler()))));
+            return current ? HookState.Registered : HookState.Outdated;
         }
-        return HookState.NotRegistered;
+        catch (InvalidOperationException) { return HookState.ConfigConflict; }
     }
 
     static void RegisterCodex()
     {
-        var lines = (File.Exists(CodexPath) ? File.ReadAllText(CodexPath) : "")
-            .Replace("\r\n", "\n").Split('\n').ToList();
-
-        int idx = lines.FindIndex(l => NotifyKey.IsMatch(l));
-        if (idx >= 0 && !IsOurNotify(lines[idx]))
-            throw new InvalidOperationException(
-                "Codex already has a custom `notify` configured. Remove it from ~/.codex/config.toml first, then register.");
-
-        if (idx >= 0) lines[idx] = CodexNotifyLine();   // refresh ours
-        else lines.Insert(0, CodexNotifyLine());        // a root key must precede any [table]
-        BackupAndWrite(CodexPath, string.Join(Environment.NewLine, lines).TrimEnd() + Environment.NewLine);
+        var root = ReadJsonObject(CodexPath, throwOnBad: true) ?? new JsonObject();
+        var hooks = CodexHooks(root);
+        if (hooks is null) { hooks = new JsonObject(); root["hooks"] = hooks; }
+        foreach (string ev in CodexEvents)
+        {
+            if (hooks[ev] is not JsonArray groups) { groups = new JsonArray(); hooks[ev] = groups; }
+            // Refresh in place, including a hook sharing a group with another tool. Only removing
+            // stale duplicates can shift later indexes; Codex will review any changed trust keys.
+            var group = groups.OfType<JsonObject>().FirstOrDefault(g => MatchesAll(g)
+                && ((JsonArray)g["hooks"]!).Any(IsCodexHandler));
+            var handler = CodexHandler();
+            if (group is not null)
+            {
+                var handlers = (JsonArray)group["hooks"]!;
+                int index = handlers.Select((h, i) => (h, i)).First(pair => IsCodexHandler(pair.h)).i;
+                handlers[index] = handler;
+            }
+            else groups.Add(new JsonObject { ["hooks"] = new JsonArray(handler) });
+            RemoveCodexHandlers(groups, handler);
+        }
+        BackupAndWrite(CodexPath, root.ToJsonString(Indented));
     }
 
     static void UnregisterCodex()
     {
-        if (!File.Exists(CodexPath)) return;
-        var lines = File.ReadAllText(CodexPath).Replace("\r\n", "\n").Split('\n').ToList();
-        lines.RemoveAll(l => NotifyKey.IsMatch(l) && IsOurNotify(l));
-        BackupAndWrite(CodexPath, string.Join(Environment.NewLine, lines).TrimEnd() + Environment.NewLine);
+        var root = ReadJsonObject(CodexPath, throwOnBad: true);
+        var hooks = root is null ? null : CodexHooks(root);
+        if (hooks is null) return;
+        foreach (string ev in hooks.Select(ev => ev.Key).ToArray())
+        {
+            var groups = (JsonArray)hooks[ev]!;
+            RemoveCodexHandlers(groups);
+            if (groups.Count == 0) hooks.Remove(ev);
+        }
+        if (hooks.Count == 0) root!.Remove("hooks");
+        BackupAndWrite(CodexPath, root!.ToJsonString(Indented));
+    }
+
+    static void RemoveCodexHandlers(JsonArray groups, JsonNode? keep = null)
+    {
+        for (int i = groups.Count - 1; i >= 0; i--)
+        {
+            var handlers = (JsonArray)groups[i]!["hooks"]!;
+            bool removed = false;
+            for (int j = handlers.Count - 1; j >= 0; j--)
+                if (!ReferenceEquals(handlers[j], keep) && IsCodexHandler(handlers[j]))
+                { handlers.RemoveAt(j); removed = true; }
+            if (removed && handlers.Count == 0) groups.RemoveAt(i);
+        }
     }
 
     // ---------- shared file IO ----------
@@ -251,7 +329,7 @@ public static class AgentHookRegistrar
     static JsonObject? ReadJsonObject(string path, bool throwOnBad)
     {
         if (!File.Exists(path)) return null;
-        try { return JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? new JsonObject(); }
+        try { return JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? throw new JsonException("Expected an object."); }
         catch (JsonException)
         {
             if (throwOnBad)

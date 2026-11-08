@@ -5,7 +5,7 @@ namespace WormsCursor.Core;
 
 /// <summary>
 /// The normalised agent event a <c>hook</c> bridge writes to the pipe — one JSON object per line.
-/// Tool-specific payloads (Claude stdin, Codex argv, …) are mapped to this shape by the bridge;
+/// Tool-specific stdin payloads are mapped to this shape by the bridge;
 /// the tray app deserializes it and feeds <see cref="AgentActivity"/>. UI-free; serialised with
 /// the same System.Text.Json the settings store uses.
 /// </summary>
@@ -15,7 +15,7 @@ public sealed class AgentEventMessage
     public string Tool { get; set; } = "";
 
     /// <summary>Normalised event: <c>thinking_started | awaiting_user | turn_complete | tool_use |
-    /// error | session_end</c>.</summary>
+    /// error | session_end | input_requested | input_answered</c>.</summary>
     public string Event { get; set; } = "";
 
     /// <summary>The tool's original event name, for logging/debugging (e.g. Claude's <c>Stop</c>).</summary>
@@ -25,6 +25,8 @@ public sealed class AgentEventMessage
     public string? Project { get; set; }
     public string? Message { get; set; }
     public string? Ts { get; set; }
+    /// <summary>Stable question IDs for asynchronous requests and their individual replies.</summary>
+    public string[]? InputIds { get; set; }
 
     static readonly JsonSerializerOptions Json = new()
     {
@@ -55,6 +57,8 @@ public sealed class AgentEventMessage
             case "tool_use": kind = AgentEventKind.ToolUse; return true;
             case "error": kind = AgentEventKind.Error; return true;
             case "session_end": kind = AgentEventKind.SessionEnded; return true;
+            case "input_requested": kind = AgentEventKind.InputRequested; return true;
+            case "input_answered": kind = AgentEventKind.InputAnswered; return true;
             default: kind = default; return false;
         }
     }

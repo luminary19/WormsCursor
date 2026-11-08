@@ -91,7 +91,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     // a changed waiting set into an overlay update + tray tooltip.
     void StartAgentNotifier()
     {
-        _agents.WaitingCountChanged += OnWaitingCountChanged;
+        _agents.WaitingChanged += OnWaitingChanged;
         _agents.Ttl = TimeSpan.FromSeconds(_settings.AgentNotifierTimeoutSeconds);
 
         _agentPipe = new AgentPipeServer(msg =>
@@ -113,10 +113,10 @@ public sealed class TrayApplicationContext : ApplicationContext
     void HandleAgentEvent(AgentEventMessage msg)
     {
         if (msg.TryGetKind(out var kind))
-            _agents.Report(msg.Tool, msg.SessionId, msg.Project, kind, DateTime.UtcNow);
+            _agents.Report(msg.Tool, msg.SessionId, msg.Project, kind, DateTime.UtcNow, msg.InputIds);
     }
 
-    void OnWaitingCountChanged(int count)
+    void OnWaitingChanged(int count)
     {
         _overlay.SetWaitingAgents(_agents.WaitingTools);
         _tray.Text = count > 0
@@ -173,7 +173,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     // Drives the live token for the "Preview" test in a dialog: a non-null value fakes that many
     // waiting agents (one logo + "+N"); null ends the preview and restores the real set (so a real
     // agent event arriving mid-preview, or just closing the dialog, leaves the genuine token on screen).
-    static readonly string[] PreviewTools = { "claude-code" }; // Codex hidden for now
+    static readonly string[] PreviewTools = { "claude-code" };
     void PreviewWaitingCount(int? testCount)
     {
         if (testCount is not int n) { _overlay.SetWaitingAgents(_agents.WaitingTools); return; }

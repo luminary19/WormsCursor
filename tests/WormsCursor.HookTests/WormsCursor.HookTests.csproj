@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/WormsCursor.App/AgentHookBridge.cs" Link="AgentHookBridge.cs" />
+    <Compile Include="../../src/WormsCursor.App/AgentPipeServer.cs" Link="AgentPipeServer.cs" />
+    <Compile Include="../../src/WormsCursor.App/Services/AgentHookRegistrar.cs" Link="AgentHookRegistrar.cs" />
+    <Compile Include="../../src/WormsCursor.Core/AgentActivity.cs" Link="AgentActivity.cs" />
+    <Compile Include="../../src/WormsCursor.Core/AgentEventMessage.cs" Link="AgentEventMessage.cs" />
+  </ItemGroup>
+</Project>
