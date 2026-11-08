@@ -51,7 +51,11 @@ internal static class JsoncEdit
             });
             if (check.RootElement.ValueKind != JsonValueKind.Object)
                 throw new InvalidOperationException($"{file} must hold a JSON object; it wasn't changed.");
-            if (check.RootElement.TryGetProperty("plugins", out var plugins) && plugins.ValueKind != JsonValueKind.Array)
+            // The edits splice the one plugins property, so there must be at most one, and it a list.
+            var plugins = check.RootElement.EnumerateObject().Where(p => p.NameEquals("plugins")).ToList();
+            if (plugins.Count > 1)
+                throw new InvalidOperationException($"{file} lists plugins more than once; it wasn't changed.");
+            if (plugins.Count == 1 && plugins[0].Value.ValueKind != JsonValueKind.Array)
                 throw new InvalidOperationException($"{file}: plugins must be a list; it wasn't changed.");
         }
         catch (JsonException)

@@ -1533,7 +1533,7 @@ static void OpenCodeRegistration() => WithHome(home =>
     Equal(others, File.ReadAllText(path));
 
     // A config that can't be edited safely is reported and left alone.
-    foreach (string raw in new[] { "{", "[1]", "{\"plugins\": {}}", "{\"plugins\": \"x\"}" })
+    foreach (string raw in new[] { "{", "[1]", "{\"plugins\": {}}", "{\"plugins\": \"x\"}", "{\"plugins\": null, \"plugins\": []}", "{\"plugins\": [], \"plugins\": []}" })
     {
         File.WriteAllText(path, raw);
         Equal(HookState.ConfigConflict, AgentHookRegistrar.GetState("opencode"));

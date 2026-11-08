@@ -91,7 +91,7 @@ test("a root's busy -> idle is a finished turn, once; a subagent finishing is si
   await plugin.stop();
 });
 
-test("a root idling with a subagent's prompt still open stays blocked, not finished", async () => {
+test("a root idling with a subagent's prompt still open stays blocked, not finished, also when it resumes", async () => {
   const { plugin, link } = controller();
   await plugin.receive({ type: "session.created", data: { sessionID: "root" } });
   await plugin.receive({ type: "session.created", data: { sessionID: "child", parentID: "root" } });
@@ -99,6 +99,9 @@ test("a root idling with a subagent's prompt still open stays blocked, not finis
   await plugin.receive({ type: "permission.asked", data: { sessionID: "child", id: "p" } });
   await plugin.receive(status("root", "idle"));
   assert.deepEqual(show(link.sent), ["thinking_started:root", "awaiting_user:root:permission:p"]);
+  // Resuming clears the tray's prompts for the session, so the still-open one is reported again.
+  await plugin.receive(status("root", "busy"));
+  assert.deepEqual(show(link.sent).slice(2), ["thinking_started:root", "awaiting_user:root:permission:p"]);
   await plugin.stop();
 });
 

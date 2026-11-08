@@ -85,7 +85,8 @@ export class OpenCodeState {
     const wasBusy = state.busy;
     state.busy = true;
     if (wasBusy === true || this.rootOf(id) !== id) return [];
-    return [this.message("thinking_started", id)];
+    // Work resuming clears the tray's prompts for the session; the ones still open here are reported again.
+    return [this.message("thinking_started", id), ...this.snapshot().filter((m) => m.sessionId === id)];
   }
 
   settled(id: string): WireMessage[] {

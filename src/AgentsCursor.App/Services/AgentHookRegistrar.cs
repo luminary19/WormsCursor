@@ -90,7 +90,7 @@ public static partial class AgentHookRegistrar
         new HookTool("codex", "Codex (desktop + CLI)", "CODEX_HOME/hooks.json",
             "In Codex, approve the changed AgentsCursor hooks under /hooks, also in sessions Orca starts, then start a new session."),
         new HookTool("opencode", "OpenCode", "OPENCODE_CONFIG_DIR/opencode.jsonc",
-            "Run `opencode reload` in open OpenCode sessions, or start a new one. Orca picks it up too."),
+            "Run \"opencode reload\" in open OpenCode sessions, or start a new one. Orca picks it up too."),
         new HookTool("pi", "Pi", "PI_CODING_AGENT_DIR/settings.json",
             "Run /reload in open Pi sessions, or start a new one."),
     };
