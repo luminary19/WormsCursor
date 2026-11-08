@@ -12,7 +12,7 @@ It runs in the background from the system tray, with no main window.
 
 Claude Code and Codex report through their lifecycle hooks; OpenCode and Pi through
 [small plugins that ship with the app](integrations/README.md). All four share the one token, its
-"?" badge, its timing and its settings.
+status badges, its timing and its settings.
 
 > This project began as a *Worms 3D*-style rotating-cursor theme. That cursor-theming engine has been
 > removed; the agent-waiting token is now the whole app, drawn as its own transparent overlay — so it
@@ -29,8 +29,8 @@ Claude Code and Codex report through their lifecycle hooks; OpenCode and Pi thro
 When an agent needs you, AgentsCursor draws the waiting tool's logo as a bouncing, click-through
 overlay. It shows one tool logo, and a small **"+N"** pill when several sessions wait at once:
 
-- **Plain logo**: the agent finished its turn and is waiting for your next prompt.
-- **Logo with a yellow "?" badge**: the agent is blocked on you. It needs a permission approval, an
+- **Logo with a green check cloud**: the agent finished its turn and is waiting for your next prompt.
+- **Logo with a yellow "?" cloud**: the agent is blocked on you. It needs a permission approval, an
   answer to a question, or an MCP elicitation (OpenCode: a permission or a form; Pi: any prompt an
   extension shows during a run, such as a permission or a question). If any waiting session is
   blocked, its logo is the one shown.
@@ -56,7 +56,7 @@ links to anything outside the file are removed, a DOCTYPE is skipped unread, and
 `@import`, an outside `url()`, or references that loop or would draw too much is refused, so nothing
 in it can run, fetch anything or hang the app. It must also draw something; if it can't be used, the
 page says why and the agent keeps its icon. Removing one of your icons can be undone. Added icons live
-in `%LocalAppData%\AgentsCursor\icons\`. Every icon gets the same contrast rim, "?" badge and "+N",
+in `%LocalAppData%\AgentsCursor\icons\`. Every icon gets the same contrast rim, status clouds and "+N",
 and the page previews both looks over dark and light. **Reset all icons to the originals** puts them
 back.
 
@@ -165,7 +165,7 @@ So it shows up when an agent is *waiting on you* and clears the moment you're cl
 submitted a prompt) or the session ends. Multiple sessions are tracked independently (keyed by tool +
 session id), so the count is simply "how many agents need you right now".
 
-**The four agents side by side.** The token, its "?" badge and "+N", the linger timeout, each agent's
+**The four agents side by side.** The token, its status clouds and "+N", the linger timeout, each agent's
 icon, the connection card and its startup update, and the hide-while-using list work the same for
 every agent. Where they differ, it is because of what each tool tells AgentsCursor:
 
@@ -173,7 +173,7 @@ every agent. Where they differ, it is because of what each tool tells AgentsCurs
 |---|---|---|---|---|
 | Reports through | lifecycle hooks | lifecycle hooks | a plugin, one connection per OpenCode location | an extension, one connection per TUI session |
 | **"?"** — blocked on you | a permission request, `AskUserQuestion`, an MCP request for input | a permission request, `request_user_input` / `request_permissions`, an unanswered asynchronous question | a permission, a form | any extension prompt during a run |
-| Plain logo — done | `Stop` (not while background subagents run), `StopFailure`, the idle reminder | `Stop` | the root session's run succeeds or fails | the run settles |
+| **✓** — done | `Stop` (not while background subagents run), `StopFailure`, the idle reminder | `Stop` | the root session's run succeeds or fails | the run settles |
 | You press Escape | no hook runs: a "?" stays until your next prompt | `Interrupt`: clears | clears | clears |
 | The agent is killed | a done token goes after the linger timeout; a "?" stays | the same | clears at once | clears at once |
 | AgentsCursor isn't running | those events are lost | those events are lost | a "?" still open is reported when it starts | a "?" still open is reported when it starts |
@@ -221,9 +221,9 @@ an unanswered asynchronous Codex question.
 AgentsCursor.sln
 ├─ src/
 │  ├─ AgentsCursor.Core/      Engine — no UI dependencies
-│  │   ├─ NotifierRenderer.cs Draws the token (one tool logo, the "?" badge when blocked, a "+N" pill) at a given centre/size/swing
-│  │   ├─ TokenFace.cs        Picks what the token shows: which logo, badge on/off, how many others
-│  │   ├─ AttentionBadge.cs   The yellow "?" badge
+│  │   ├─ NotifierRenderer.cs Draws the token (one tool logo, its status cloud, a "+N" pill) at a given centre/size/swing
+│  │   ├─ TokenFace.cs        Picks what the token shows: which logo, blocked or done, how many others
+│  │   ├─ StatusBadge.cs      The status clouds: yellow "?" (blocked on you), green check (done)
 │  │   ├─ IconCatalog.cs      The built-in token icons (each agent's logo + 3 mascots), embedded from Icons/<tool>/*.svg;
 │  │   │                      IconChoices normalises the per-agent choice
 │  │   ├─ IconSource.cs       An icon's SVG text (built-in or added), falling back to the agent's original logo
@@ -288,7 +288,7 @@ make it. Its sidebar has five pages:
 - **Token** — the master switch, the size, where it shows (below, above or beside the pointer, or a
   screen corner), and a live preview of a pointer gliding over dark and light with the token following it.
 - **Icons** — each agent's icon: its original logo, a mascot, or an SVG you add, with a preview of
-  both looks (done, and the yellow "?" with a "+N" for "needs you").
+  both looks (the green check for "done", and the yellow "?" with a "+N" for "needs you").
 - **Agents** — connect, update or disconnect Claude Code, Codex, OpenCode and Pi, how long the token
   stays after an agent is done, and **Preview on screen**, which shows pretend agents on the real token.
 - **Apps** — the **Hide the token while using** list.

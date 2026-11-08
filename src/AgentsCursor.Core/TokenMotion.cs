@@ -86,7 +86,7 @@ public static class TokenMotion
     public static Rest RestFor(NotifierPlacement placement, float tokenPx, float dpi, Flip flip)
     {
         bool flipY = flip.HasFlag(Flip.Y);
-        float below = PointerClearance * dpi + tokenPx * (0.5f + AttentionBadge.Overhang);
+        float below = PointerClearance * dpi + tokenPx * (0.5f + StatusBadge.Overhang);
         float above = -0.62f * tokenPx;
         var (dx, dy) = placement switch
         {
@@ -208,9 +208,9 @@ public static class TokenMotion
     // Math.Clamp, except that a work area narrower than the token centres it instead of throwing.
     static float Clamp(float value, float min, float max) => min > max ? (min + max) / 2f : Math.Clamp(value, min, max);
 
-    /// <summary>Half the side of the box a resting token needs: the icon plus the "?" badge and its
+    /// <summary>Half the side of the box a resting token needs: the icon plus the status cloud and its
     /// shadow (the same reach <see cref="TokenCanvas"/> allows for).</summary>
-    public static float RestHalfExtent(float tokenPx) => tokenPx * (0.5f + AttentionBadge.RadiusRatio * 1.25f);
+    public static float RestHalfExtent(float tokenPx) => tokenPx * (0.5f + StatusBadge.RadiusRatio * 1.25f);
 
     /// <summary>The corner token's continuous "ball" bounce at time <paramref name="t"/> seconds: |sin|
     /// hops it up from its anchor and back down, with a small sway and tilt so it reads as alive without
@@ -227,7 +227,7 @@ public static class TokenMotion
 
 /// <summary>
 /// The square canvas the token is drawn on, centred on the token's centre: big enough for the icon at
-/// any tilt, the "?" badge with its shadow and the "+N" pill beside it, and the contrast rim, so
+/// any tilt, the status cloud with its shadow and the "+N" pill beside it, and the contrast rim, so
 /// nothing is ever clipped whatever the placement or swing.
 /// </summary>
 public static class TokenCanvas
@@ -235,7 +235,7 @@ public static class TokenCanvas
     /// <summary>Half the canvas side for a token of <paramref name="tokenPx"/> px: the box's corner at
     /// any rotation (half its diagonal), plus the badge and its shadow, plus the rim.</summary>
     public static float HalfExtent(float tokenPx)
-        => tokenPx * (0.5f * MathF.Sqrt(2f) + AttentionBadge.RadiusRatio * 1.25f) + RimPad(tokenPx);
+        => tokenPx * (0.5f * MathF.Sqrt(2f) + StatusBadge.RadiusRatio * 1.25f) + RimPad(tokenPx);
 
     /// <summary>The canvas side, in whole px (even, so the token centre is a pixel corner).</summary>
     public static int Side(float tokenPx) => 2 * (int)MathF.Ceiling(HalfExtent(tokenPx));

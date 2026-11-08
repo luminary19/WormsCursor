@@ -13,7 +13,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
   face, bracket arms or a stack of windows; Pi strolls, wears 8-bit shades or turns into a whole
   pie. **Add SVG…** takes your own file (up to 256 KB, 24 per agent): it's cleaned before it's kept,
   so nothing in it can run or fetch anything from elsewhere, and if it can't be used the page says why
-  and the agent keeps its icon; removing one of your icons can be undone. The yellow "?" and the "+N" sit on every icon, and the page previews
+  and the agent keeps its icon; removing one of your icons can be undone. The status clouds and the "+N" sit on every icon, and the page previews
   both looks over dark and light. **Reset all icons to the originals** puts everything back.
 - **Above or beside the pointer, not just below.** **Position** now offers **Below the pointer** (the
   hanging token you know), **Above the pointer** (floating like a balloon on a string) and **Beside
@@ -26,7 +26,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
   (`integrations\` next to the exe), and they report into the one tray, so Pi and OpenCode get
   everything the others have: the yellow **"?"** when they need your answer (an OpenCode permission or
   form; in Pi, any prompt an extension shows during a run, such as a permission or a question), the
-  plain logo when a turn is done, the "+N", the linger timeout, the on/off switch and the
+  green check when a turn is done, the "+N", the linger timeout, the on/off switch and the
   hide-while-using list. A subagent's prompt shows on its parent conversation. When Pi or OpenCode
   quits, or is killed while waiting on you, its token clears at once. The plugins never start
   AgentsCursor: if it isn't running they wait quietly and catch up when it starts. Pi needs version
@@ -61,10 +61,11 @@ GitHub releases. The release workflow pulls the matching section into each relea
 
 - **You can tell "it needs an answer" from "it's done".** When an agent is blocked on you (a
   permission prompt, an `AskUserQuestion`, an MCP elicitation, a Codex approval or question, or an
-  OpenCode permission or form), its logo now carries a yellow **"?"** badge at the top-right. A plain
-  logo means the agent simply finished its turn. When several sessions wait, one that is blocked on
-  you is the logo shown. This works for Claude Code, Codex, OpenCode and Pi alike, and the "?" is drawn
-  as vector shapes, so it looks the same on every machine.
+  OpenCode permission or form), its logo now wears a fluffy yellow cloud with a **"?"** at the
+  top-right. When it simply finished its turn, the cloud is green with a **check**. When several
+  sessions wait, one that is blocked on you is the logo shown. This works for Claude Code, Codex,
+  OpenCode and Pi alike, and the clouds are drawn as vector shapes, so they look the same on every
+  machine.
 
 ### Changed
 - **WormsCursor is now AgentsCursor.** The new name says what it does: it shows when your AI agents
@@ -80,10 +81,10 @@ GitHub releases. The release workflow pulls the matching section into each relea
   AgentsCursor like the other agents, and all of that comes from AgentsCursor's settings (its linger
   is AgentsCursor's, 20 s by default, instead of the plugin's 30 s). An OpenCode config that still
   lists the old plugin shows as *Needs update* and is updated when AgentsCursor starts.
-- **The "+N" count is now a small pill in the logo's top-right corner.** When the "?" badge is up,
-  the pill tucks in beside it, so the two never overlap. That corner faces the cursor, so the count
-  can't swing out of view. In a top screen corner the token now sits a little further from the edge,
-  which leaves room for the badge while it bounces.
+- **The "+N" count is now a small pill in the logo's top-right corner.** It tucks in beside the
+  status cloud, so the two never overlap. That corner faces the cursor, so the count can't swing out
+  of view. In a top screen corner the token now sits a little further from the edge, which leaves
+  room for the cloud while it bounces.
 - **It's now just the agent-waiting notifier — the cursor theming is gone.** The token that
   shows when an AI agent needs you no longer rides on a themed system cursor, so you don't have to
   enable any of the *Worms*-style cursors to see it. It's drawn by its own transparent, click-through

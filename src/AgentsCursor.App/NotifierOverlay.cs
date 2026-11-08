@@ -86,7 +86,7 @@ public sealed class NotifierOverlay : IDisposable
 
     /// <summary>Set which agent sessions currently await the user — one entry per waiting session
     /// (empty = none), each with its tool and whether it is blocked on you or finished. The token shows
-    /// their <see cref="TokenFace"/>: a blocked session's logo with the "?" badge if any is blocked,
+    /// their <see cref="TokenFace"/>: a blocked session's logo with the "?" cloud if any is blocked,
     /// plus a "+N" count for the rest. Starts/stops the animation accordingly. Thread-safe (just swaps
     /// an immutable face and wakes the animation thread); call from anywhere.</summary>
     public void SetWaitingAgents(IReadOnlyList<WaitingAgent>? agents)
@@ -189,9 +189,9 @@ public sealed class NotifierOverlay : IDisposable
             var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
             dpi = DpiScaleForPoint(wa.Left + wa.Width / 2, wa.Top + wa.Height / 2);
             tokenPx = _settings.Size * dpi;
-            // Room for the bounce (0.22) and the "?" badge's reach past the logo, so the hopping
+            // Room for the bounce (0.22) and the status cloud's reach past the logo, so the hopping
             // token stays fully on screen in a top corner.
-            int margin = (int)(tokenPx * (0.25f + AttentionBadge.Overhang)) + (int)(16 * dpi);
+            int margin = (int)(tokenPx * (0.25f + StatusBadge.Overhang)) + (int)(16 * dpi);
             int half = (int)(tokenPx / 2f);
             int anchorX = _settings.Corner is ScreenCorner.TopLeft or ScreenCorner.BottomLeft
                 ? wa.Left + margin + half : wa.Right - margin - half;

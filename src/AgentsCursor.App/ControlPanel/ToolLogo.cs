@@ -45,8 +45,7 @@ static class ToolLogo
         using (var g = Gdi.Graphics.FromImage(bitmap))
         {
             g.Clear(Gdi.Color.Transparent);
-            renderer.DrawToken(g, new CursorSettings(), new TokenFace(toolId, Blocked: false, Others: 0), iconId,
-                px / 2f, px / 2f, px * share, 0f, (float)dpiScale);
+            renderer.DrawIcon(g, toolId, iconId, px / 2f, px / 2f, px * share, (float)dpiScale);
         }
 
         var data = bitmap.LockBits(new Gdi.Rectangle(0, 0, px, px), GdiImaging.ImageLockMode.ReadOnly,

@@ -7,8 +7,8 @@ namespace AgentsCursor.Core;
 /// Draws the agent-notifier token for a <see cref="TokenFace"/>: one waiting agent's icon (the one
 /// <see cref="CursorSettings.IconFor"/> picks: its original logo — Claude Code's critter, Codex's OpenAI
 /// knot, OpenCode's mark, Pi's Powerline pi — a mascot from <see cref="IconCatalog"/>, or an uploaded
-/// SVG) as a bare, free-floating glyph, with the yellow "?"
-/// <see cref="AttentionBadge"/> on its top-right when that session is blocked on you, and a small "+N"
+/// SVG) as a bare, free-floating glyph, with a <see cref="StatusBadge"/> cloud on its top-right (a
+/// green check when that session finished, a yellow "?" when it is blocked on you), and a small "+N"
 /// count pill beside it when other sessions wait too.
 ///
 /// This is UI-agnostic GDI+ drawing only — the host (the tray app's overlay window) decides where the
@@ -27,7 +27,8 @@ public sealed class NotifierRenderer : IDisposable
     /// <summary>Draws <paramref name="face"/>'s logo in a box of side <paramref name="tokenSidePx"/>
     /// centred at (<paramref name="centerX"/>/<paramref name="centerY"/>) and tilted by
     /// <paramref name="swingDeg"/> (0 = upright), plus its badges: the "+N" pill when others wait and
-    /// the "?" badge (drawn last, on top, and kept upright) when it is blocked on you. A thin contrast
+    /// the status cloud (drawn last, on top, and kept upright): a check when it finished, a "?" when it
+    /// is blocked on you. A thin contrast
     /// rim (<see cref="RimWidth"/>, at <paramref name="dpi"/>: 1 = 96 DPI) keeps the bare logo legible
     /// over any window behind it. Leaves no transform behind.</summary>
     public void DrawToken(Graphics g, CursorSettings s, TokenFace face,
@@ -50,12 +51,26 @@ public sealed class NotifierRenderer : IDisposable
         g.RotateTransform(swingDeg);
 
         var icon = DrawIcon(g, face.Tool, iconId, square, edge);
-        var (corner, radius) = AttentionBadge.Place(icon, box);
+        var (corner, radius) = StatusBadge.Place(icon, box);
         if (face.Others > 0)
-            DrawCount(g, face.Others, corner, face.Blocked ? radius : 0f, box, Parse(s.OutlineColor, Color.Black));
-        if (face.Blocked)
-            AttentionBadge.Draw(g, corner.X, corner.Y, radius);
+            DrawCount(g, face.Others, corner, radius, box, Parse(s.OutlineColor, Color.Black));
+        StatusBadge.Draw(g, corner.X, corner.Y, radius, face.Blocked ? WaitingState.Blocked : WaitingState.Finished);
 
+        g.Restore(saved);
+    }
+
+    /// <summary>Draws just <paramref name="iconId"/> of <paramref name="tool"/>, upright, with its contrast
+    /// rim and no status badge or count, fitted as the token fits it in a box of side
+    /// <paramref name="sidePx"/> centred at (<paramref name="centerX"/>/<paramref name="centerY"/>).
+    /// For places that show which agent or icon this is rather than what it is doing (the panel's
+    /// Agents cards and icon tiles).</summary>
+    public void DrawIcon(Graphics g, string tool, string iconId, float centerX, float centerY, float sidePx, float dpi)
+    {
+        float box = Math.Max(8f, sidePx);
+        var saved = g.Save();
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        DrawIcon(g, tool, iconId, new RectangleF(centerX - box / 2f, centerY - box / 2f, box, box), RimWidth(box, dpi));
         g.Restore(saved);
     }
 
@@ -114,8 +129,8 @@ public sealed class NotifierRenderer : IDisposable
     // theme outline colour, ringed in a light hairline and then a thin dark edge, so it reads as its own
     // shape on dark and light screens (the dark edge also parts it from dark logo strokes behind it). It
     // lives in the logo's top-right badge corner (the side facing the cursor, so it never swings out of
-    // the canvas). Alone it is centred on that corner; beside the "?" badge (radius > 0) it tucks under
-    // the badge's left edge, the digits centred in the part left showing, so the two read as one cluster.
+    // the canvas), tucked under the status cloud's left edge, the digits centred in the part left
+    // showing, so the two read as one cluster.
     // The digits scale with the token but never drop below MinDigitsPx, where the "+" would blur into a dot.
     const float MinDigitsPx = 11f;
     const float DigitsRatio = 0.19f, PillRatio = 0.24f; // of the token side, before the floor
@@ -131,9 +146,9 @@ public sealed class NotifierRenderer : IDisposable
 
         float h = em * (PillRatio / DigitsRatio);
         float shown = Math.Max(h, ink.Width + h * 0.62f);     // the pill's visible length
-        // Tucking a full pill height under the badge hides the pill's whole rounded end inside the disc.
-        float tuck = badgeRadius > 0f ? h : 0f;
-        float right = badgeRadius > 0f ? corner.X - badgeRadius + tuck : corner.X + h / 2f;
+        // Tucking a full pill height under the badge hides the pill's whole rounded end inside the cloud.
+        float tuck = h;
+        float right = corner.X - badgeRadius + tuck;
         float left = right - tuck - shown;
         float cy = corner.Y;
         // Centre the digits' ink (not the font's line box) in the visible part of the pill.

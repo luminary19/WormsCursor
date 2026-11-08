@@ -11,7 +11,7 @@ namespace AgentsCursor.Core;
 /// same size, and each gets the same two-tone contrast rim (its alpha mask dilated: a dark inner band,
 /// then a light outer one) so any icon reads over any window, dark or light, and a gallery of icons
 /// is edged alike whatever their colours. The sprite also
-/// reports where the icon sits in its box (<see cref="Sprite.Visual"/>), which is what the "?" badge
+/// reports where the icon sits in its box (<see cref="Sprite.Visual"/>), which is what the status badge
 /// and the "+N" pill anchor to.
 ///
 /// Not thread-safe, by design (GDI+ objects and SVG documents throw when two threads share them): each

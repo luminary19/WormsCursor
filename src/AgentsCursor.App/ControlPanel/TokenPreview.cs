@@ -45,7 +45,7 @@ public sealed class TokenPreview : FrameworkElement
     /// <summary>The agent whose icon is shown.</summary>
     public string Tool { get; set; } = "claude-code";
 
-    /// <summary>Show the "blocked on you" face (with the yellow "?") instead of the plain one.</summary>
+    /// <summary>Show the "blocked on you" face (yellow "?" cloud) instead of the finished one (green check cloud).</summary>
     public bool Blocked { get; set; }
 
     /// <summary>How many other sessions the "+N" pill counts (0 = no pill).</summary>
@@ -162,7 +162,7 @@ public sealed class TokenPreview : FrameworkElement
     // In place: the corner hop, or a bob along the placement's string (from an imaginary pointer).
     (float X, float Y, float Swing, Gdi.PointF? Pointer) IdlePose(int w, int h, float t, float tokenPx, float scale)
     {
-        float badge = tokenPx * AttentionBadge.Overhang;
+        float badge = tokenPx * StatusBadge.Overhang;
         if (_look.Placement == NotifierPlacement.Corner)
         {
             var pose = TokenMotion.CornerBounce(t, tokenPx);
@@ -199,7 +199,7 @@ public sealed class TokenPreview : FrameworkElement
         if (placement == NotifierPlacement.Corner)
         {
             var pose = TokenMotion.CornerBounce(t, tokenPx);
-            float inset = tokenPx * (0.5f + AttentionBadge.Overhang) + 8f * scale;
+            float inset = tokenPx * (0.5f + StatusBadge.Overhang) + 8f * scale;
             float x = _look.Corner is ScreenCorner.TopLeft or ScreenCorner.BottomLeft ? inset : w - inset;
             float y = _look.Corner is ScreenCorner.TopLeft or ScreenCorner.TopRight
                 ? inset + tokenPx * TokenMotion.CornerHop : h - inset;

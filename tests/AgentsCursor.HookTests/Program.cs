@@ -21,7 +21,7 @@ var tests = new (string Name, Action Run)[]
     ("A parallel call finishing keeps another call's approval", ParallelCalls),
     ("Waiting sessions report finished vs blocked", FinishedVersusBlocked),
     ("The token shows a blocked session first, badged, with the rest counted", TokenFaceSelection),
-    ("The token draws the \"?\" badge only when blocked, clear of the count", BadgeDrawing),
+    ("The token draws a yellow \"?\" cloud when blocked and a green check cloud when done, clear of the count; bare icons get none", BadgeDrawing),
     ("Codex registration merges, refreshes, and unregisters", Registration),
     ("Codex's Windows hook command parses in PowerShell", CodexWindowsCommandShell),
     ("Malformed configs are preserved", MalformedConfigs),
@@ -426,9 +426,9 @@ static void TokenFaceSelection()
     Equal(new TokenFace("claude-code", false, 0), TokenFace.For(activity.Waiting));
 }
 
-// Pixels, not just logic: the yellow disc appears only for a blocked face, at the icon's top-right,
-// for every built-in icon (originals and mascots) and token size, and the "+N" pill beside it never
-// covers it.
+// Pixels, not just logic: the status cloud sits at the icon's top-right, yellow for a blocked face and
+// green for a finished one, for every built-in icon (originals and mascots) and token size, and the "+N"
+// pill beside it never covers it.
 static void BadgeDrawing()
 {
     var settings = new CursorSettings();
@@ -438,19 +438,29 @@ static void BadgeDrawing()
             foreach (int others in new[] { 0, 3, 12 })
             {
                 var logo = IconBounds(icon.Tool, icon.Id, side);
-                var (center, r) = AttentionBadge.Place(logo, side);
+                var (center, r) = StatusBadge.Place(logo, side);
                 int dim = side * 3, mid = dim / 2;
-                // A spot on the yellow face, left of the "?" glyph.
-                int px = mid + (int)MathF.Round(center.X - r * 0.62f), py = mid + (int)MathF.Round(center.Y + r * 0.1f);
+                // A spot on the cloud's lower-left puff, clear of the "?" and the check.
+                int px = mid + (int)MathF.Round(center.X - r * 0.70f), py = mid + (int)MathF.Round(center.Y + r * 0.22f);
                 foreach (bool blocked in new[] { false, true })
                 {
                     using var canvas = new Bitmap(dim, dim);
                     using (var g = Graphics.FromImage(canvas))
                         renderer.DrawToken(g, settings, new TokenFace(icon.Tool, blocked, others), icon.Id, mid, mid, side, 0f, 1f);
                     var c = canvas.GetPixel(px, py);
-                    bool yellow = c.A > 240 && c.R > 230 && c.G > 170 && c.B < 90;
-                    if (yellow != blocked)
+                    bool yellow = c.A > 240 && c.R > 230 && c.G > 170 && c.B < 120;
+                    bool green = c.A > 240 && c.G > 150 && c.G > c.R + 40 && c.G > c.B + 40;
+                    if (blocked ? !yellow : !green)
                         throw new InvalidOperationException($"{icon.Id} {side}px +{others} blocked={blocked}: badge pixel was {c}.");
+                }
+                // A bare icon (the panel's cards and tiles) carries no status at all.
+                using (var bare = new Bitmap(dim, dim))
+                {
+                    using (var g = Graphics.FromImage(bare))
+                        renderer.DrawIcon(g, icon.Tool, icon.Id, mid, mid, side, 1f);
+                    var c = bare.GetPixel(px, py);
+                    if (c.A > 240 && (c.R > 230 && c.G > 170 && c.B < 120 || c.G > 150 && c.G > c.R + 40 && c.G > c.B + 40))
+                        throw new InvalidOperationException($"{icon.Id} {side}px: the bare icon has a badge pixel {c}.");
                 }
             }
 }
@@ -1737,7 +1747,7 @@ static void BuiltInIcons()
                     if (sprite.Image.GetPixel(x, y).A > 200) opaque++;
             Equal(true, opaque > side * side / 8);
             // The badge sits on the icon's top-right.
-            var (center, _) = AttentionBadge.Place(new RectangleF(v.X, v.Y, v.Width, v.Height), side);
+            var (center, _) = StatusBadge.Place(new RectangleF(v.X, v.Y, v.Width, v.Height), side);
             Equal(true, center.X > v.X + v.Width / 2 && center.Y < v.Y + v.Height / 2);
         }
     }

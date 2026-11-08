@@ -178,9 +178,9 @@ when several wait, a small frameless **"+N"** superscript (N = the rest) sits at
 is deliberately never a fan of logos — it stays legible on the tiny cursor canvas.
 
 > **Current rendering** (supersedes the count encoding above): `TokenFace.For(AgentActivity.Waiting)`
-> picks the logo, preferring a session that is blocked on you. A blocked session's logo carries a
-> yellow "?" `AttentionBadge` on its top-right; a plain logo means the turn just finished. The "+N"
-> is a small pill in the same corner, tucked beside the badge.
+> picks the logo, preferring a session that is blocked on you. The logo carries a `StatusBadge` cloud
+> on its top-right: yellow with a "?" when that session is blocked on you, green with a check when its
+> turn just finished. The "+N" is a small pill in the same corner, tucked beside the cloud.
 
 > **Current icons** (supersede `SvgPath`/`AgentLogos` below): every icon is an SVG. Each agent has its
 > logo (`Icons/<tool>/original.svg`: the Claude critter, the OpenAI knot, OpenCode's compact mark and

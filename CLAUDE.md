@@ -95,14 +95,16 @@ like Claude's) because a resumed Codex thread can still have open asynchronous q
 The reusable heart: token drawing + the agent-activity model. Hostable from a tray app, console, or
 tests.
 - `NotifierRenderer.cs` — `DrawToken(g, settings, TokenFace, ...)`: draws one tool logo at a given
-  centre/size/swing angle, with the yellow "?" `AttentionBadge` on its top-right when that session is
-  blocked on you, and a "+N" pill (tucked beside the badge) when other sessions wait. Pure GDI+; the
-  host decides where it lives and how it bounces. One renderer per drawing thread.
+  centre/size/swing angle, with a `StatusBadge` cloud on its top-right (a yellow "?" when that session
+  is blocked on you, a green check when it finished), and a "+N" pill (tucked beside the badge) when
+  other sessions wait. `DrawIcon(...)` draws just the icon, with no badge, for the panel's cards and
+  tiles. Pure GDI+; the host decides where it lives and how it bounces. One renderer per drawing thread.
 - `TokenFace.cs` — `TokenFace.For(Waiting)`: the pure selection of what the token shows: the first
   blocked session's tool (else the first session's), `Blocked`, and `Others` (the "+N").
-- `AttentionBadge.cs` — the "?" badge (`Place` + `Draw`): a vector glyph, stateless, so it is
-  thread-safe, drawn on every agent's icon. Its `Overhang` is what the corner placement allows for at
-  the top edge.
+- `StatusBadge.cs` — the status badge (`Place` + `Draw(..., WaitingState)`): one fluffy cloud shape
+  (overlapping puffs filled as a single winding path), yellow with a "?" for blocked and green with a
+  check for finished. All vector, stateless, so it is thread-safe, drawn on every agent's icon. Its
+  `Overhang` is what the corner placement allows for at the top edge.
 - `IconCatalog.cs` / `IconSource.cs` / `TokenSprites.cs` + `Icons/<tool>/<variant>.svg` — the token
   icons. Per agent: its `original` logo (Claude critter, OpenAI knot, OpenCode's compact mark,
   pi-cursor's Powerline pi generated once from its font into paths) and three mascots

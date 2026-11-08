@@ -2,8 +2,8 @@
 
 AgentsCursor's plugins for **Pi** (1.3 or later) and **OpenCode** (2.2, V2 plugins). They tell the
 AgentsCursor tray when the agent is blocked on you or has finished its turn, so Pi and OpenCode get
-the same token as Claude Code and Codex: the same logo-with-"?" for "needs your answer", the same
-plain logo for "done", the same "+N", linger timeout, on/off switch and hide-while-using list. All of
+the same token as Claude Code and Codex: the same yellow "?" cloud for "needs your answer", the same
+green check cloud for "done", the same "+N", linger timeout, on/off switch and hide-while-using list. All of
 that is set in AgentsCursor; the plugins have no settings of their own.
 
 They ship with the app, next to `AgentsCursor.exe`:

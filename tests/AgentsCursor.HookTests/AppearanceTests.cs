@@ -397,7 +397,7 @@ static class AppearanceTests
         var bitmap = new Bitmap(side * 2, side * 2, PixelFormat.Format32bppArgb);
         using var renderer = new NotifierRenderer();
         using var g = Graphics.FromImage(bitmap);
-        renderer.DrawToken(g, new CursorSettings(), new TokenFace(tool, false, 0), iconId, side, side, side, 0f, 1f);
+        renderer.DrawIcon(g, tool, iconId, side, side, side, 1f);
         return bitmap;
     }
 

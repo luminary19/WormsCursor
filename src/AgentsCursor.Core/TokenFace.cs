@@ -1,9 +1,9 @@
 namespace AgentsCursor.Core;
 
 /// <summary>
-/// What the token shows for the sessions currently waiting on you: one tool's logo, whether that
-/// logo carries the "blocked on you" badge (<see cref="AttentionBadge"/>), and how many other
-/// sessions wait behind it (the "+N" count).
+/// What the token shows for the sessions currently waiting on you: one tool's logo, which
+/// <see cref="StatusBadge"/> it carries (the "?" when blocked on you, the check when finished), and
+/// how many other sessions wait behind it (the "+N" count).
 ///
 /// A session blocked on you takes priority over one that merely finished, so the logo you see is
 /// the one that needs an answer. Immutable, so a host can swap it between threads freely.
