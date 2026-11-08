@@ -32,6 +32,26 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - The token no longer pops up when Claude Code hands work to background subagents. Spawning them
   ends Claude's turn at once, but it picks back up by itself when they report in, so it isn't your
   move yet. The token now waits for the real finish.
+- A permission prompt in one subagent is no longer cleared by another subagent that keeps working.
+  Approvals are now tracked per agent, and Claude Code's come from its `PermissionRequest` hook.
+  **Re-register Claude Code** in *Agent settings…* (it shows *Update available*) to pick this up.
+- The tray app no longer crashes when the Preferences preview and the live token draw at the same
+  time, and a failed animation frame is logged to `bridge.log` and retried instead of ending the app.
+- Clicking OK or Apply in Preferences no longer undoes changes made in *Agent settings…* while
+  Preferences was open (the linger timeout or the on/off toggle).
+- Closing *What's new* before the release notes finish loading no longer shows an error dialog.
+- A read-only or locked `settings.json` no longer crashes the app. A settings file that doesn't parse
+  is kept as `settings.json.corrupt-<time>` and is no longer overwritten with defaults. Trailing commas
+  and `//` comments in it are now accepted.
+- Register / Unregister keeps your own hook commands even when they share a matcher group with
+  WormsCursor's. The `.wormscursor.bak` backup now always holds your original file, and a malformed
+  Claude Code `settings.json` shows *Manual setup needed* instead of being partly overwritten.
+- *Start with Windows* only shows as ticked when the startup entry launches this copy of WormsCursor,
+  so an entry left by an old or dev build no longer hides behind a ticked box.
+- `WormsCursor.exe register|unregister` now exits non-zero and says why when it fails (including an
+  unknown `--tool`).
+- The OpenCode integration no longer re-runs a failing helper build every few seconds. It reports the
+  failure once and waits until the helper sources change.
 
 ### Removed
 - The **Check for updates** button in Preferences (the app still records the version for the post-update

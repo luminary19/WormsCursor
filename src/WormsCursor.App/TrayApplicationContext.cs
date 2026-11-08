@@ -43,7 +43,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (!_settings.AgentNotifierEnabled)
         {
             _settings.AgentNotifierEnabled = true;
-            SettingsStore.Save(_settings);
+            Persist();
         }
 
         // Self-heal for anyone upgrading from the cursor-theming version: if that older build was
@@ -113,7 +113,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     void HandleAgentEvent(AgentEventMessage msg)
     {
         if (msg.TryGetKind(out var kind))
-            _agents.Report(msg.Tool, msg.SessionId, msg.Project, kind, DateTime.UtcNow, msg.InputIds);
+            _agents.Report(msg.Tool, msg.SessionId, msg.Project, kind, DateTime.UtcNow, msg.InputIds, msg.AgentId);
     }
 
     void OnWaitingChanged(int count)
@@ -135,7 +135,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (string.Equals(lastSeen, current, StringComparison.OrdinalIgnoreCase)) return;
 
         _settings.LastSeenVersion = current; // record now, so it pops only once even if the dialog fails
-        SettingsStore.Save(_settings);
+        Persist();
 
         if (string.IsNullOrEmpty(lastSeen)) return; // nothing recorded yet (first run): just remember, don't pop
 
@@ -152,7 +152,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     void OnToggleEnabled(object? sender, EventArgs e)
     {
         _settings.AgentNotifierEnabled = !_settings.AgentNotifierEnabled;
-        SettingsStore.Save(_settings);
+        Persist();
         _enabledItem.Checked = _settings.AgentNotifierEnabled;
         _overlay.RefreshSettings();
     }
@@ -190,7 +190,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _settings.AgentNotifierTimeoutSeconds = timeoutSeconds;
         _settings.Normalize(); // clamp the timeout into range
         _agents.Ttl = TimeSpan.FromSeconds(_settings.AgentNotifierTimeoutSeconds);
-        SettingsStore.Save(_settings);
+        Persist();
         _enabledItem.Checked = _settings.AgentNotifierEnabled;
         _overlay.RefreshSettings();
     }
@@ -224,15 +224,29 @@ public sealed class TrayApplicationContext : ApplicationContext
     }
 
     /// <summary>
-    /// Apply edited settings — used by both Preferences "Apply" and "OK". Persists them and re-reads
-    /// them into the live overlay (size/placement/corner take effect on the next frame; no restart).
+    /// Apply edited settings — used by both Preferences "Apply" and "OK". Takes only the appearance
+    /// fields Preferences owns (the agent-notifier enable/timeout belong to ApplyAgentDisplay and the
+    /// tray toggle, and may have changed while the dialog was open), persists, and re-reads them into
+    /// the live overlay (size/placement/corner take effect on the next frame; no restart).
     /// </summary>
     void ApplySettings(CursorSettings source)
     {
-        _settings.CopyFrom(source);
-        SettingsStore.Save(_settings);
-        _enabledItem.Checked = _settings.AgentNotifierEnabled;
+        _settings.CopyAppearanceFrom(source);
+        Persist();
         _overlay.RefreshSettings();
+    }
+
+    // Every settings save goes through here. Persisting is best-effort: a read-only or locked
+    // settings.json must never crash the tray (some saves run in the constructor, before the message
+    // loop, where a throw would end the app with no tray icon). The in-memory settings stay live for
+    // this run; the failure is logged so it can be diagnosed.
+    void Persist()
+    {
+        try { SettingsStore.Save(_settings); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            AppLog.Write("couldn't save settings: " + ex.Message);
+        }
     }
 
     void OnExit(object? sender, EventArgs e)

@@ -6,10 +6,20 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="../../src/WormsCursor.App/AgentHookBridge.cs" Link="AgentHookBridge.cs" />
     <Compile Include="../../src/WormsCursor.App/AgentPipeServer.cs" Link="AgentPipeServer.cs" />
+    <Compile Include="../../src/WormsCursor.App/AppLog.cs" Link="AppLog.cs" />
+    <Compile Include="../../src/WormsCursor.App/Autostart.cs" Link="Autostart.cs" />
     <Compile Include="../../src/WormsCursor.App/Services/AgentHookRegistrar.cs" Link="AgentHookRegistrar.cs" />
     <Compile Include="../../src/WormsCursor.Core/AgentActivity.cs" Link="AgentActivity.cs" />
     <Compile Include="../../src/WormsCursor.Core/AgentEventMessage.cs" Link="AgentEventMessage.cs" />
+    <Compile Include="../../src/WormsCursor.Core/AgentLogos.cs" Link="AgentLogos.cs" />
+    <Compile Include="../../src/WormsCursor.Core/CursorSettings.cs" Link="CursorSettings.cs" />
+    <Compile Include="../../src/WormsCursor.Core/NotifierRenderer.cs" Link="NotifierRenderer.cs" />
+    <Compile Include="../../src/WormsCursor.Core/SettingsStore.cs" Link="SettingsStore.cs" />
+    <Compile Include="../../src/WormsCursor.Core/SvgPath.cs" Link="SvgPath.cs" />
   </ItemGroup>
 </Project>

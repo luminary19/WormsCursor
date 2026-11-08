@@ -93,7 +93,7 @@ Per-tool mapping (verified against live docs):
 | normalised        | Claude Code                                   | Codex                 | Cursor                |
 |-------------------|-----------------------------------------------|-----------------------|-----------------------|
 | `thinking_started`| `UserPromptSubmit` / `SessionStart`           | — (none)              | `sessionStart`/`preToolUse` |
-| `awaiting_user`   | `Notification` (`notification_type` = `permission_prompt`/`idle_prompt`) | — (none) | `beforeShellExecution` |
+| `awaiting_user`   | `PermissionRequest` (scoped to the asking agent by `agent_id`) / `Notification` `elicitation_dialog` | — (none) | `beforeShellExecution` |
 | `turn_complete`   | `Stop`                                        | `agent-turn-complete` | `stop`                |
 | `tool_use`        | `PreToolUse`/`PostToolUse`                     | —                     | `preToolUse`/`postToolUse` |
 | `error`           | `StopFailure`/`PostToolUseFailure`            | —                     | `postToolUseFailure`  |
@@ -168,7 +168,8 @@ Engine integration (`CursorEngine`):
 
 - `CursorSettings` (additive, tolerant-load convention): `AgentNotifierEnabled` (default true),
   `AgentNotifierTimeoutSeconds` (logo linger timeout, default 60, clamped 30–1800), maybe
-  `AgentNotifierAccent` color. Add each to `CopyFrom`/`Normalize`.
+  `AgentNotifierAccent` color. Add each to `Normalize` (not to `CopyAppearanceFrom`, which only
+  carries the fields Preferences edits).
 - `AgentHooksForm`: the display section — "Show the agent logo" toggle + a "Clear a stuck logo
   after:" minutes picker (stored as seconds). (Same live-edit/working-copy pattern as existing toggles.)
 - `TrayApplicationContext`: a **"Set up agent hooks…"** menu item between "Preferences…" and

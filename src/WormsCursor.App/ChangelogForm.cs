@@ -18,6 +18,9 @@ public sealed class ChangelogForm : Form
 
     readonly UpdateService _updates;
     readonly RichTextBox _notes;
+    // Ties the release-notes fetch to the form's lifetime: cancelled when the form closes, so a fetch
+    // that finishes (or fails) after the user closed the dialog never touches the disposed controls.
+    readonly CancellationTokenSource _closing = new();
 
     public ChangelogForm(UpdateService updates)
     {
@@ -71,16 +74,31 @@ public sealed class ChangelogForm : Form
     {
         try
         {
-            var notes = await _updates.FetchReleaseNotesAsync();
+            var notes = await _updates.FetchReleaseNotesAsync(_closing.Token);
+            if (_closing.IsCancellationRequested) return; // closed mid-fetch: nothing left to render into
             if (notes.Count == 0) { _notes.Text = "No releases found yet."; return; }
             RenderAll(notes);
         }
         catch (Exception ex)
         {
+            // Includes the cancellation from closing the form — quietly done, the controls are gone.
+            if (_closing.IsCancellationRequested) return;
             _notes.Clear();
             _notes.AppendText("Couldn't load release notes.\n\n" + ex.Message +
                               "\n\nUse “View on GitHub” for the full changelog.");
         }
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        _closing.Cancel();
+        base.OnFormClosed(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _closing.Dispose();
+        base.Dispose(disposing);
     }
 
     // The whole changelog in one scrollable column: a version heading per release, then its notes.

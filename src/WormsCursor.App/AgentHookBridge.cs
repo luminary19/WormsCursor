@@ -26,7 +26,7 @@ static class AgentHookBridge
         }
         catch (Exception ex)
         {
-            Log("hook error: " + ex.Message);
+            AppLog.Write("hook error: " + ex.Message);
         }
         return 0; // ALWAYS succeed — never block or fail the agent
     }
@@ -47,7 +47,7 @@ static class AgentHookBridge
     // (+ notification_type) ourselves; Cursor passes the normalised event via --event.
     static AgentEventMessage? FromStdin(string tool, string raw, string? evOverride)
     {
-        string? rawEvent = null, notifType = null, sessionId = null, project = null, message = null;
+        string? rawEvent = null, notifType = null, sessionId = null, agentId = null, project = null, message = null;
         bool subagentsRunning = false;
         if (!string.IsNullOrWhiteSpace(raw))
         {
@@ -58,6 +58,7 @@ static class AgentHookBridge
                 rawEvent = Str(root, "hook_event_name");
                 notifType = Str(root, "notification_type");
                 sessionId = Str(root, "session_id");
+                agentId = Str(root, "agent_id"); // set only inside a subagent
                 project = Str(root, "cwd");
                 message = Str(root, "message");
                 subagentsRunning = HasRunningSubagent(root);
@@ -74,6 +75,7 @@ static class AgentHookBridge
             Event = norm,
             RawEvent = rawEvent ?? evOverride,
             SessionId = sessionId,
+            AgentId = agentId,
             Project = project,
             Message = message,
             Ts = DateTime.UtcNow.ToString("o"),
@@ -124,6 +126,7 @@ static class AgentHookBridge
                 Event = norm,
                 RawEvent = rawEvent,
                 SessionId = Str(root, "session_id"),
+                AgentId = Str(root, "agent_id"), // set only inside a subagent
                 Project = Str(root, "cwd"),
                 Message = Str(root, "last_assistant_message"),
                 InputIds = inputIds is { Length: > 0 } ? inputIds : null,
@@ -198,6 +201,10 @@ static class AgentHookBridge
         "UserPromptSubmit" or "SessionStart" => "thinking_started",
         // The session ended (/exit, Ctrl+C, /clear, logout) → drop it so its logo doesn't linger.
         "SessionEnd" => "session_end",
+        // A permission dialog is being shown. Unlike Notification, PermissionRequest runs inside the
+        // requesting agent's context, so its payload carries that subagent's agent_id — which is what
+        // lets a sibling subagent's tool use leave this approval pending.
+        "PermissionRequest" => "awaiting_user",
         // The agent is blocked on you → awaiting_user (sticky, never swept). Claude's Notification
         // payload carries NO `notification_type` field — that string is only what the hook *matcher*
         // filters on, and we register the matcher as `permission_prompt|idle_prompt`. So any
@@ -246,16 +253,4 @@ static class AgentHookBridge
            && obj.TryGetProperty(name, out var v)
            && v.ValueKind == JsonValueKind.String
             ? v.GetString() : null;
-
-    static void Log(string text)
-    {
-        try
-        {
-            string dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WormsCursor");
-            Directory.CreateDirectory(dir);
-            File.AppendAllText(Path.Combine(dir, "bridge.log"), $"{DateTime.Now:s} {text}{Environment.NewLine}");
-        }
-        catch { /* logging must never throw */ }
-    }
 }

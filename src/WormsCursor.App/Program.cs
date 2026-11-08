@@ -21,6 +21,8 @@ static class Program
         // Headless hook (un)registration: `WormsCursor.exe register|unregister [--tool <id>]` writes or
         // removes our hooks in the tool's config and exits — the same action as the Agent-settings
         // dialog's buttons, but scriptable and UI-less (setup scripts; refreshing an outdated set).
+        // A script must be able to tell it failed (unknown tool id, malformed config, …): the reason
+        // goes to stderr (if the caller captured it) and bridge.log, and the exit code is non-zero.
         if (args.Length > 0 && args[0] is "register" or "unregister")
         {
             string tool = ArgValue(args, "--tool") ?? "claude-code";
@@ -29,7 +31,13 @@ static class Program
                 if (args[0] == "register") AgentHookRegistrar.Register(tool);
                 else AgentHookRegistrar.Unregister(tool);
             }
-            catch { /* config conflict / bad JSON — surfaced in the UI, nothing to do headless */ }
+            catch (Exception ex)
+            {
+                string error = $"{args[0]} --tool {tool} failed: {ex.Message}";
+                Console.Error.WriteLine(error);
+                AppLog.Write(error);
+                Environment.ExitCode = 1;
+            }
             return;
         }
 

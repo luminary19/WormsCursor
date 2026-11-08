@@ -26,12 +26,16 @@ public sealed class RegistryAutostart : IAutostart
 
     static string Command => $"\"{Environment.ProcessPath}\"";
 
+    /// <summary>True only when the Run entry launches <i>this</i> exe. An entry left behind by another
+    /// copy (e.g. a dev build in bin\, or an old install) reads as off, so the checkbox shows unticked
+    /// and ticking it rewrites the entry to the current exe instead of hiding a stale autostart.</summary>
     public bool IsEnabled
     {
         get
         {
             using var run = Registry.CurrentUser.OpenSubKey(RunKey);
-            if (run?.GetValue(ValueName) is not string) return false;
+            if (run?.GetValue(ValueName) is not string stored || !LaunchesExe(stored, Environment.ProcessPath))
+                return false;
 
             // If the user switched us off in Task Manager / Settings, StartupApproved
             // holds a flag whose first byte is != 2 (2 = enabled, 3 = disabled).
@@ -40,6 +44,23 @@ public sealed class RegistryAutostart : IAutostart
                 return false;
 
             return true;
+        }
+    }
+
+    /// <summary>Whether a stored Run command (as <see cref="Enable"/> writes it: the quoted exe path)
+    /// launches <paramref name="exe"/> — compared as full paths, quotes trimmed, case-insensitive.</summary>
+    internal static bool LaunchesExe(string stored, string? exe)
+    {
+        if (string.IsNullOrWhiteSpace(exe)) return false;
+        string path = stored.Trim().Trim('"');
+        if (path.Length == 0) return false;
+        try
+        {
+            return string.Equals(Path.GetFullPath(path), Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false; // not a usable path, so it can't be launching us
         }
     }
 

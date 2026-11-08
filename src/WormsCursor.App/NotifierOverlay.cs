@@ -31,6 +31,10 @@ public sealed class NotifierOverlay : IDisposable
 {
     readonly CursorSettings _settings;
     readonly LayeredWindow _window = new();
+    // The window's HWND, captured once on the UI thread. The animation thread passes only this raw
+    // handle to user32 — it never touches a Control member (reading Control.Handle off-thread throws
+    // "Cross-thread operation not valid" whenever CheckForIllegalCrossThreadCalls is on, e.g. under a debugger).
+    readonly IntPtr _hwnd;
     readonly Bitmap _empty = new(1, 1, PixelFormat.Format32bppArgb); // painted when hiding the token
 
     readonly Thread _thread;
@@ -43,6 +47,8 @@ public sealed class NotifierOverlay : IDisposable
     bool _disposed;
 
     // --- animation state (touched only by the animation thread) ---
+    readonly NotifierRenderer _renderer = new(); // its GDI+ objects belong to the animation thread
+    bool _frameFailureLogged; // log the first failed frame only, so a persistent fault can't flood the log
     Bitmap? _buffer;          // reused back-buffer, sized to the current canvas
     int _canvas;              // current back-buffer side (physical px)
     float _t;                 // master clock (s)
@@ -51,12 +57,13 @@ public sealed class NotifierOverlay : IDisposable
 
     const int SleepMs = 6;    // ~150 Hz loop cap; real elapsed dt keeps the motion time-correct
     const float MaxDt = 0.05f;// clamp a scheduling hiccup so the explicit-Euler spring can't blow up
+    const int FailureBackoffMs = 1000; // pause after a failed frame before trying again
 
     public NotifierOverlay(CursorSettings settings)
     {
         _settings = settings;
-        _ = _window.Handle;                                  // realise the handle on the UI thread
-        ShowWindow(_window.Handle, SW_SHOWNOACTIVATE);       // a layered window draws nothing until UpdateLayeredWindow
+        _hwnd = _window.Handle;                              // realise the handle on the UI thread
+        ShowWindow(_hwnd, SW_SHOWNOACTIVATE);                // a layered window draws nothing until UpdateLayeredWindow
         HideToken();                                         // …so this just parks it transparent + off-screen
 
         _thread = new Thread(Loop) { IsBackground = true, Name = "WormsCursorNotifier" };
@@ -101,22 +108,38 @@ public sealed class NotifierOverlay : IDisposable
             {
                 if (_active)
                 {
-                    // Re-assert the top of the always-on-top band on each hidden->shown transition.
-                    // The window sets WS_EX_TOPMOST once at creation and never re-raises itself, so a
-                    // later-created topmost overlay (e.g. the alacritty-blackhole GL overlay) would
-                    // otherwise sit above the token. One raise per appearance is enough — UpdateLayeredWindow
-                    // never touches z-order, so it holds for as long as the token stays visible.
-                    if (hidden) { _window.BringToTop(); hidden = false; }
-                    double now = sw.Elapsed.TotalSeconds;
-                    float dt = (float)(now - last);
-                    last = now;
-                    if (dt > MaxDt) dt = MaxDt;
-                    if (dt > 0f) Tick(dt);
+                    // One frame is the failure boundary: an exception here must never escape this
+                    // background thread, which would terminate the whole tray process. A failed frame
+                    // is logged (once), the token is hidden, and the loop backs off and tries again.
+                    try
+                    {
+                        // Re-assert the top of the always-on-top band on each hidden->shown transition.
+                        // The window sets WS_EX_TOPMOST once at creation and never re-raises itself, so a
+                        // later-created topmost overlay (e.g. the alacritty-blackhole GL overlay) would
+                        // otherwise sit above the token. One raise per appearance is enough — UpdateLayeredWindow
+                        // never touches z-order, so it holds for as long as the token stays visible.
+                        if (hidden) { BringToTop(_hwnd); hidden = false; }
+                        double now = sw.Elapsed.TotalSeconds;
+                        float dt = (float)(now - last);
+                        last = now;
+                        if (dt > MaxDt) dt = MaxDt;
+                        if (dt > 0f) Tick(dt);
+                    }
+                    catch (Exception ex)
+                    {
+                        FrameFailed(ex);
+                        hidden = true;                  // re-raise on the next good frame
+                        last = sw.Elapsed.TotalSeconds; // no giant dt after the back-off
+                    }
                     Thread.Sleep(SleepMs);
                 }
                 else
                 {
-                    if (!hidden) { HideToken(); hidden = true; }
+                    if (!hidden)
+                    {
+                        hidden = true;
+                        try { HideToken(); } catch (Exception ex) { FrameFailed(ex); }
+                    }
                     _wake.Wait();
                     if (!_running) break;
                     _wake.Reset();
@@ -173,11 +196,23 @@ public sealed class NotifierOverlay : IDisposable
             g.Clear(Color.Transparent);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            NotifierRenderer.DrawToken(g, _settings, tools,
+            _renderer.DrawToken(g, _settings, tools,
                 canvas / 2f + offX, canvas / 2f + offY, tokenPx, swing);
         }
 
-        _window.SetBitmap(_buffer!, anchorX - canvas / 2, anchorY - canvas / 2);
+        SetBitmap(_hwnd, _buffer!, anchorX - canvas / 2, anchorY - canvas / 2);
+    }
+
+    // A frame threw: log the first failure, park the token off-screen, and pause before retrying.
+    void FrameFailed(Exception ex)
+    {
+        if (!_frameFailureLogged)
+        {
+            _frameFailureLogged = true;
+            AppLog.Write("overlay frame failed (token hidden, retrying): " + ex);
+        }
+        try { HideToken(); } catch { /* best-effort; the next good frame repaints anyway */ }
+        Thread.Sleep(FailureBackoffMs);
     }
 
     // The pointer pendulum: a springy string from the cursor (anchor) to the token (bob), under
@@ -234,7 +269,7 @@ public sealed class NotifierOverlay : IDisposable
         _canvas = canvas;
     }
 
-    void HideToken() => _window.SetBitmap(_empty, -32000, -32000);
+    void HideToken() => SetBitmap(_hwnd, _empty, -32000, -32000);
 
     // DPI scale (1.0 = 96 DPI) of the monitor under a screen point, so the token stays a consistent
     // physical size on mixed-DPI setups. Best-effort: falls back to 1.0 if the shell call fails.
@@ -258,6 +293,7 @@ public sealed class NotifierOverlay : IDisposable
         _wake.Set();
         if (_thread.IsAlive) _thread.Join(500); // stop touching the window before we dispose it
         _buffer?.Dispose();
+        _renderer.Dispose();
         _empty.Dispose();
         _wake.Dispose();
         _window.Dispose();
@@ -294,50 +330,46 @@ public sealed class NotifierOverlay : IDisposable
         }
 
         protected override bool ShowWithoutActivation => true;
+    }
 
-        /// <summary>Re-assert this window at the top of the always-on-top band, without moving,
-        /// resizing, or activating it. Called once per token appearance so a topmost overlay created
-        /// after us (e.g. the alacritty-blackhole GL overlay) can't keep the token buried. Safe from
-        /// the animation thread — a plain z-order call, like SetBitmap's UpdateLayeredWindow.</summary>
-        public void BringToTop()
+    /// <summary>Re-assert the window at the top of the always-on-top band, without moving,
+    /// resizing, or activating it. Called once per token appearance so a topmost overlay created
+    /// after us (e.g. the alacritty-blackhole GL overlay) can't keep the token buried. Safe from
+    /// the animation thread — a plain z-order call on the raw HWND, like <see cref="SetBitmap"/>.</summary>
+    static void BringToTop(IntPtr hwnd)
+        => SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    /// <summary>Blit an ARGB bitmap as the window's content at screen (<paramref name="x"/>,
+    /// <paramref name="y"/>), honouring its per-pixel alpha. Safe to call from the animation thread:
+    /// it only updates the layered surface of the raw HWND (no message pump, no Control members).
+    /// (Canonical Forms layered-window pattern: <c>GetHbitmap(Color.FromArgb(0))</c> + AC_SRC_ALPHA.)</summary>
+    static void SetBitmap(IntPtr hwnd, Bitmap bmp, int x, int y)
+    {
+        IntPtr screenDc = GetDC(IntPtr.Zero);
+        IntPtr memDc = CreateCompatibleDC(screenDc);
+        IntPtr hBmp = IntPtr.Zero, old = IntPtr.Zero;
+        try
         {
-            if (!IsHandleCreated) return;
-            SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            hBmp = bmp.GetHbitmap(Color.FromArgb(0));
+            old = SelectObject(memDc, hBmp);
+            var size = new SIZE { cx = bmp.Width, cy = bmp.Height };
+            var src = new POINT { x = 0, y = 0 };
+            var dst = new POINT { x = x, y = y };
+            var blend = new BLENDFUNCTION
+            {
+                BlendOp = AC_SRC_OVER,
+                BlendFlags = 0,
+                SourceConstantAlpha = 255,
+                AlphaFormat = AC_SRC_ALPHA,
+            };
+            UpdateLayeredWindow(hwnd, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, ULW_ALPHA);
         }
-
-        /// <summary>Blit an ARGB bitmap as the window's content at screen (<paramref name="x"/>,
-        /// <paramref name="y"/>), honouring its per-pixel alpha. Safe to call from the animation thread:
-        /// it only updates the layered surface (no message pump needed). (Canonical Forms layered-window
-        /// pattern: <c>GetHbitmap(Color.FromArgb(0))</c> + AC_SRC_ALPHA.)</summary>
-        public void SetBitmap(Bitmap bmp, int x, int y)
+        finally
         {
-            if (!IsHandleCreated) return;
-            IntPtr screenDc = GetDC(IntPtr.Zero);
-            IntPtr memDc = CreateCompatibleDC(screenDc);
-            IntPtr hBmp = IntPtr.Zero, old = IntPtr.Zero;
-            try
-            {
-                hBmp = bmp.GetHbitmap(Color.FromArgb(0));
-                old = SelectObject(memDc, hBmp);
-                var size = new SIZE { cx = bmp.Width, cy = bmp.Height };
-                var src = new POINT { x = 0, y = 0 };
-                var dst = new POINT { x = x, y = y };
-                var blend = new BLENDFUNCTION
-                {
-                    BlendOp = AC_SRC_OVER,
-                    BlendFlags = 0,
-                    SourceConstantAlpha = 255,
-                    AlphaFormat = AC_SRC_ALPHA,
-                };
-                UpdateLayeredWindow(Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, ULW_ALPHA);
-            }
-            finally
-            {
-                if (old != IntPtr.Zero) SelectObject(memDc, old);
-                if (hBmp != IntPtr.Zero) DeleteObject(hBmp);
-                DeleteDC(memDc);
-                ReleaseDC(IntPtr.Zero, screenDc);
-            }
+            if (old != IntPtr.Zero) SelectObject(memDc, old);
+            if (hBmp != IntPtr.Zero) DeleteObject(hBmp);
+            DeleteDC(memDc);
+            ReleaseDC(IntPtr.Zero, screenDc);
         }
     }
 

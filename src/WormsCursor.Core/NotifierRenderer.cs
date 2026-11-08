@@ -12,16 +12,22 @@ namespace WormsCursor.Core;
 /// token lives and how it bounces, then calls <see cref="DrawToken"/> with the computed centre and
 /// swing angle. There is intentionally never a fan of logos — multiple waiting agents collapse to one
 /// logo plus a "+N" count, which stays legible at any size.
+///
+/// An instance owns the GDI+ objects it draws with (parsed logos + cached sprites), and GDI+ objects
+/// are not thread-safe — so each drawing thread creates its own renderer (the overlay's animation
+/// thread and the Preferences preview each hold one) and never shares it with another thread.
 /// </summary>
-public static class NotifierRenderer
+public sealed class NotifierRenderer : IDisposable
 {
+    readonly AgentLogos _logos = new();
+
     /// <summary>Draws a single logo (the first entry in <paramref name="tools"/>, tool ids like
     /// "claude-code" / "codex") of side <paramref name="tokenSidePx"/> centred at
     /// (<paramref name="centerX"/>/<paramref name="centerY"/>) and tilted by <paramref name="swingDeg"/>
     /// (0 = upright). When more than one agent waits, a small "+N" superscript (N = the rest) sits at
     /// the logo's top-right. A thin contrast rim keeps the bare logo legible over any window behind it.
     /// Leaves no transform behind.</summary>
-    public static void DrawToken(Graphics g, CursorSettings s, IReadOnlyList<string> tools,
+    public void DrawToken(Graphics g, CursorSettings s, IReadOnlyList<string> tools,
                                  float centerX, float centerY, float tokenSidePx, float swingDeg)
     {
         if (tools is null || tools.Count == 0) return;
@@ -36,7 +42,7 @@ public static class NotifierRenderer
         g.RotateTransform(swingDeg);
 
         // Always exactly one logo (the most recent waiting tool); never a fan.
-        AgentLogos.Draw(g, tools[0], new RectangleF(-box / 2f, -box / 2f, box, box), edge);
+        _logos.Draw(g, tools[0], new RectangleF(-box / 2f, -box / 2f, box, box), edge);
         if (count > 1)
         {
             var outline = Parse(s.OutlineColor, Color.Black);
@@ -45,6 +51,8 @@ public static class NotifierRenderer
 
         g.Restore(saved);
     }
+
+    public void Dispose() => _logos.Dispose();
 
     // A small outlined "+N" (white fill / theme outline, like the other glyphs) standing in for the
     // other waiting agents — a frameless superscript at the single logo's top-right corner.

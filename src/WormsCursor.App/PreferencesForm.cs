@@ -36,6 +36,9 @@ public sealed class PreferencesForm : Form
     readonly Label _version;
     readonly LinkLabel _link, _whatsNew;
     readonly ToolTip _tip = new();
+    // The preview's own renderer (UI thread only) — never the overlay's, whose GDI+ objects belong
+    // to the animation thread.
+    readonly NotifierRenderer _renderer = new();
 
     readonly Action<CursorSettings> _apply;
     readonly UpdateService _updates;
@@ -225,7 +228,7 @@ public sealed class PreferencesForm : Form
 
         // Draw the token at its real configured size, centred, upright (swing 0).
         float side = Math.Min(_working.Size, Math.Min(w, h) - 12);
-        NotifierRenderer.DrawToken(g, _working, new[] { "claude-code" }, w / 2f, h / 2f, side, 0f);
+        _renderer.DrawToken(g, _working, new[] { "claude-code" }, w / 2f, h / 2f, side, 0f);
     }
 
     void ResetDefaults()
@@ -289,7 +292,11 @@ public sealed class PreferencesForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _tip?.Dispose();
+        if (disposing)
+        {
+            _tip?.Dispose();
+            _renderer.Dispose();
+        }
         base.Dispose(disposing);
     }
 

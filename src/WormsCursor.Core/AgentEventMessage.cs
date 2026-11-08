@@ -22,6 +22,9 @@ public sealed class AgentEventMessage
     public string? RawEvent { get; set; }
 
     public string? SessionId { get; set; }
+    /// <summary>The subagent that raised the event; absent for the main agent. Subagents share their
+    /// parent's <see cref="SessionId"/>, so this is what scopes an approval prompt to one agent.</summary>
+    public string? AgentId { get; set; }
     public string? Project { get; set; }
     public string? Message { get; set; }
     public string? Ts { get; set; }

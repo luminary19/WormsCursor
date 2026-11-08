@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, readdir, rename, rm } from "node:fs/promises";
 import { createConnection, type Socket } from "node:net";
@@ -17,6 +17,18 @@ export interface CursorRuntime {
 
 export interface NativeMaterialization { hash: string; directory: string; executable: string }
 
+export interface MaterializeOptions {
+  /** Repository root holding global.json and src/WormsCursor.OpenCodeOverlay (default: this checkout). */
+  root?: string;
+  /** Builds the helper project into a directory (default: `dotnet build`). */
+  build?: (project: string, directory: string) => Promise<void>;
+}
+
+// A build that failed for one source hash will fail the same way until those sources change, so the
+// failure is remembered for this process: connect retries then re-attempt only the connect/spawn and
+// never re-run `dotnet build` every few seconds. Keyed by the content-addressed output directory.
+const failedBuilds = new Map<string, Error>();
+
 async function exists(path: string): Promise<boolean> {
   try { await access(path); return true; } catch { return false; }
 }
@@ -32,11 +44,24 @@ async function sourceFiles(directory: string, relative = ""): Promise<string[]> 
   return result.sort();
 }
 
-function build(project: string, directory: string): Promise<void> {
+// The dotnet driver hands the work to MSBuild worker processes, so killing only its PID would leave
+// them writing into the staging directory that is about to be deleted. Resolves once taskkill exits.
+function killTree(child: ChildProcess): Promise<void> {
+  return new Promise((resolveKill) => {
+    if (child.pid === undefined) { resolveKill(); return; }
+    const killer = spawn("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true, shell: false, stdio: "ignore" });
+    killer.once("error", () => { child.kill(); resolveKill(); });
+    killer.once("exit", () => resolveKill());
+  });
+}
+
+// -nodeReuse:false keeps no MSBuild nodes alive after the build. The project's own directory is the
+// working directory, so the SDK still resolves the repository's global.json.
+function dotnetBuild(project: string, directory: string): Promise<void> {
   return new Promise((resolveBuild, reject) => {
-    const child = spawn("dotnet", ["build", project, "-c", "Release", "--nologo", "-o", directory,
+    const child = spawn("dotnet", ["build", project, "-c", "Release", "--nologo", "-nodeReuse:false", "-o", directory,
       `-p:BaseIntermediateOutputPath=${join(directory, "obj")}\\`], {
-      cwd: repository, windowsHide: true, shell: false, stdio: "ignore",
+      cwd: dirname(project), windowsHide: true, shell: false, stdio: "ignore",
     });
     let settled = false;
     const finish = (error?: Error) => {
@@ -45,30 +70,51 @@ function build(project: string, directory: string): Promise<void> {
       clearTimeout(timer);
       error ? reject(error) : resolveBuild();
     };
-    const timer = setTimeout(() => { child.kill(); finish(new Error("OpenCode cursor helper build timed out")); }, 60000);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true; // the killed driver's own exit must not be reported as an ordinary failure
+      void killTree(child).then(() => finish(new Error("OpenCode cursor helper build timed out")));
+    }, 60000);
     child.once("error", finish);
-    child.once("exit", (code) => finish(code === 0 ? undefined : new Error(`OpenCode cursor helper build exited ${code}`)));
+    child.once("exit", (code) => {
+      if (!timedOut) finish(code === 0 ? undefined : new Error(`OpenCode cursor helper build exited ${code}`));
+    });
   });
 }
 
+function rememberFailure(directory: string, hash: string, error: unknown): Error {
+  const failure = error instanceof Error ? error : new Error(String(error));
+  failedBuilds.set(directory, failure);
+  console.error(`WormsCursor: OpenCode cursor helper build ${hash} failed; not rebuilding until its sources change: ${failure.message}`);
+  return failure;
+}
+
 /** Source-addressed builds never replace an executable used by another session. */
-export async function materializeNativeHelper(): Promise<NativeMaterialization> {
-  const native = join(repository, "src", "WormsCursor.OpenCodeOverlay");
+export async function materializeNativeHelper(options: MaterializeOptions = {}): Promise<NativeMaterialization> {
+  const root = options.root ?? repository;
+  const build = options.build ?? dotnetBuild;
+  const native = join(root, "src", "WormsCursor.OpenCodeOverlay");
   const digest = createHash("sha256");
-  digest.update(await readFile(join(repository, "global.json")));
+  digest.update(await readFile(join(root, "global.json")));
   for (const name of await sourceFiles(native)) {
     digest.update(name.replaceAll("\\", "/")).update("\0").update(await readFile(join(native, name))).update("\0");
   }
   const hash = digest.digest("hex").slice(0, 24);
-  const cache = join(repository, "artifacts", "opencode");
+  const cache = join(root, "artifacts", "opencode");
   const directory = join(cache, hash);
   const executable = join(directory, "OpenCodeCursorOverlay.exe");
   if (await exists(executable)) return { hash, directory, executable };
+  const failed = failedBuilds.get(directory);
+  if (failed) throw failed;
   await mkdir(cache, { recursive: true });
   const staging = await mkdtemp(join(cache, `.${hash}-`));
   try {
-    await build(join(native, "WormsCursor.OpenCodeOverlay.csproj"), staging);
-    if (!await exists(join(staging, "OpenCodeCursorOverlay.exe"))) throw new Error("OpenCode cursor build produced no executable");
+    try {
+      await build(join(native, "WormsCursor.OpenCodeOverlay.csproj"), staging);
+      if (!await exists(join(staging, "OpenCodeCursorOverlay.exe"))) throw new Error("OpenCode cursor build produced no executable");
+    } catch (error) {
+      throw rememberFailure(directory, hash, error);
+    }
     await rm(join(staging, "obj"), { recursive: true, force: true });
     try { await rename(staging, directory); }
     catch (error) { if (!await exists(executable)) throw error; }

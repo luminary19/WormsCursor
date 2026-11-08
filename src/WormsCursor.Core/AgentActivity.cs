@@ -7,17 +7,19 @@ public enum AgentEventKind
 {
     /// <summary>The agent started working on your prompt (Claude <c>UserPromptSubmit</c>). Clears "needs you".</summary>
     ThinkingStarted,
-    /// <summary>The agent is blocked on you mid-turn — a permission/idle prompt (Claude
-    /// <c>Notification</c> permission_prompt/idle_prompt). Sets "needs you" <b>indefinitely</b>: the
-    /// agent is actively waiting on your decision, so this logo is never swept by the idle timeout —
-    /// it stays until you respond (the session reports work again) or it ends.</summary>
+    /// <summary>An agent is blocked on you mid-turn — a permission prompt (Claude and Codex
+    /// <c>PermissionRequest</c>) or an MCP elicitation. Recorded as a pending approval for <i>that
+    /// agent</i> (main agent or one subagent) and held <b>indefinitely</b>: the agent is actively
+    /// waiting on your decision, so this logo is never swept by the idle timeout — it stays until
+    /// that same agent reports work again, the turn ends, or the session ends.</summary>
     AwaitingUser,
     /// <summary>The agent finished its turn; the ball is in your court (Claude <c>Stop</c>,
     /// Codex <c>Stop</c>). Sets "needs you" and fires a celebratory pulse. Unlike
     /// <see cref="AwaitingUser"/> this just needs a fresh prompt, so its logo lingers then auto-clears
     /// once the idle timeout elapses.</summary>
     TurnComplete,
-    /// <summary>The agent is actively using a tool (Pre/PostToolUse). Clears "needs you".</summary>
+    /// <summary>An agent is actively using a tool (Pre/PostToolUse). Clears the finished-turn notice
+    /// and that agent's own pending approval — never a sibling subagent's.</summary>
     ToolUse,
     /// <summary>The turn ended on an error (Claude <c>StopFailure</c>). Sets "needs you", red pulse.</summary>
     Error,
@@ -37,30 +39,39 @@ public enum AgentEventKind
 /// pipe-listener thread calls <see cref="Report"/>; the tray reads <see cref="WaitingTools"/> /
 /// <see cref="WaitingCount"/> and pushes them into the overlay.
 ///
-/// "Needs you" is set by <see cref="AgentEventKind.AwaitingUser"/>, <see cref="AgentEventKind.TurnComplete"/>
-/// and <see cref="AgentEventKind.Error"/> (the agent is blocked or done — your move), and cleared by
-/// <see cref="AgentEventKind.ThinkingStarted"/> / <see cref="AgentEventKind.ToolUse"/> (it's working again,
-/// so you must have responded), and the session is dropped outright by <see cref="AgentEventKind.SessionEnded"/>
-/// (the agent exited).
+/// A session needs you while any of three independent things is pending:
+/// <list type="bullet">
+/// <item>a <b>finished-turn notice</b> — <see cref="AgentEventKind.TurnComplete"/> / <see cref="AgentEventKind.Error"/>
+/// (your move), cleared when work resumes (<see cref="AgentEventKind.ThinkingStarted"/> / <see cref="AgentEventKind.ToolUse"/>);</item>
+/// <item><b>pending approvals</b>, one per blocked agent — <see cref="AgentEventKind.AwaitingUser"/>. Subagents share
+/// their parent's session id, so approvals are keyed by agent id: a subagent's tool use clears only its own
+/// approval, while a sibling still blocked on you keeps the token up. A new prompt or a finished turn clears
+/// them all (nothing can still be blocked once the turn is over);</item>
+/// <item><b>pending questions</b> — <see cref="AgentEventKind.InputRequested"/>, until each is answered.</item>
+/// </list>
+/// The session is dropped outright by <see cref="AgentEventKind.SessionEnded"/> (the agent exited).
 ///
 /// The idle timeout (<see cref="_ttl"/>) only sweeps <b>timed</b> waits — a finished turn or an error,
 /// which just need a fresh prompt — so a logo can't wedge the count after a quiet finish. A session
-/// blocked on your approval (<see cref="AgentEventKind.AwaitingUser"/>) is <b>sticky</b>: it is never
-/// swept and stays until you actually respond or it ends, because the agent really is still waiting on
-/// you. (Trade-off: a hard-killed agent that was awaiting approval leaves its logo up until you clear
-/// or disable it, since no closing event ever arrives.)
+/// with a pending approval or question is <b>sticky</b>: it is never swept and stays until you actually
+/// respond or it ends, because the agent really is still waiting on you. (Trade-off: a hard-killed agent
+/// that was awaiting approval leaves its logo up until you clear or disable it, since no closing event
+/// ever arrives.)
 /// </summary>
 public sealed class AgentActivity
 {
-    // Sticky == this wait is the agent blocking on your approval; it survives the idle sweep entirely.
+    // NeedsYou is the timed finished-turn/error notice. Pending approvals and questions are sticky:
+    // an entry holding either survives the idle sweep entirely.
     sealed class Entry
     {
         public bool NeedsYou;
-        public bool Sticky;
         public DateTime LastUtc;
         public string Tool = "";
+        // Agent ids blocked on an approval prompt ("" = the main agent).
+        public readonly HashSet<string> PendingApprovals = new(StringComparer.Ordinal);
         public readonly HashSet<string> PendingInputs = new(StringComparer.Ordinal);
-        public bool IsWaiting => NeedsYou || PendingInputs.Count > 0;
+        public bool IsSticky => PendingApprovals.Count > 0 || PendingInputs.Count > 0;
+        public bool IsWaiting => NeedsYou || IsSticky;
     }
 
     readonly object _gate = new();
@@ -103,10 +114,11 @@ public sealed class AgentActivity
     }
 
     /// <summary>Apply one normalised event for a session. <paramref name="sessionId"/> may be null
-    /// (we then key by tool+project). <paramref name="nowUtc"/> is injected so callers/tests stay
+    /// (we then key by tool+project). <paramref name="agentId"/> names the subagent that raised the
+    /// event (null = the main agent). <paramref name="nowUtc"/> is injected so callers/tests stay
     /// deterministic. Safe to call from any thread.</summary>
     public void Report(string tool, string? sessionId, string? project, AgentEventKind kind, DateTime nowUtc,
-        IReadOnlyList<string>? inputIds = null)
+        IReadOnlyList<string>? inputIds = null, string? agentId = null)
     {
         if (string.IsNullOrEmpty(tool)) tool = "unknown";
         int after;
@@ -134,18 +146,30 @@ public sealed class AgentActivity
                     if (inputIds is not null) e.PendingInputs.ExceptWith(inputIds);
                     // Answering a question acknowledges a finished turn, but does not answer an
                     // independent approval prompt. Async questions and approvals can overlap.
-                    if (!e.Sticky) e.NeedsYou = false;
+                    e.NeedsYou = false;
                 }
                 else
                 {
-                    if (kind == AgentEventKind.ThinkingStarted) e.PendingInputs.Clear();
-                    e.NeedsYou = kind switch
+                    string agent = agentId ?? "";
+                    switch (kind)
                     {
-                        AgentEventKind.AwaitingUser or AgentEventKind.TurnComplete or AgentEventKind.Error => true,
-                        _ => false, // ThinkingStarted / ToolUse: the agent is working again
-                    };
-                    // Approval prompts remain sticky; completion and error notices expire.
-                    e.Sticky = kind == AgentEventKind.AwaitingUser;
+                        case AgentEventKind.AwaitingUser:
+                            e.PendingApprovals.Add(agent);
+                            break;
+                        case AgentEventKind.ToolUse:
+                            // Only this agent resumed: a sibling subagent may still be blocked on you.
+                            e.PendingApprovals.Remove(agent);
+                            break;
+                        case AgentEventKind.ThinkingStarted:
+                            e.PendingInputs.Clear();
+                            e.PendingApprovals.Clear();
+                            break;
+                        default: // TurnComplete / Error: the turn is over, so no agent is still blocked
+                            e.PendingApprovals.Clear();
+                            break;
+                    }
+                    // Completion and error notices are timed; they expire on the idle sweep.
+                    e.NeedsYou = kind is AgentEventKind.TurnComplete or AgentEventKind.Error;
                 }
             }
             after = CountNeedsYou();
@@ -156,7 +180,7 @@ public sealed class AgentActivity
 
     /// <summary>Evict <i>timed</i> sessions (finished turn / error) idle longer than the TTL. Call
     /// periodically (e.g. a tray timer) so a finished-turn logo eventually drops out of the count.
-    /// Sticky sessions (blocked on your approval) are never evicted here.</summary>
+    /// Sticky sessions (a pending approval or question) are never evicted here.</summary>
     public void Sweep(DateTime nowUtc)
     {
         int before, after;
@@ -173,7 +197,7 @@ public sealed class AgentActivity
     {
         List<string>? dead = null;
         foreach (var kv in _sessions)
-            if (!kv.Value.Sticky && kv.Value.PendingInputs.Count == 0 && nowUtc - kv.Value.LastUtc > _ttl)
+            if (!kv.Value.IsSticky && nowUtc - kv.Value.LastUtc > _ttl)
                 (dead ??= new()).Add(kv.Key);
         if (dead is not null)
             foreach (var k in dead) _sessions.Remove(k);

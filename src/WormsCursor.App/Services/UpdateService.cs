@@ -50,10 +50,11 @@ public sealed class UpdateService
     /// are dropped; each entry's <see cref="ReleaseNote.Body"/> is the release notes markdown.
     /// Throws on network / rate-limit / parse failure — the caller falls back to the Releases
     /// page. Anonymous GitHub API is rate-limited (~60/h per IP), ample for occasional use.
+    /// <paramref name="cancellationToken"/> abandons the request (e.g. the dialog was closed).
     /// </summary>
-    public async Task<IReadOnlyList<ReleaseNote>> FetchReleaseNotesAsync()
+    public async Task<IReadOnlyList<ReleaseNote>> FetchReleaseNotesAsync(CancellationToken cancellationToken = default)
     {
-        var json = await Http.GetStringAsync(ApiReleasesUrl).ConfigureAwait(false);
+        var json = await Http.GetStringAsync(ApiReleasesUrl, cancellationToken).ConfigureAwait(false);
         var releases = JsonSerializer.Deserialize<List<GithubRelease>>(json) ?? new();
         return releases
             .Where(r => !r.Draft)

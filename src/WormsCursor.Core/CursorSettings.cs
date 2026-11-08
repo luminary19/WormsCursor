@@ -72,16 +72,16 @@ public sealed class CursorSettings
     /// member-wise clone is already a safe, independent working copy for the dialog.</summary>
     public CursorSettings Clone() => (CursorSettings)MemberwiseClone();
 
-    /// <summary>Copy all editable values from <paramref name="other"/> into this instance (so a
-    /// reference held by the overlay sees the change without being replaced). <see cref="LastSeenVersion"/>
-    /// is app state, not an appearance edit, so it's deliberately left alone.</summary>
-    public void CopyFrom(CursorSettings other)
+    /// <summary>Copy the token-appearance values (the ones the Preferences dialog edits) from
+    /// <paramref name="other"/> into this instance, so a reference held by the overlay sees the change
+    /// without being replaced. Everything else is deliberately left alone: the agent-notifier enable +
+    /// linger timeout have their own owner (the Agent settings dialog and the tray toggle), which may
+    /// have changed them <i>after</i> the Preferences working copy was cloned — copying them here would
+    /// revert those edits with a stale snapshot. <see cref="LastSeenVersion"/> is app state.</summary>
+    public void CopyAppearanceFrom(CursorSettings other)
     {
-        Version = other.Version;
         Size = other.Size;
         OutlineColor = other.OutlineColor;
-        AgentNotifierEnabled = other.AgentNotifierEnabled;
-        AgentNotifierTimeoutSeconds = other.AgentNotifierTimeoutSeconds;
         Placement = other.Placement;
         Corner = other.Corner;
     }

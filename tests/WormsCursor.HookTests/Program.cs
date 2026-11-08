@@ -1,3 +1,4 @@
+using System.Drawing;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using WormsCursor.App;
@@ -14,6 +15,13 @@ var tests = new (string Name, Action Run)[]
     ("Codex registration merges, refreshes, and unregisters", Registration),
     ("Malformed configs are preserved", MalformedConfigs),
     ("CODEX_HOME is respected", CodexHome),
+    ("A sibling subagent's tool use keeps another agent's approval", SubagentApprovals),
+    ("Claude registration keeps user commands and the original backup", ClaudeRegistration),
+    ("Unknown tool ids are rejected", UnknownTool),
+    ("Renderers on two threads draw concurrently without sharing GDI+ objects", ConcurrentRendering),
+    ("Applying Preferences keeps the agent-notifier settings", PreferencesKeepAgentSettings),
+    ("Corrupt and unwritable settings files are never destroyed", SettingsPersistence),
+    ("Autostart only counts a Run entry that launches this exe", AutostartTarget),
 };
 foreach (var (name, run) in tests)
 {
@@ -35,7 +43,7 @@ static AgentEventMessage Parse(object payload, string tool = "codex", string? ev
 static void Apply(AgentActivity activity, AgentEventMessage message, DateTime now)
 {
     Equal(true, message.TryGetKind(out var kind));
-    activity.Report(message.Tool, message.SessionId, message.Project, kind, now, message.InputIds);
+    activity.Report(message.Tool, message.SessionId, message.Project, kind, now, message.InputIds, message.AgentId);
 }
 
 static void Lifecycle()
@@ -254,17 +262,25 @@ static void Registration() => WithHome(home =>
 
 static void MalformedConfigs() => WithHome(home =>
 {
-    string path = AgentHookRegistrar.CodexPath;
-    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    foreach (string raw in new[] { "[1]", "null", "{", "{\"hooks\":[]}", "{\"hooks\":{\"Stop\":{}}}" })
+    foreach (var (tool, path) in new[] { ("codex", AgentHookRegistrar.CodexPath), ("claude-code", AgentHookRegistrar.ClaudePath) })
     {
-        File.WriteAllText(path, raw);
-        Equal(HookState.ConfigConflict, AgentHookRegistrar.GetState("codex"));
-        bool rejected = false;
-        try { AgentHookRegistrar.Register("codex"); }
-        catch (InvalidOperationException) { rejected = true; }
-        Equal(true, rejected);
-        Equal(raw, File.ReadAllText(path));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        foreach (string raw in new[] { "[1]", "null", "{", "{\"hooks\":[]}", "{\"hooks\":{\"Stop\":{}}}", "{\"hooks\":{\"Stop\":[{\"matcher\":\"*\"}]}}" })
+        {
+            File.WriteAllText(path, raw);
+            Equal(HookState.ConfigConflict, AgentHookRegistrar.GetState(tool));
+            foreach (Action action in new Action[] { () => AgentHookRegistrar.Register(tool), () => AgentHookRegistrar.Unregister(tool) })
+            {
+                bool rejected = false;
+                try { action(); }
+                catch (InvalidOperationException) { rejected = true; }
+                Equal(true, rejected);
+                Equal(raw, File.ReadAllText(path));
+            }
+        }
+        // A non-string command is not ours, and must not make the state check throw.
+        File.WriteAllText(path, "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":5}]}]}}");
+        Equal(HookState.NotRegistered, AgentHookRegistrar.GetState(tool));
     }
 });
 
@@ -278,4 +294,178 @@ static void CodexHome()
         WithHome(home => Equal(Path.Combine(home, ".codex", "hooks.json"), AgentHookRegistrar.CodexPath));
     }
     finally { Environment.SetEnvironmentVariable("CODEX_HOME", previous); }
+}
+
+static void SubagentApprovals()
+{
+    var now = DateTime.UtcNow;
+    foreach (string tool in new[] { "claude-code", "codex" })
+    {
+        var activity = new AgentActivity(TimeSpan.FromSeconds(10));
+        AgentEventMessage Event(string name, string? agent) => Parse(new
+        {
+            hook_event_name = name, session_id = "parent", tool_name = "Bash", agent_id = agent,
+        }, tool);
+        var asked = Event("PermissionRequest", "agent-a");
+        Equal("awaiting_user", asked.Event);
+        Equal("agent-a", asked.AgentId);
+        Apply(activity, asked, now);
+        Apply(activity, Event("PostToolUse", "agent-b"), now); // a sibling keeps working
+        Equal(1, activity.WaitingCount);
+        Apply(activity, Event("PostToolUse", null), now);      // so does the main agent
+        Equal(1, activity.WaitingCount);
+        activity.Sweep(now.AddHours(1));
+        Equal(1, activity.WaitingCount);                       // still blocked on you: never swept
+        Apply(activity, Event("PostToolUse", "agent-a"), now.AddHours(1)); // agent A was approved
+        Equal(0, activity.WaitingCount);
+
+        // Two agents blocked at once: the token stays until both are answered.
+        Apply(activity, Event("PermissionRequest", null), now);
+        Apply(activity, Event("PermissionRequest", "agent-b"), now);
+        Apply(activity, Event("PreToolUse", null), now);
+        Equal(1, activity.WaitingCount);
+        Apply(activity, Event("PreToolUse", "agent-b"), now);
+        Equal(0, activity.WaitingCount);
+
+        // A finished turn means nothing is still blocked: the notice replaces the approvals and expires.
+        Apply(activity, Event("PermissionRequest", "agent-a"), now);
+        Apply(activity, Event("Stop", null), now);
+        Equal(1, activity.WaitingCount);
+        activity.Sweep(now.AddSeconds(11));
+        Equal(0, activity.WaitingCount);
+    }
+}
+
+static void ClaudeRegistration() => WithHome(home =>
+{
+    string path = AgentHookRegistrar.ClaudePath;
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    File.WriteAllText(path, "{\"model\":\"opus\"}");
+    string original = File.ReadAllText(path);
+    AgentHookRegistrar.Register("claude-code");
+    Equal(HookState.Registered, AgentHookRegistrar.GetState("claude-code"));
+    var root = JsonNode.Parse(File.ReadAllText(path))!;
+    Equal(true, root["hooks"]!["PermissionRequest"] is JsonArray);
+    // The approval prompt comes from PermissionRequest (it carries agent_id), not Notification.
+    Equal(false, File.ReadAllText(path).Contains("permission_prompt"));
+
+    // A user's own command hand-placed in our matcher group survives a refresh and an unregister.
+    root["hooks"]!["Stop"]![0]!["hooks"]!.AsArray().Add(new JsonObject
+    {
+        ["type"] = "command", ["command"] = "my-notify.ps1",
+    });
+    File.WriteAllText(path, root.ToJsonString());
+    AgentHookRegistrar.Register("claude-code");
+    Equal(HookState.Registered, AgentHookRegistrar.GetState("claude-code"));
+    Equal(true, File.ReadAllText(path).Contains("my-notify.ps1"));
+    AgentHookRegistrar.Unregister("claude-code");
+    Equal(HookState.NotRegistered, AgentHookRegistrar.GetState("claude-code"));
+    var after = JsonNode.Parse(File.ReadAllText(path))!;
+    Equal("my-notify.ps1", after["hooks"]!["Stop"]![0]!["hooks"]![0]!["command"]!.GetValue<string>());
+    Equal(1, after["hooks"]!.AsObject().Count);
+    // Several writes later, the backup is still the user's original, pre-WormsCursor file.
+    Equal(original, File.ReadAllText(path + ".wormscursor.bak"));
+
+    // A registration from before PermissionRequest was added reads as needing a refresh.
+    AgentHookRegistrar.Register("claude-code");
+    var old = JsonNode.Parse(File.ReadAllText(path))!;
+    old["hooks"]!.AsObject().Remove("PermissionRequest");
+    File.WriteAllText(path, old.ToJsonString());
+    Equal(HookState.Outdated, AgentHookRegistrar.GetState("claude-code"));
+});
+
+static void UnknownTool() => WithHome(home =>
+{
+    foreach (Action action in new Action[] { () => AgentHookRegistrar.Register("cluade"), () => AgentHookRegistrar.Unregister("cluade") })
+    {
+        bool rejected = false;
+        try { action(); }
+        catch (ArgumentException) { rejected = true; }
+        Equal(true, rejected);
+    }
+});
+
+// The overlay's animation thread and the Preferences preview draw the same logo at the same size.
+// Each owns its renderer, so no GDI+ object is shared ("Object is currently in use elsewhere").
+static void ConcurrentRendering()
+{
+    var settings = new CursorSettings();
+    var tools = new[] { "claude-code", "codex" };
+    int failures = 0, frames = 0;
+    var until = DateTime.UtcNow.AddSeconds(1.5);
+    var threads = Enumerable.Range(0, 2).Select(_ => new Thread(() =>
+    {
+        using var renderer = new NotifierRenderer();
+        using var canvas = new Bitmap(256, 256);
+        while (DateTime.UtcNow < until)
+        {
+            try
+            {
+                using var g = Graphics.FromImage(canvas);
+                renderer.DrawToken(g, settings, tools, 128f, 128f, 96f, 0f);
+                Interlocked.Increment(ref frames);
+            }
+            catch (InvalidOperationException) { Interlocked.Increment(ref failures); }
+        }
+    })).ToArray();
+    foreach (var t in threads) t.Start();
+    foreach (var t in threads) t.Join();
+    Equal(0, failures);
+    Equal(true, frames > 100);
+}
+
+static void PreferencesKeepAgentSettings()
+{
+    var live = new CursorSettings();
+    var working = live.Clone(); // Preferences opens on a snapshot…
+    live.AgentNotifierEnabled = false;       // …then Agent settings… changes the notifier
+    live.AgentNotifierTimeoutSeconds = 120;
+    working.Size = 150;
+    working.Placement = NotifierPlacement.Corner;
+    live.CopyAppearanceFrom(working);        // OK / Apply in Preferences
+    Equal(150, live.Size);
+    Equal(NotifierPlacement.Corner, live.Placement);
+    Equal(false, live.AgentNotifierEnabled);
+    Equal(120, live.AgentNotifierTimeoutSeconds);
+}
+
+static void SettingsPersistence() => WithHome(home =>
+{
+    string path = Path.Combine(home, "settings.json");
+    // Hand-edit slips the reader forgives.
+    File.WriteAllText(path, "{\n  // bigger token\n  \"Size\": 120,\n}");
+    Equal(120, SettingsStore.Load(path).Size);
+
+    // An unparseable file is moved aside, so saving the defaults can't destroy it.
+    string corrupt = "{\"Size\": 120, \"Corner\": \"Bottom\"}";
+    File.WriteAllText(path, corrupt);
+    var loaded = SettingsStore.Load(path);
+    Equal(96, loaded.Size);
+    string[] kept = Directory.GetFiles(home, "settings.json.corrupt-*");
+    Equal(1, kept.Length);
+    Equal(corrupt, File.ReadAllText(kept[0]));
+    SettingsStore.Save(loaded, path);
+    Equal(corrupt, File.ReadAllText(kept[0]));
+
+    // A read-only target throws (the app decides how to handle it) and leaves no orphaned tmp.
+    File.SetAttributes(path, FileAttributes.ReadOnly);
+    try
+    {
+        bool threw = false;
+        try { SettingsStore.Save(loaded, path); }
+        catch (UnauthorizedAccessException) { threw = true; }
+        Equal(true, threw);
+        Equal(false, File.Exists(path + ".tmp"));
+    }
+    finally { File.SetAttributes(path, FileAttributes.Normal); }
+});
+
+static void AutostartTarget()
+{
+    const string exe = "C:\\Users\\me\\AppData\\Local\\WormsCursor\\current\\WormsCursor.exe";
+    Equal(true, RegistryAutostart.LaunchesExe("\"" + exe + "\"", exe));
+    Equal(true, RegistryAutostart.LaunchesExe(exe.ToUpperInvariant(), exe));
+    Equal(false, RegistryAutostart.LaunchesExe("\"C:\\src\\WormsCursor\\bin\\Release\\WormsCursor.exe\"", exe));
+    Equal(false, RegistryAutostart.LaunchesExe("\"\"", exe));
+    Equal(false, RegistryAutostart.LaunchesExe("\"" + exe + "\"", null));
 }

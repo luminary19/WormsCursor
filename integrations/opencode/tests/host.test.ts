@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer, type Socket } from "node:net";
 import test from "node:test";
-import { NativeCursorRuntime } from "../host.ts";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { materializeNativeHelper, NativeCursorRuntime } from "../host.ts";
 import { DEFAULT_SETTINGS } from "../state.ts";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -62,4 +65,29 @@ test("stopping during helper materialization cannot launch a late helper", { ski
   release();
   await starting;
   assert.equal(runtime.getStatus(), "Disconnected");
+});
+
+test("a failed helper build is not re-run until the helper sources change", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wormscursor-materialize-"));
+  const native = join(root, "src", "WormsCursor.OpenCodeOverlay");
+  await mkdir(native, { recursive: true });
+  await writeFile(join(root, "global.json"), "{}");
+  await writeFile(join(native, "Program.cs"), "// v1");
+  let builds = 0;
+  const build = async () => { builds++; throw new Error("compile error"); };
+  const errors: unknown[] = [];
+  const consoleError = console.error;
+  console.error = (...args: unknown[]) => { errors.push(args); };
+  try {
+    await assert.rejects(materializeNativeHelper({ root, build }), /compile error/);
+    await assert.rejects(materializeNativeHelper({ root, build }), /compile error/);
+    assert.equal(builds, 1);
+    assert.equal(errors.length, 1);
+    await writeFile(join(native, "Program.cs"), "// v2");
+    await assert.rejects(materializeNativeHelper({ root, build }), /compile error/);
+    assert.equal(builds, 2);
+  } finally {
+    console.error = consoleError;
+    await rm(root, { recursive: true, force: true });
+  }
 });
