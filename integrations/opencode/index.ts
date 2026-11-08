@@ -1,13 +1,14 @@
+// AgentsCursor's OpenCode plugin: reports when OpenCode is blocked on you or has finished, so the
+// AgentsCursor tray shows OpenCode's token. Connect it from AgentsCursor's Agents page (it adds this
+// folder to opencode.jsonc `plugins`); the tray owns the token's look, timing and switch.
 import { Plugin } from "@opencode/plugin";
-import { CursorController } from "./controller.ts";
-import { NativeCursorRuntime } from "./host.ts";
-import { readSettings } from "./state.ts";
+import { OpenCodeController } from "./controller.ts";
 
 export default Plugin.define({
-  id: "local.opencode-cursor",
+  id: "agentscursor.opencode",
   setup(context) {
     if (process.platform !== "win32") return;
-    const controller = new CursorController(context, new NativeCursorRuntime(), readSettings(context.options));
+    const controller = new OpenCodeController(context);
     controller.start();
     return () => controller.stop();
   },

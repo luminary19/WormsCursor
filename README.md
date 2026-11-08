@@ -3,26 +3,26 @@
 <img src="src/AgentsCursor.App/Assets/icon.png" width="96" align="right" alt="AgentsCursor icon">
 
 A tiny Windows tray utility that shows a **bouncing token when an AI agent is waiting on you**. When
-Claude Code or Codex is blocked on your decision or has finished its turn, its
+Claude Code, Codex, OpenCode or Pi is blocked on your decision or has finished its turn, its
 logo appears and bounces — either hanging off your mouse pointer and following it, or pinned to
 a screen corner. Reply (or the session ends) and it disappears. It's an ambient, peripheral-vision
 nudge: no toast, no extra window to manage.
 
 It runs in the background from the system tray, with no main window.
 
-The [OpenCode 2 plugin](integrations/opencode/README.md) uses an independent shared native helper,
-following Pi's cursor extension: the same motion, completion linger, persistent pipe ownership,
-and optimized rendering, with the OpenCode logo. Its source and build live in this repository.
+Claude Code and Codex report through their lifecycle hooks; OpenCode and Pi through
+[small plugins that ship with the app](integrations/README.md). All four share the one token, its
+"?" badge, its timing and its settings.
 
 > This project began as a *Worms 3D*-style rotating-cursor theme. That cursor-theming engine has been
 > removed; the agent-waiting token is now the whole app, drawn as its own transparent overlay — so it
 > works **without theming or replacing any of your system cursors**. (The old cursor code lives in git
 > history if you want it.)
 
-> **Renamed from WormsCursor.** The app was called WormsCursor until 0.8.2. On its first start,
-> AgentsCursor copies your settings over from `%LocalAppData%\WormsCursor\` and moves a **Start with
-> Windows** entry across. Hooks connected by WormsCursor show as **Update** on the **Agents** page:
-> press it once per tool and they are replaced in place. The GitHub repository keeps its old name.
+> **Renamed from WormsCursor.** The app was called WormsCursor until 0.8.2. AgentsCursor reads your
+> settings from `%LocalAppData%\WormsCursor\` until it saves its own, and moves a **Start with
+> Windows** entry across. Hooks WormsCursor connected are updated in place when AgentsCursor starts
+> (for Codex, approve the changed hooks with `/hooks`). The GitHub repository keeps its old name.
 
 ## The token
 
@@ -31,8 +31,9 @@ overlay. It shows one tool logo, and a small **"+N"** pill when several sessions
 
 - **Plain logo**: the agent finished its turn and is waiting for your next prompt.
 - **Logo with a yellow "?" badge**: the agent is blocked on you. It needs a permission approval, an
-  answer to a question, or an MCP elicitation (OpenCode: a permission or a form). If any waiting
-  session is blocked, its logo is the one shown.
+  answer to a question, or an MCP elicitation (OpenCode: a permission or a form; Pi: any prompt an
+  extension shows during a run, such as a permission or a question). If any waiting session is
+  blocked, its logo is the one shown.
 
 Two placements (set on the **Token** page of **Preferences…**):
 
@@ -50,13 +51,15 @@ of **Preferences…**) is in front, whether it runs fullscreen, borderless or wi
 (`dota2.exe`) is on the list by default. **Add a program** offers the programs that are open now, or
 takes a typed exe name; **Remove** takes one off. Your agents are still tracked meanwhile. When you switch
 away and one is still waiting, the token comes back. While hidden, the token costs no CPU: AgentsCursor
-learns about focus changes from Windows instead of checking repeatedly. The OpenCode helper follows
-the same list.
+learns about focus changes from Windows instead of checking repeatedly.
 
 ## How the notifier works
 
-Set it up on the **Agents** page of **Preferences…**: connect **Claude Code** or **Codex** there
-and set how long the token stays after an agent is done (the master switch is on the **Token** page). Connecting writes AgentsCursor's
+Set it up on the **Agents** page of **Preferences…**: connect **Claude Code**, **Codex**,
+**OpenCode** or **Pi** there, and set how long the token stays after an agent is done (the master
+switch is on the **Token** page). Every card reads the same way: *Connected*, *Needs update*, *Not
+connected* or *Can't read its config*, with **Connect**, **Update**, **Disconnect** or **Show file**.
+For Claude Code and Codex, connecting writes AgentsCursor's
 `hook` command into the tool's config — `%CLAUDE_CONFIG_DIR%\settings.json` when that environment
 variable is set, otherwise `%USERPROFILE%\.claude\settings.json`; Codex uses
 `%CODEX_HOME%\hooks.json`, otherwise `%USERPROFILE%\.codex\hooks.json` — with backup-and-merge, so it preserves
@@ -102,13 +105,30 @@ or changing hook trust so they load the updated configuration.
 Codex runs a Windows hook through PowerShell (`powershell.exe -NoProfile -Command …`, or `pwsh`
 when installed), so AgentsCursor registers its Codex hook as `& '<path>\AgentsCursor.exe' hook --tool
 codex` in `commandWindows`. A registration from before this fix used a bare quoted path, which
-PowerShell rejects, so every Codex hook failed; the **Agents** page shows it as *Update available*.
+PowerShell rejects, so every Codex hook failed; the **Agents** page shows it as *Needs update*.
 
 **Codex under Orca.** Orca runs Codex with
 `CODEX_HOME=%APPDATA%\orca\codex-runtime-home\home`. Orca copies your hooks there but trusts only
 its own, so AgentsCursor's hooks don't run in Orca-launched Codex until you trust them: open Codex
 from Orca, run `/hooks`, and trust the AgentsCursor entries. Do this once, and again whenever the
 hook command changes (after **Update**, or when the AgentsCursor exe moves).
+
+**OpenCode and Pi.** Connecting adds the plugin folder shipped next to `AgentsCursor.exe`
+(`integrations\opencode`, `integrations\pi`) to OpenCode's `opencode.jsonc` `plugins` or Pi's
+`settings.json` `extensions`. Each plugin host keeps one connection to the tray, so a Pi or OpenCode
+that quits or is killed clears its token at once. They never start the tray; when it isn't running
+they wait quietly and reconnect when it is. OpenCode reports a permission or form as blocked and a
+finished root session as done, with a subagent's prompts shown on its parent conversation; Pi reports
+any extension prompt raised during a run (approvals, questions) as blocked and a settled run as done.
+See [integrations/README.md](integrations/README.md) for the event mapping.
+
+**Kept current automatically.** When AgentsCursor starts, it updates every connection you made that
+points at another copy of it or an older setup (the app moved, it was renamed from WormsCursor, a dev
+build ran) in place, and leaves alone the tools you didn't connect. If a tool needs a step of its own
+afterwards, a notification says so and its card on the **Agents** page shows the step: start a new
+session; for Codex, approve the changed hooks under `/hooks` (also in Orca-launched Codex); for
+OpenCode, `opencode reload`; for Pi, `/reload`. A dev build and the installed app each point the
+connections at themselves when they start.
 
 Codex currently has no failure lifecycle hook for model/API errors, and those errors can skip
 `Stop`. Consequently, these failures cannot reliably produce a completion token. Normal completion,
@@ -137,7 +157,8 @@ an unanswered asynchronous Codex question.
 
 ## Known issues
 
-- **A hard-killed agent's token can linger.** The notifier learns everything from the tool's hooks
+- **A hard-killed Claude Code or Codex agent's token can linger.** (OpenCode and Pi clear at once:
+  their plugin's connection closes with them.) The notifier learns everything from the tool's hooks
   over the pipe — it never watches the agent's process. A *clean* exit (`/exit`, `Ctrl+C`, `/clear`,
   logout) fires `SessionEnd` and the token clears immediately, but if the agent is **killed outright**
   (Task Manager "End Task", closing the terminal window, `kill`) no hook runs, so no "session ended"
@@ -154,8 +175,10 @@ AgentsCursor.sln
 │  ├─ AgentsCursor.Core/      Engine — no UI dependencies
 │  │   ├─ NotifierRenderer.cs Draws the token (one tool logo, the "?" badge when blocked, a "+N" pill) at a given centre/size/swing
 │  │   ├─ TokenFace.cs        Picks what the token shows: which logo, badge on/off, how many others
-│  │   ├─ AttentionBadge.cs   The yellow "?" badge, shared with the OpenCode helper
-│  │   ├─ AgentLogos.cs       Baked tool logos (Claude critter, OpenAI knot); SvgPath.cs parses the path data
+│  │   ├─ AttentionBadge.cs   The yellow "?" badge
+│  │   ├─ IconCatalog.cs      The built-in token icons (each agent's own logo), embedded from Icons/<tool>/*.svg
+│  │   ├─ IconSource.cs       An icon's SVG text, falling back to the agent's original logo
+│  │   ├─ TokenSprites.cs     Renders icons (SVG.NET) to cached sprites, fitted by visible pixels, with a contrast rim
 │  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe)
 │  │   ├─ AgentEventMessage.cs The normalised wire format (one JSON line per event)
 │  │   ├─ CursorSettings.cs   Token size / placement / corner / notifier settings / hidden-while-using programs (persisted as JSON)
@@ -170,18 +193,20 @@ AgentsCursor.sln
 │      ├─ NotifierOverlay.cs          The layered overlay window + bounce animation (cursor / corner)
 │      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the overlay, pipe server, settings and control panel
 │      ├─ ControlPanel/               The WPF-UI control panel: one window, sidebar pages Token / Agents / Apps / About
-│      ├─ AgentPipeServer.cs          Named-pipe server that receives normalised agent events
+│      ├─ AgentPipeServer.cs          Named-pipe server: many connections at once, hooks and plugin leases
 │      ├─ AgentHookBridge.cs          The `hook` verb: normalises a tool's payload → one pipe line, fail-silent
-│      ├─ Services/AgentHookRegistrar.cs Writes/removes AgentsCursor's hook in each tool's config (backup + merge)
+│      ├─ Services/AgentHookRegistrar.cs Connects each tool (backup + merge); HooksJson.cs (Claude, Codex),
+│      │                              OpenCodePlugins.cs + JsoncEdit.cs, PiExtensions.cs
 │      ├─ SingleInstance.cs           One instance only; a 2nd launch opens the control panel
 │      ├─ Autostart.cs                "Start with Windows" via HKCU\…\Run
 │      └─ Services/UpdateService.cs   Velopack check / download / apply updates, release notes
+├─ integrations/            The Pi and OpenCode plugins (TypeScript), shipped next to the exe
+│  ├─ shared/                The tray connection and message format
+│  ├─ pi/, opencode/         The plugins
+│  └─ tests/                 Their tests and SDK contract checks (npm test, npm run typecheck)
 └─ tools/
    └─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the app/tray glyph
 ```
-
-`src/AgentsCursor.OpenCodeOverlay/` contains the independent OpenCode helper;
-`integrations/opencode/` contains its V2 plugin, installation script, and lifecycle tests.
 
 The engine (`Core`) is deliberately UI-agnostic (GDI+ only): the WinForms overlay and the WPF control
 panel's preview draw the token with the same renderer.
@@ -207,7 +232,7 @@ make it. Its sidebar has four pages:
 
 - **Token** — the master switch, a live preview of both looks (done, and the yellow "?" for "needs
   you") on dark and light, the size, and where it shows (next to the pointer, or a screen corner).
-- **Agents** — connect, update or disconnect the hooks for Claude Code and Codex, how long the token
+- **Agents** — connect, update or disconnect Claude Code, Codex, OpenCode and Pi, how long the token
   stays after an agent is done, and **Preview on screen**, which shows pretend agents on the real token.
 - **Apps** — the **Hide the token while using** list.
 - **About** — the version, **Check for updates**, **What's new**, the panel's **Theme** (System,

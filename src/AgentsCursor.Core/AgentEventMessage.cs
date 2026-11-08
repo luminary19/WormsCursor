@@ -4,14 +4,22 @@ using System.Text.Json.Serialization;
 namespace AgentsCursor.Core;
 
 /// <summary>
-/// The normalised agent event a <c>hook</c> bridge writes to the pipe — one JSON object per line.
-/// Tool-specific stdin payloads are mapped to this shape by the bridge;
-/// the tray app deserializes it and feeds <see cref="AgentActivity"/>. UI-free; serialised with
-/// the same System.Text.Json the settings store uses.
+/// The normalised agent event written to the tray's pipe, one JSON object per line. Two kinds of
+/// client write it: the throwaway <c>hook</c> bridge (Claude Code, Codex), which maps a tool's stdin
+/// payload to one line and exits, and the Pi and OpenCode plugins, which keep one connection open for
+/// their host's lifetime and open it with <see cref="AttachEvent"/>. The tray app deserializes it and
+/// feeds <see cref="AgentActivity"/>. UI-free; serialised with the same System.Text.Json the settings
+/// store uses.
 /// </summary>
 public sealed class AgentEventMessage
 {
-    /// <summary>Originating tool: <c>claude-code</c>, <c>codex</c>, <c>cursor</c>, …</summary>
+    /// <summary>The first line of a persistent plugin connection (<c>{"tool":"pi","event":"attach"}</c>).
+    /// A connection-level message, consumed by the pipe server: it ties the sessions reported over that
+    /// connection to it, so they are dropped when it closes. It is never an <see cref="AgentEventKind"/>.</summary>
+    public const string AttachEvent = "attach";
+
+    /// <summary>Originating tool: <c>claude-code</c>, <c>codex</c> (hooks), <c>pi</c>, <c>opencode</c>
+    /// (plugins). Icons are keyed by these ids.</summary>
     public string Tool { get; set; } = "";
 
     /// <summary>Normalised event: <c>thinking_started | awaiting_user | turn_complete | tool_use |
@@ -21,6 +29,8 @@ public sealed class AgentEventMessage
     /// <summary>The tool's original event name, for logging/debugging (e.g. Claude's <c>Stop</c>).</summary>
     public string? RawEvent { get; set; }
 
+    /// <summary>The agent's session: Claude's and Codex's <c>session_id</c>, Pi's session id, or the
+    /// <b>root</b> OpenCode session (a subagent's events belong to its parent conversation).</summary>
     public string? SessionId { get; set; }
     /// <summary>The subagent that raised the event; absent for the main agent. Subagents share their
     /// parent's <see cref="SessionId"/>, so this is what scopes an approval prompt to one agent.</summary>

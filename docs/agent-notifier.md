@@ -1,9 +1,10 @@
 ﻿# Agent Notifier — historical design
 
 > This is an archived design note. The current implementation also replaces the old Codex `notify`
-> integration with shared desktop/CLI lifecycle hooks, tracks asynchronous questions, and includes
-> an independent OpenCode 2 helper. Use [README.md](../README.md) and the
-> [OpenCode integration guide](../integrations/opencode/README.md) for current behavior and setup.
+> integration with shared desktop/CLI lifecycle hooks, tracks asynchronous questions, and reports
+> OpenCode and Pi through plugins that keep a connection to the tray (see "Current transport" below).
+> Use [README.md](../README.md) and the [plugin guide](../integrations/README.md) for current
+> behavior and setup.
 
 > **Superseded (rendering only).** This doc describes the original design where the notifier was
 > composited onto the *themed system cursors* by `CursorEngine`. The cursor-theming engine has since
@@ -78,6 +79,18 @@ Cursor ──────┘  .cursor/hooks.json command                        
 - The existing `EventWaitHandle` "show preferences" signal can later fold into this pipe, but
   MVP leaves it untouched.
 
+> **Current transport** (supersedes the one-client-at-a-time server above): `AgentPipeServer` serves
+> up to 64 connections at once (`PipeOptions.CurrentUserOnly`, duplex because Bun can't write to an
+> inbound-only pipe), always keeping a listening instance, so a persistent connection never delays a
+> hook. Lines are capped at 64 KiB (a longer one drops that connection). Two kinds of client share it:
+> the throwaway `hook` bridge (Claude Code, Codex: one line, then exit) and the OpenCode and Pi
+> plugins, which hold one connection per host and open it with `{"tool":"pi","event":"attach"}`.
+> That makes the connection a **lease**: its messages reach the tray tagged with it, the sessions they
+> report are owned by it (`AgentActivity.Report(..., owner)`), and when it closes the server raises
+> the release after its last message and `AgentActivity.Release(owner)` drops exactly those sessions,
+> so a killed Pi or OpenCode clears at once. The plugins never start the tray: they retry with
+> backoff and replay their blocked state on every connect.
+
 ### 2. Normalised wire format (hook → pipe)
 
 One JSON object per line:
@@ -89,7 +102,11 @@ One JSON object per line:
 
 `event` ∈ `thinking_started | awaiting_user | turn_complete | tool_use | error | session_end |
 input_requested | input_answered`; `agentId` names the subagent (absent = main agent) and `inputIds`
-names the items an event opens or answers. Current mapping (Claude Code 2.1.x, Codex 0.162.x; the
+names the items an event opens or answers. `tool` is `claude-code`, `codex`, `opencode` or `pi`; the
+plugins also send the connection-level `attach` (never an event kind). Pi and OpenCode map their own
+events onto these (Pi: `ui_prompt_start`/`ui_prompt_end` during a run, `agent_settled`; OpenCode:
+`permission.*`, `form.*`, the root session's run starting and ending), as tabled in
+[integrations/README.md](../integrations/README.md). Current mapping (Claude Code 2.1.x, Codex 0.162.x; the
 Cursor column of the original design was never shipped):
 
 | normalised        | Claude Code                                   | Codex                 |
@@ -158,10 +175,15 @@ is deliberately never a fan of logos — it stays legible on the tiny cursor can
 > **Current rendering** (supersedes the count encoding above): `TokenFace.For(AgentActivity.Waiting)`
 > picks the logo, preferring a session that is blocked on you. A blocked session's logo carries a
 > yellow "?" `AttentionBadge` on its top-right; a plain logo means the turn just finished. The "+N"
-> is a small pill in the same corner, tucked beside the badge. The OpenCode helper draws the same
-> badge for its `waiting` display.
+> is a small pill in the same corner, tucked beside the badge.
 
-Logos are baked from each tool's SVG into vector geometry by `SvgPath` (a tiny path-data parser,
+> **Current icons** (supersede `SvgPath`/`AgentLogos` below): each agent's logo is an SVG embedded in
+> Core (`Icons/<tool>/original.svg`: the Claude critter, the OpenAI knot, OpenCode's compact mark and
+> pi-cursor's 12-column Powerline pi), rendered with SVG.NET by `TokenSprites`: fitted by its visible
+> pixels, given a generic contrast rim (its alpha mask dilated, light for a dark icon, dark for a light
+> one), and cached per size. The badge and the pill anchor to the icon's visible bounds.
+
+Logos were baked from each tool's SVG into vector geometry by `SvgPath` (a tiny path-data parser,
 mirroring `HandShape`) and held by `AgentLogos` (`claude-code` → the orange pixel critter; the
 Codex/OpenAI knot is baked but hidden from the UI until it can be tested); they scale crisply to any
 cursor size and get a thin auto-contrast rim (light vs. dark brand colour) so a bare logo still

@@ -7,7 +7,9 @@
     "noEmit": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
     "types": ["node"]
   },
-  "include": ["*.ts", "scripts/*.ts", "tests/*.ts"]
+  "include": ["shared/*.ts", "pi/*.ts", "opencode/*.ts", "tests/*.ts"]
 }

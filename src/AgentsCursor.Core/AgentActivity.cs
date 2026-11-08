@@ -85,8 +85,13 @@ public readonly record struct WaitingAgent(string Tool, WaitingState State);
 ///
 /// The idle timeout (<see cref="Ttl"/>) only sweeps <b>finished</b> sessions, so a logo can't wedge the
 /// count after a quiet finish. A <b>blocked</b> session is never swept: the agent really is still
-/// waiting on you. (Trade-off: a hard-killed agent that was blocked leaves its logo up until you clear
-/// or disable it, since no closing event ever arrives.)
+/// waiting on you.
+///
+/// A session reported over a plugin's persistent connection carries that connection as its
+/// <b>owner</b>; when the connection closes, <see cref="Release"/> drops every session it owned, so a
+/// killed Pi or OpenCode host clears at once. Hook-reported sessions (Claude Code, Codex) have no owner.
+/// (Trade-off for them: a hard-killed hook agent that was blocked leaves its logo up until you clear or
+/// disable it, since no closing event ever arrives.)
 /// </summary>
 public sealed class AgentActivity
 {
@@ -95,6 +100,7 @@ public sealed class AgentActivity
         public bool Finished;          // the timed finished-turn / error notice
         public DateTime LastUtc;
         public string Tool = "";
+        public string? Owner;          // the plugin connection that reported it; null for hooks
         // (agent, call): agent "" is the main agent, call "" a prompt whose call the tool didn't name.
         public readonly HashSet<(string Agent, string Call)> BlockedCalls = new();
         public readonly HashSet<string> BlockedItems = new(StringComparer.Ordinal);
@@ -136,10 +142,12 @@ public sealed class AgentActivity
     /// event (null = the main agent). <paramref name="itemIds"/> name the questions or item prompts the
     /// event opens or answers. <paramref name="callIds"/> name the tool call an agent prompt blocks
     /// (<see cref="AgentEventKind.AwaitingUser"/>), or the call that just finished
-    /// (<see cref="AgentEventKind.ToolUse"/>). <paramref name="nowUtc"/> is injected so callers/tests
-    /// stay deterministic. Safe to call from any thread.</summary>
+    /// (<see cref="AgentEventKind.ToolUse"/>). <paramref name="owner"/> is the persistent connection the
+    /// event came over (see <see cref="Release"/>), null for a hook. <paramref name="nowUtc"/> is injected
+    /// so callers/tests stay deterministic. Safe to call from any thread.</summary>
     public void Report(string tool, string? sessionId, string? project, AgentEventKind kind, DateTime nowUtc,
-        IReadOnlyList<string>? itemIds = null, string? agentId = null, IReadOnlyList<string>? callIds = null)
+        IReadOnlyList<string>? itemIds = null, string? agentId = null, IReadOnlyList<string>? callIds = null,
+        string? owner = null)
     {
         if (string.IsNullOrEmpty(tool)) tool = "unknown";
         int after;
@@ -155,6 +163,7 @@ public sealed class AgentActivity
             {
                 if (!_sessions.TryGetValue(key, out var e)) { e = new Entry(); _sessions[key] = e; }
                 e.Tool = tool;
+                e.Owner = owner;
                 e.LastUtc = nowUtc;
                 Apply(e, kind, itemIds ?? Array.Empty<string>(), agentId ?? "", callIds ?? Array.Empty<string>());
             }
@@ -203,6 +212,26 @@ public sealed class AgentActivity
                 break;
         }
         e.Finished = kind is AgentEventKind.TurnComplete or AgentEventKind.Error;
+    }
+
+    /// <summary>Drops every session whose events came over the connection <paramref name="owner"/>,
+    /// because that connection closed: the plugin host that reported them is gone (quit, reloaded or
+    /// killed), so nothing it owned can still be waiting on you. Sessions with another owner, or none
+    /// (hooks), are untouched. Raises <see cref="WaitingChanged"/> once if the waiting set changed.</summary>
+    public void Release(string owner)
+    {
+        int after;
+        bool changed;
+        lock (_gate)
+        {
+            var before = SnapshotLocked();
+            foreach (var key in _sessions.Where(kv => kv.Value.Owner == owner).Select(kv => kv.Key).ToArray())
+                _sessions.Remove(key);
+            var now = SnapshotLocked();
+            after = now.Count;
+            changed = !before.SequenceEqual(now);
+        }
+        if (changed) WaitingChanged?.Invoke(after);
     }
 
     /// <summary>Evict <see cref="WaitingState.Finished"/> sessions idle longer than the TTL. Call

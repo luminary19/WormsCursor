@@ -42,7 +42,14 @@ jobs:
             # The WPF control panel: WPF-UI and the self-contained WPF runtime's native renderer.
             'Wpf.Ui.dll',
             'PresentationFramework.dll',
-            'wpfgfx_cor3.dll'
+            'wpfgfx_cor3.dll',
+            # The token icons' SVG renderer.
+            'Svg.dll',
+            # The Pi and OpenCode plugins the Agents page connects (AgentHookRegistrar.PluginDir).
+            'integrations/pi/index.ts',
+            'integrations/opencode/index.ts',
+            'integrations/opencode/package.json',
+            'integrations/shared/tray-client.ts'
           )
           $missing = @()
           foreach ($f in $required) {

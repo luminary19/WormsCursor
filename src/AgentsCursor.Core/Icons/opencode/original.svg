@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 300">
+  <!-- OpenCode: the official compact mark (its full-rect mask and clip are no-ops, so dropped). -->
+  <path fill="#4B4646" d="M60 120H180V240H60Z"/>
+  <path fill="#F1ECEC" d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z"/>
+</svg>

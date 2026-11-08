@@ -1,0 +1,16 @@
+{
+  "name": "agentscursor-integrations",
+  "private": true,
+  "type": "module",
+  "description": "Development only: tests and type checks for AgentsCursor's Pi and OpenCode plugins. The plugins themselves need no dependencies at runtime.",
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@opencode/plugin": "2.2.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -9,24 +9,26 @@ public enum ToolAction { Connect, Disconnect, ShowFile }
 
 /// <summary>
 /// One agent tool on the Agents page: its logo, where its config lives, and whether AgentsCursor is
-/// connected to it (its hooks are in that config) right now, with the actions that make sense for that
-/// state.
+/// connected to it (its hooks or its plugin are in that config) right now, with the actions that make
+/// sense for that state. Every tool's card reads the same way.
 /// </summary>
 public sealed class ToolRow : INotifyPropertyChanged
 {
-    public ToolRow(HookTool tool, ImageSource logo, string configPath)
+    public ToolRow(HookTool tool, ImageSource logo)
     {
         Tool = tool;
         Logo = logo;
-        ConfigPath = configPath;
     }
 
     public HookTool Tool { get; }
     public ImageSource Logo { get; }
     public string Name => Tool.DisplayName;
-    public string ConfigPath { get; }
+    public string ConfigPath { get; private set; } = "";
 
     public HookState State { get; private set; }
+
+    /// <summary>How AgentsCursor changed this connection during this run, if it did.</summary>
+    public ConnectionChange? Change { get; private set; }
 
     public string StatusText => State switch
     {
@@ -47,8 +49,13 @@ public sealed class ToolRow : INotifyPropertyChanged
 
     public string Explanation => State switch
     {
-        HookState.Registered => Tool.SetupNote ?? "",
-        HookState.Outdated => "An earlier version of AgentsCursor connected these hooks. Update them so every event arrives.",
+        HookState.Registered => Change switch
+        {
+            ConnectionChange.RefreshedAtStartup => "Updated automatically when AgentsCursor started. " + Tool.AfterChange,
+            ConnectionChange.ByYou => Tool.AfterChange,
+            _ => "",
+        },
+        HookState.Outdated => "AgentsCursor's connection points at an older copy or an older setup. Update it so every event arrives.",
         HookState.ConfigConflict => "This file isn't valid, so AgentsCursor won't change it. Fix or remove it, then come back here.",
         _ => "",
     };
@@ -78,9 +85,11 @@ public sealed class ToolRow : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    /// <summary>Re-reads the tool's config.</summary>
-    public void Refresh()
+    /// <summary>Re-reads the tool's config; <paramref name="change"/> is how this run changed it, if it did.</summary>
+    public void Refresh(ConnectionChange? change)
     {
+        Change = change;
+        ConfigPath = AgentHookRegistrar.ConfigPath(Tool.Id);
         State = AgentHookRegistrar.GetState(Tool.Id);
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty)); // every derived property
     }

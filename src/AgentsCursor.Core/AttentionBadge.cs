@@ -8,9 +8,9 @@ namespace AgentsCursor.Core;
 /// tool logo, like an app's notification badge. A plain logo means the agent simply finished its
 /// turn; the badge means it is waiting for your answer (an approval, a question, an elicitation).
 ///
-/// Shared by the tray overlay (<see cref="NotifierRenderer"/>) and the standalone OpenCode helper,
-/// which compiles this file in, so both draw the identical badge. The "?" is vector geometry (an arc,
-/// a curve and a dot stroked with round caps), not a font glyph, so it looks the same on every machine.
+/// Drawn by <see cref="NotifierRenderer"/> on every agent's icon, built-in or not, anchored to the
+/// icon's visible bounds. The "?" is vector geometry (an arc, a curve and a dot stroked with round
+/// caps), not a font glyph, so it looks the same on every machine.
 ///
 /// Stateless: every call creates and disposes its own GDI+ objects, so it is safe on any thread.
 /// </summary>

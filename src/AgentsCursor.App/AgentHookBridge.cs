@@ -276,7 +276,7 @@ static class AgentHookBridge
 
     static void Send(AgentEventMessage msg)
     {
-        using var client = new NamedPipeClientStream(".", AgentPipeServer.PipeName, PipeDirection.Out);
+        using var client = new NamedPipeClientStream(".", AgentPipeServer.DefaultPipeName, PipeDirection.Out);
         client.Connect(400); // < 500 ms; throws if no tray app is listening (swallowed by Run)
         using var w = new StreamWriter(client) { AutoFlush = true };
         w.WriteLine(msg.ToJsonLine());

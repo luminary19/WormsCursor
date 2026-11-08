@@ -4,23 +4,24 @@ using System.Drawing.Drawing2D;
 namespace AgentsCursor.Core;
 
 /// <summary>
-/// Draws the agent-notifier token for a <see cref="TokenFace"/>: one waiting tool's logo (Claude
-/// Code's critter, Codex's OpenAI knot — see <see cref="AgentLogos"/>) as a bare, free-floating glyph,
-/// with the yellow "?" <see cref="AttentionBadge"/> on its top-right when that session is blocked on
-/// you, and a small "+N" count pill on its right edge when other sessions wait too.
+/// Draws the agent-notifier token for a <see cref="TokenFace"/>: one waiting agent's icon (Claude
+/// Code's critter, Codex's OpenAI knot, OpenCode's mark, Pi's Powerline pi — see
+/// <see cref="IconCatalog"/>) as a bare, free-floating glyph, with the yellow "?"
+/// <see cref="AttentionBadge"/> on its top-right when that session is blocked on you, and a small "+N"
+/// count pill beside it when other sessions wait too.
 ///
 /// This is UI-agnostic GDI+ drawing only — the host (the tray app's overlay window) decides where the
 /// token lives and how it bounces, then calls <see cref="DrawToken"/> with the computed centre and
 /// swing angle. There is intentionally never a fan of logos — multiple waiting agents collapse to one
 /// logo plus a "+N" count, which stays legible at any size.
 ///
-/// An instance owns the GDI+ objects it draws with (parsed logos + cached sprites), and GDI+ objects
+/// An instance owns the GDI+ objects it draws with (parsed icons + cached sprites), and GDI+ objects
 /// are not thread-safe — so each drawing thread creates its own renderer (the overlay's animation
 /// thread and the Preferences preview each hold one) and never shares it with another thread.
 /// </summary>
 public sealed class NotifierRenderer : IDisposable
 {
-    readonly AgentLogos _logos = new();
+    readonly TokenSprites _sprites = new();
 
     /// <summary>Draws <paramref name="face"/>'s logo in a box of side <paramref name="tokenSidePx"/>
     /// centred at (<paramref name="centerX"/>/<paramref name="centerY"/>) and tilted by
@@ -40,8 +41,8 @@ public sealed class NotifierRenderer : IDisposable
         g.TranslateTransform(centerX, centerY);
         g.RotateTransform(swingDeg);
 
-        _logos.Draw(g, face.Tool, square, edge);
-        var (corner, radius) = AttentionBadge.Place(_logos.Fit(face.Tool, square), box);
+        var icon = DrawIcon(g, face.Tool, square, edge);
+        var (corner, radius) = AttentionBadge.Place(icon, box);
         if (face.Others > 0)
             DrawCount(g, face.Others, corner, face.Blocked ? radius : 0f, box, Parse(s.OutlineColor, Color.Black));
         if (face.Blocked)
@@ -50,7 +51,37 @@ public sealed class NotifierRenderer : IDisposable
         g.Restore(saved);
     }
 
-    public void Dispose() => _logos.Dispose();
+    public void Dispose() => _sprites.Dispose();
+
+    // The unknown-tool dot's diameter as a fraction of the box.
+    const float DotRatio = 0.7f;
+
+    // Blits the tool's icon sprite (fitted to the box, rim included) and returns the rectangle the
+    // icon actually covers, which the badges anchor to. A tool without an icon gets a grey dot, so a
+    // future or unmapped tool still shows something.
+    RectangleF DrawIcon(Graphics g, string tool, RectangleF box, float edge)
+    {
+        var icon = IconCatalog.Original(tool);
+        var sprite = icon is null ? null : _sprites.Get(tool, icon.Id, box.Width, edge);
+        if (sprite is null)
+        {
+            float d = Math.Min(box.Width, box.Height) * DotRatio;
+            var dot = new RectangleF(box.X + (box.Width - d) / 2f, box.Y + (box.Height - d) / 2f, d, d);
+            using (var rim = new Pen(TokenSprites.RimFor(Color.Gray), edge))
+                g.DrawEllipse(rim, dot);
+            using (var fill = new SolidBrush(Color.Gray))
+                g.FillEllipse(fill, dot);
+            return dot;
+        }
+        // The swing rotation is already in g's transform, so the sprite rotates with it. It is padded
+        // for its rim, so it goes back at the matching negative offset to put the icon in the box.
+        var saved = g.InterpolationMode;
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        g.DrawImage(sprite.Image, box.X - sprite.Pad, box.Y - sprite.Pad, sprite.Image.Width, sprite.Image.Height);
+        g.InterpolationMode = saved;
+        var v = sprite.Visual;
+        return new RectangleF(box.X + v.X, box.Y + v.Y, v.Width, v.Height);
+    }
 
     // The "+N" count for the other waiting sessions: white bold digits on a pill filled with the
     // theme outline colour, ringed in a light hairline and then a thin dark edge, so it reads as its own

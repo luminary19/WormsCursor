@@ -10,7 +10,19 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- SVG.NET (MS-PL): renders the token icons straight to System.Drawing. -->
+    <PackageReference Include="Svg" Version="3.4.8" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
+  </ItemGroup>
+
+  <!-- The built-in token icons, read by IconSource as "Icons/<tool>/<variant>.svg". -->
+  <ItemGroup>
+    <EmbeddedResource Include="Icons\**\*.svg"
+                      LogicalName="Icons/$([System.String]::Copy('%(RecursiveDir)').Replace('\', '/'))%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AgentsCursor.HookTests" />
   </ItemGroup>
 
 </Project>

@@ -1,7 +1,7 @@
 ﻿# AgentsCursor
 
 A Windows tray app that shows a **bouncing agent-waiting token**: whenever an AI coding agent
-(Claude Code or Codex) is blocked on your decision or has finished its turn, its tool logo
+(Claude Code, Codex, OpenCode or Pi) is blocked on your decision or has finished its turn, its tool logo
 appears and bounces — either hanging off the mouse pointer and following it, or
 pinned to a screen corner. It ships as a Velopack app (Setup.exe / Portable.zip) that updates
 from GitHub Releases (About → Check for updates). No main window: the tray icon (WinForms) opens one
@@ -14,9 +14,10 @@ WPF control panel, built with WPF-UI to look like Windows 11 Settings.
 > It was then called **WormsCursor** until 0.8.2 and renamed **AgentsCursor** (exe, namespaces,
 > `%LocalAppData%` folder, pipe, mutex, Run value, Velopack packId). The GitHub repository and this
 > checkout's folder keep the old name. The only code that still says WormsCursor is the repo URL
-> and the migration from it: the settings carry-over and Run value (see
-> `TrayApplicationContext.MigrateFromWormsCursor`) and the registrar honouring an old
-> `.wormscursor.bak` backup.
+> and the migration from it: `SettingsStore.Load` reading the old settings file while there is no
+> new one, the Run value (`TrayApplicationContext.MigrateAutostartFromWormsCursor`), and the registrar
+> honouring an old `.wormscursor.bak` backup (its hooks are simply outdated connections, refreshed on
+> startup).
 
 ## How it works (the core idea)
 
@@ -27,10 +28,17 @@ painted with `UpdateLayeredWindow` (true per-pixel alpha). Its animation thread 
 while at least one agent is waiting; idle, the thread parks and the token is painted away, so
 a quiet tray burns no CPU.
 
-Which agents are "waiting" is fed in by the same hook → named-pipe plumbing as before:
-`AgentsCursor.exe hook …` (fired by the agent's lifecycle hooks) writes one normalised JSON event to
-the running tray over a per-user named pipe; `AgentActivity` tracks which sessions need you; the tray
-pushes that set into the overlay.
+Which agents are "waiting" is fed in over one per-user named pipe (`AgentsCursor.<user>`), which
+`AgentPipeServer` serves to many clients at once. Claude Code and Codex fire
+`AgentsCursor.exe hook …` from their lifecycle hooks: a throwaway process that writes one normalised
+JSON event and exits. The OpenCode and Pi plugins (`integrations/`) keep **one persistent connection
+per host** and open it with an `attach` line, which makes it a **lease**: their sessions are owned by
+the connection, and when it closes (`LeaseReleased`, raised after its last message)
+`AgentActivity.Release` drops exactly those sessions, so a killed Pi or OpenCode clears at once. The
+plugins never launch the tray; they retry with backoff and replay their blocked state on reconnect.
+`AgentActivity` tracks which sessions need you; the tray pushes that set into the overlay. The pipe is
+`CurrentUserOnly`, duplex (Bun, OpenCode's runtime, can't write to an inbound-only pipe), capped at 64
+connections and 64 KiB per line.
 
 **Per-app focus suppression.** While a program on `CursorSettings.SuppressedPrograms` (default
 `dota2.exe`) owns the foreground window — fullscreen, borderless or windowed — the overlay treats it
@@ -40,8 +48,7 @@ message-pumping thread (no polling) and resolves the window to an exe name with
 `PROCESS_QUERY_LIMITED_INFORMATION` (works for elevated / anti-cheat processes). It only reports *what*
 is in front; the overlay decides with the pure `ProgramSuppression.Matches`, so a settings edit
 re-evaluates at once. Agents keep being tracked meanwhile; when focus moves on and something still
-waits, the token comes back with its entrance. The OpenCode helper does the same with the same Core
-source (see below).
+waits, the token comes back with its entrance.
 
 Codex desktop and CLI use `%CODEX_HOME%/hooks.json` through the same shared engine hooks.
 Codex runs Windows hooks through PowerShell (`<shell> -NoProfile -Command <commandWindows>`), so the
@@ -59,8 +66,17 @@ next tool event resolves it. Claude hooks are registered in exec form (`command`
 a shell string. `Elicitation` carries no `agent_id`, so
 it is keyed by its own id (`mcp_server_name` + `elicitation_id`) and resolved by `ElicitationResult`.
 Never derive a blocked state from Claude's `Notification` — it has no `agent_id` (verified in the
-2.1.x binary); only its `idle_prompt` reminder is used, as a finished nudge. The OpenCode 2 integration has an independent shared helper, based on the
-existing Pi cursor extension; do not route it through throwaway AgentsCursor hook processes.
+2.1.x binary); only its `idle_prompt` reminder is used, as a finished nudge.
+
+Pi and OpenCode report through the plugins, never through throwaway hook processes, with the same
+blocked / finished / abort semantics as the hooks (see `integrations/README.md` for the tables). Pi:
+only an interactive TUI runtime reports (in-process subagents have no UI; their approvals are prompts
+in the parent TUI); `ui_prompt_start`/`ui_prompt_end` during a run are blocked (a prompt while idle is
+ignored), `agent_settled` is finished, an aborted settle is `session_end` (like Codex's Interrupt).
+Requires Pi 1.3+. OpenCode: everything is reported under the **root** session (a child session is a
+subagent), each answer under the root its prompt opened under; a root's run ending
+(`session.execution.succeeded`/`failed`, or status idle / `session.idle`, first one counts) is
+finished. A real `opencode run` emits no status or idle event, only the execution result.
 
 ## Projects (`src/`)
 
@@ -74,14 +90,20 @@ tests.
 - `TokenFace.cs` — `TokenFace.For(Waiting)`: the pure selection of what the token shows: the first
   blocked session's tool (else the first session's), `Blocked`, and `Others` (the "+N").
 - `AttentionBadge.cs` — the "?" badge (`Place` + `Draw`): a vector glyph, stateless, so it is
-  thread-safe. Compiled into the OpenCode helper too, so both overlays draw the identical badge. Its
-  `Overhang` is what the corner placement allows for at the top edge.
-- `AgentLogos.cs` / `SvgPath.cs` — the baked vector tool logos (Claude critter, OpenAI knot) parsed
-  from SVG path data and rasterised to cached sprites; `SvgPath` is the tiny path-data parser.
+  thread-safe, drawn on every agent's icon. Its `Overhang` is what the corner placement allows for at
+  the top edge.
+- `IconCatalog.cs` / `IconSource.cs` / `TokenSprites.cs` + `Icons/<tool>/original.svg` — the token
+  icons: each agent's logo as an embedded SVG (Claude critter, OpenAI knot, OpenCode's compact mark,
+  pi-cursor's Powerline pi generated once from its font into paths), rendered with SVG.NET (`Svg`,
+  MS-PL) into cached sprites per renderer: fitted by the icon's visible pixels (not its viewBox), with
+  a generic contrast rim (the alpha mask dilated, light for a dark icon, dark for a light one).
+  `Sprite.Visual` is what the badge and the "+N" anchor to. SVG.NET never fetches external images,
+  elements or entities (`TokenSprites.EnsureConfigured`). Unknown tools get a grey dot.
 - `AgentActivity.cs` — tracks which agent sessions currently **need the user** (thread-safe), exposes
   `Waiting` (one `WaitingAgent(Tool, State)` per session, `State` = `WaitingState.Blocked` when an
   approval/question/elicitation is pending, `Finished` when the turn just ended) and `WaitingCount`,
   raises `WaitingChanged`, and sweeps finished sessions after a TTL (blocked ones are never swept).
+  A session reported over a plugin connection records it as its owner; `Release(owner)` drops them.
 - `AgentEventMessage.cs` — the normalised wire format (one JSON line per event) + the
   raw-event → `AgentEventKind` mapping.
 - `CursorSettings.cs` — the persisted, tunable settings: token `Size`, `Placement`
@@ -98,10 +120,10 @@ tests.
 - `TokenMotion.cs` — the token's self-driven motion as pure functions of time (corner bounce, idle
   bob), shared by the overlay and the control panel's preview.
 - `SettingsStore.cs` — tolerant JSON load / atomic save in `%LocalAppData%\AgentsCursor\settings.json`
-  (survives app-folder updates); enums stored as readable names. `Load` (the owning tray app) moves a
-  corrupt file aside; `Read` (another process, i.e. the OpenCode helper) never touches the file.
-  `CarryOverLegacy` copies `%LocalAppData%\WormsCursor\settings.json` over once, only while there is
-  no AgentsCursor file yet.
+  (survives app-folder updates); enums stored as readable names. `Load` never touches a file (a
+  corrupt one is copied aside by the next `Save`). `Load` owns the carry-over from the rename: while
+  the AgentsCursor file doesn't exist, it reads `%LocalAppData%\WormsCursor\settings.json` (read-only;
+  the first save writes the new file), and a corrupt new file never falls back to the old one.
 - `ProgramSuppression.cs` — pure: normalize program names (trim, path → file name, add ".exe",
   case-insensitive dedupe) and match a program against the list. Unit-tested.
 - `WindowPrograms.cs` — Win32: window/process → exe name, and the visible top-level windows the
@@ -119,10 +141,13 @@ tests.
   `NotifierOverlay`, the pipe server + sweep timer, the `LiveSettings`, and the one control panel
   window (created on first use, kept for the app's lifetime; it is the panel's `IControlPanelHost`).
   Every settings change lands in `OnSettingsChanged` (linger TTL, menu check, overlay refresh).
-  The "Enabled" item is the master on/off. On startup, before loading settings,
-  `MigrateFromWormsCursor` carries the settings file and the Start with Windows entry over from the
-  old name (hooks need no step: the registrar reads WormsCursor's as Outdated). Reloads the real
-  cursor scheme once on startup (self-heal for anyone upgrading from the cursor-theming version).
+  The "Enabled" item is the master on/off. On startup it moves WormsCursor's Start with Windows entry
+  over, then (posted, after the pipe is up) runs `AgentHookRegistrar.RefreshConnected`: every
+  connection that is ours but Outdated is re-registered in place, nothing else is touched, and one
+  balloon lists the steps the refreshed tools need (Codex: re-approve under `/hooks`, also in Orca);
+  clicking it opens the Agents page. It keeps `ChangedThisRun` / `RefreshErrors` for the cards. Reloads
+  the real cursor scheme once on startup (self-heal for anyone upgrading from the cursor-theming
+  version).
 - `ControlPanel/` — the WPF control panel (WPF-UI, instant-apply, no OK/Cancel):
   - `WpfHost.cs` — creates the one `System.Windows.Application` (`OnExplicitShutdown`, no `Run`) with
     WPF-UI's `ThemesDictionary` + `ControlsDictionary`; the WinForms loop pumps WPF too.
@@ -136,43 +161,50 @@ tests.
     the sidebar folds to icons below 860 DIPs; each page opens scrolled to the top.
   - `TokenPage` — master switch, live animated preview (`TokenPreview`: Core renderer → WPF bitmap
     on the UI thread, its own renderer, both faces over dark and light), size, position, corner.
-  - `AgentsPage` + `ToolRow` — per-tool hook cards (Register / Update / Unregister, status from the
-    registrar), the linger timeout, and "Preview on screen" (fakes blocked agents on the real overlay).
+  - `AgentsPage` + `ToolRow` — one card per tool (Claude Code, Codex, OpenCode, Pi), all with the
+    same anatomy: status Connected / Needs update / Not connected / Can't read its config, buttons
+    Connect / Update (+ Disconnect) / Disconnect / Show file, and after a change made this run the
+    tool's `AfterChange` step. Also the linger timeout and "Preview on screen" (fakes blocked agents
+    on the real overlay).
   - `AppsPage` — the hide-while-using list (Remove per row, empty state), an inline "Add a program"
     picker (open windows or a typed exe name), Restore the default list.
   - `AboutPage` — version, Check for updates → download → restart (`UpdateService`), What's new
     (release notes via `ReleaseNotesFormat`, a pure, tested Markdown reader), Theme, Start with
     Windows, links.
   - `IControlPanelHost`, `PanelStyles.xaml`, `SettingHeader`, `ToolLogo`, `PanelAssets`.
-- `AgentPipeServer.cs` — the named-pipe server that `hook` invocations write to (own thread).
+- `AgentPipeServer.cs` — the named-pipe server: an async accept loop serving hook and plugin
+  connections at once, plugin leases, `LeaseReleased` (see "How it works").
 - `AgentHookBridge.cs` — the `hook` verb: normalises a tool's stdin/argv payload → one pipe line;
   **fail-silent** (sub-½ s pipe timeout, errors to `bridge.log`, always exits 0).
-- `Services/AgentHookRegistrar.cs` — writes/removes AgentsCursor's `hook` in each tool's config
-  (backup + merge, never clobber).
+- `Services/AgentHookRegistrar.cs` — the one entry point that connects each tool (`Tools`, `GetState`,
+  `Register`, `Unregister`, `RefreshConnected`, `PluginDir`), backup once + merge, never clobber.
+  `HooksJson.cs` (Claude Code + Codex hooks), `PiExtensions.cs` (Pi `settings.json` `extensions`:
+  the absolute `<exe dir>\integrations\pi`), `OpenCodePlugins.cs` + `JsoncEdit.cs` (OpenCode
+  `opencode.jsonc` `plugins`: the bare `file:` URL of `<exe dir>\integrations\opencode`, edited by
+  splicing text so comments and formatting stay byte-identical). Ours is found by a marker that
+  survives a moved exe (`hook --tool <id>`, a path ending in `integrations\<id>`), so another copy's
+  entry reads as Outdated. **Configs are written in place** (`File.WriteAllText`, never a renamed temp
+  file): Orca's OpenCode overlay `%APPDATA%\orca\opencode-config-overlays\<hash>\opencode.jsonc` is a
+  hard link to the user's config, and a rename would break it.
 - `Services/UpdateService.cs` — Velopack `UpdateManager`: check, download, apply-and-restart, release
   notes; updating is unavailable (and says so) for dev builds run from `bin\`.
 - `SingleInstance.cs` (a second launch opens the panel and hands it foreground rights),
   `Autostart.cs` (per-user `HKCU\…\Run` behind the `IStartupEntries` seam; `MigrateLegacy` moves
   WormsCursor's Run value to ours, only if it was on), `Assets/`.
 
-### `AgentsCursor.OpenCodeOverlay` and `integrations/opencode`
+### `integrations/` — the Pi and OpenCode plugins (TypeScript)
 
-The native helper retains Pi's per-client pipe aggregation, singleton ownership, no-client shutdown,
-monitor-rate waitable timer, frame coalescing, cached logo, and persistent DIB surface. It sleeps while
-hidden and uses the official compact OpenCode mark. Display `waiting` (a permission or form pending)
-bakes Core's `AttentionBadge` into the cached logo; `completion` shows the plain mark. The V2 plugin subscribes to `event.data` lifecycle
-events and form/permission events, using one persistent pipe connection per plugin host. Build
-materializations are immutable and content-addressed under `artifacts/opencode/`.
-
-The helper compiles in Core's `CursorSettings`, `SettingsStore`, `ProgramSuppression`,
-`WindowPrograms` and `ForegroundWatcher` as linked source (`<Compile Include="../AgentsCursor.Core/…">`,
-no DLL reference). `FocusSuppression.cs` hides its token while a suppressed program is in front,
-reading the list from the tray's `settings.json` via `SettingsStore.Read` and re-reading it on a focus
-change only when the file's write time moved. `host.ts` hashes those linked files into the content
-address, so editing them rebuilds the helper.
-
-Use the installed OpenCode V2 SDK as the event contract: the local OpenCode source checkout can be
-older. See `integrations/opencode/README.md` for setup and tests.
+`shared/tray-client.ts` (`TrayClient`: the persistent connection, attach + snapshot on every connect,
+backoff 1 s → 30 s, never launches anything, nothing before `start()`, sockets and timers unref'd) and
+`shared/wire.ts`; `pi/` (`createPiExtension`, all state per registration, never module-level) and
+`opencode/` (`OpenCodeController` + the pure `OpenCodeState`; plugin id `agentscursor.opencode`). The
+plugins code against structural interfaces (`PiLike`, `CursorContext`); `tests/contracts.ts` checks
+them against the installed Pi 1.3 and OpenCode 2.2 SDK types, so drift fails `npm run typecheck`.
+`Integrations.props` (imported by the App and the tests csproj) copies the runtime files next to the
+exe as `integrations\{shared,pi,opencode}\`, so bin, publish and Velopack ship them; Pi runs them
+through jiti and OpenCode (Bun) supplies `@opencode/plugin`, so no `node_modules` ships. Use the
+installed SDKs as the event contract (the local OpenCode source checkout can be older). See
+`integrations/README.md`.
 
 ## Build & run
 
@@ -186,6 +218,12 @@ dotnet run --project src/AgentsCursor.App     # run the tray app (dev)
 To exercise the notifier without a real agent: **Preferences… → Agents → Preview on screen**, or fire a
 hook by hand — `echo '{"hook_event_name":"PermissionRequest","session_id":"t","tool_name":"Bash"}' |
 AgentsCursor.exe hook --tool claude-code` (the tray must be running).
+
+Tests: `dotnet run --project tests/AgentsCursor.HookTests -c Release` (registrar tests run only on
+temp homes via `HomeOverride`, which also ignores `CLAUDE_CONFIG_DIR`/`CODEX_HOME`/
+`PI_CODING_AGENT_DIR`/`OPENCODE_CONFIG_DIR`; pipe tests use private pipe names), and in
+`integrations/`: `npm test` + `npm run typecheck`. A dev build and the installed app each re-point
+the connections at themselves when they start (the startup refresh).
 
 ## Releasing
 

@@ -16,6 +16,18 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      # The Pi and OpenCode plugins: unit tests, and type checks against the real Pi and OpenCode SDKs.
+      - name: Plugin tests
+        working-directory: integrations
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run typecheck
+
       - name: Restore
         run: dotnet restore AgentsCursor.sln
 

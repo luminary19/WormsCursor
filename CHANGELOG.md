@@ -7,6 +7,21 @@ GitHub releases. The release workflow pulls the matching section into each relea
 ## Unreleased
 
 ### Added
+- **Pi and OpenCode, in the same token.** The **Agents** page now connects **OpenCode** and **Pi**
+  next to Claude Code and Codex, with the same card for all four. Their plugins ship with AgentsCursor
+  (`integrations\` next to the exe), and they report into the one tray, so Pi and OpenCode get
+  everything the others have: the yellow **"?"** when they need your answer (an OpenCode permission or
+  form; in Pi, any prompt an extension shows during a run, such as a permission or a question), the
+  plain logo when a turn is done, the "+N", the linger timeout, the on/off switch and the
+  hide-while-using list. A subagent's prompt shows on its parent conversation. When Pi or OpenCode
+  quits, or is killed while waiting on you, its token clears at once. The plugins never start
+  AgentsCursor: if it isn't running they wait quietly and catch up when it starts. Pi needs version
+  1.3 or later.
+- **Connections stay current by themselves.** When AgentsCursor starts, it updates in place every
+  connection you made that points at another copy of it or an older setup (a moved app, the rename
+  from WormsCursor, a dev build), and leaves the tools you didn't connect alone. If a tool then needs a
+  step of its own, a notification says so and its card shows it, for example approving the changed
+  Codex hooks under `/hooks` (also in Codex sessions Orca starts).
 - **A new control panel.** **Preferences…** now opens one window in the style of Windows 11
   Settings: Mica, rounded cards, switches, and it follows your Windows light or dark mode as it
   changes, or stays light or dark if you pick that under **About → Theme**. A sidebar holds four pages:
@@ -28,24 +43,29 @@ GitHub releases. The release workflow pulls the matching section into each relea
   the apps that are open now, or takes a typed exe name, and **Remove** takes one off. Your agents are
   still tracked meanwhile, and the token comes back when you switch away while one is still waiting.
   While hidden it uses no CPU: AgentsCursor learns about focus changes from Windows instead of checking
-  repeatedly. The OpenCode helper follows the same list. Restart OpenCode to pick it up there.
+  repeatedly.
 
 - **You can tell "it needs an answer" from "it's done".** When an agent is blocked on you (a
   permission prompt, an `AskUserQuestion`, an MCP elicitation, a Codex approval or question, or an
   OpenCode permission or form), its logo now carries a yellow **"?"** badge at the top-right. A plain
   logo means the agent simply finished its turn. When several sessions wait, one that is blocked on
-  you is the logo shown. This works for Claude Code, Codex and OpenCode alike, and the "?" is drawn as
-  vector shapes, so it looks the same on every machine.
+  you is the logo shown. This works for Claude Code, Codex, OpenCode and Pi alike, and the "?" is drawn
+  as vector shapes, so it looks the same on every machine.
 
 ### Changed
 - **WormsCursor is now AgentsCursor.** The new name says what it does: it shows when your AI agents
   need you. The app, its exe (`AgentsCursor.exe`), its tray icon tooltip and its settings folder
-  (`%LocalAppData%\AgentsCursor\`) all carry the new name. What you had carries over on the first
-  start: your settings are copied from `%LocalAppData%\WormsCursor\` (the old folder is left alone),
-  and if WormsCursor started with Windows, AgentsCursor now does instead. Hooks connected by WormsCursor
-  show as *Update available* on the **Agents** page: **Update** each tool once and its hooks are
-  replaced in place, not added twice (for Codex, approve the changed hooks with `/hooks`). The GitHub
-  repository keeps its old name, so links and updates still come from the same place.
+  (`%LocalAppData%\AgentsCursor\`) all carry the new name. What you had carries over: until
+  AgentsCursor saves settings of its own, it reads them from `%LocalAppData%\WormsCursor\` (the old
+  folder is left alone), and if WormsCursor started with Windows, AgentsCursor now does instead. Hooks
+  connected by WormsCursor are updated in place when AgentsCursor starts, not added twice (for Codex,
+  approve the changed hooks with `/hooks`). The GitHub repository keeps its old name, so links and
+  updates still come from the same place.
+- **The OpenCode plugin's own helper and settings are gone.** OpenCode used to draw its token with a
+  separate helper program and had its own size, linger and on/off options; it now reports to
+  AgentsCursor like the other agents, and all of that comes from AgentsCursor's settings (its linger
+  is AgentsCursor's, 20 s by default, instead of the plugin's 30 s). An OpenCode config that still
+  lists the old plugin shows as *Needs update* and is updated when AgentsCursor starts.
 - **The "+N" count is now a small pill in the logo's top-right corner.** When the "?" badge is up,
   the pill tucks in beside it, so the two never overlap. That corner faces the cursor, so the count
   can't swing out of view. In a top screen corner the token now sits a little further from the edge,
@@ -67,7 +87,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
   Claude's `PreToolUse`/`PostToolUse` hooks, so approving a permission prompt (which fires no
   `UserPromptSubmit`) clears the token as soon as the agent does its next thing, instead of lingering
   until the linger timeout. The trade-off is one short fail-silent hook process per tool call during an
-  active turn. **Update the registration on Preferences… → Agents** ("Update available" → **Update**)
+  active turn. **Update the registration on Preferences… → Agents** ("Needs update" → **Update**)
   and restart your agent session to pick up the new events.
 
 ### Fixed
@@ -85,7 +105,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - **Codex hooks work on Windows again.** Codex runs Windows hook commands in PowerShell, which
   rejected the command WormsCursor registered (a quoted exe path followed by arguments), so every
   Codex hook failed and the token never showed for Codex. The command now uses PowerShell's call
-  operator. The **Agents** page shows Codex as *Update available*: **Update** it, approve the
+  operator. The **Agents** page shows Codex as *Needs update*: **Update** it, approve the
   changed hooks in Codex (`/hooks`), and restart open Codex sessions.
 - **The token knows when an agent is blocked on you, and who asked.** Every "waiting for your
   answer" state now comes from a Claude Code hook that says which agent asked and has a matching
@@ -93,15 +113,15 @@ GitHub releases. The release workflow pulls the matching section into each relea
   server requests for input (`Elicitation` / `ElicitationResult`). A question from a subagent no
   longer gets filed under the main agent, and a question from the main agent is no longer cleared by
   background subagents that keep working. Claude's `Notification` hook is now used only for its
-  "still waiting for your input" reminder. The **Agents** page shows Claude Code as *Update
-  available* (it also does when the registered hook points at a different exe, such as
+  "still waiting for your input" reminder. The **Agents** page shows Claude Code as *Needs
+  update* (it also does when the registered hook points at a different exe, such as
   `WormsCursor.exe`): **Update** it to pick this up.
 - The token no longer pops up when Claude Code hands work to background subagents. Spawning them
   ends Claude's turn at once, but it picks back up by itself when they report in, so it isn't your
   move yet. The token now waits for the real finish.
 - A permission prompt in one subagent is no longer cleared by another subagent that keeps working.
   Approvals are now tracked per agent, and Claude Code's come from its `PermissionRequest` hook.
-  **Update Claude Code** on the **Agents** page (it shows *Update available*) to pick this up.
+  **Update Claude Code** on the **Agents** page (it shows *Needs update*) to pick this up.
 - The tray app no longer crashes when the control panel's preview and the live token draw at the
   same time, and a failed animation frame is logged to `bridge.log` and retried instead of ending the app.
 - A read-only or locked `settings.json` no longer crashes the app. A settings file that doesn't parse

@@ -39,12 +39,19 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
     AgentPipeServer? _agentPipe;
     System.Windows.Forms.Timer? _agentSweep;
 
+    // The agent connections changed during this run (by the startup refresh or on the Agents page),
+    // and why the startup refresh couldn't update a tool; the Agents page shows both on its cards.
+    readonly Dictionary<string, ConnectionChange> _changedThisRun = new();
+    readonly Dictionary<string, string> _refreshErrors = new();
+
     public TrayApplicationContext()
     {
         _ = _marshal.Handle; // realise the window handle on the UI thread for BeginInvoke
 
-        MigrateFromWormsCursor(); // before the first load, so carried-over settings are the ones used
+        MigrateAutostartFromWormsCursor();
+        // Load reads WormsCursor's settings file while there is no AgentsCursor one yet.
         _settings = new LiveSettings(SettingsStore.Load(), Persist);
+        IconSource.Log = AppLog.Write;
 
         // Force the notifier on at every startup: a persisted `false` (e.g. an accidental "Enabled"
         // toggle, or a stray hand-edit) self-heals back to `true` so the token can never get stuck off
@@ -83,6 +90,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
             ContextMenuStrip = menu,
         };
         _tray.DoubleClick += (_, _) => OnToggleEnabled(this, EventArgs.Empty);
+        _tray.BalloonTipClicked += (_, _) => OpenPanel(PanelSection.Agents);
 
         // The overlay touches no global system state, so there's nothing to undo on exit — but still
         // dispose it cleanly so the layered window goes away promptly.
@@ -90,6 +98,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
 
         _settings.Changed += OnSettingsChanged;
         StartAgentNotifier();
+        // After the pipe is up, and once the message loop runs, so startup stays quick.
+        _marshal.BeginInvoke(RefreshAgentConnections);
         MaybeShowWhatsNew();
     }
 
@@ -98,6 +108,20 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
     public LiveSettings Settings => _settings;
     public IAutostart Autostart => _autostart;
     public UpdateService Updates => _updates;
+    public IReadOnlyDictionary<string, ConnectionChange> ChangedThisRun => _changedThisRun;
+    public IReadOnlyDictionary<string, string> RefreshErrors => _refreshErrors;
+
+    public void NoteConnected(string toolId)
+    {
+        _changedThisRun[toolId] = ConnectionChange.ByYou;
+        _refreshErrors.Remove(toolId);
+    }
+
+    public void NoteDisconnected(string toolId)
+    {
+        _changedThisRun.Remove(toolId);
+        _refreshErrors.Remove(toolId);
+    }
 
     // Drives the live token for the panel's "Preview on screen": a non-null value fakes that many
     // waiting agents (one logo + "+N"); null ends the preview and restores the real set (so a real
@@ -128,13 +152,12 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
         _agents.WaitingChanged += OnWaitingChanged;
         _agents.Ttl = TimeSpan.FromSeconds(_settings.Live.AgentNotifierTimeoutSeconds);
 
-        _agentPipe = new AgentPipeServer(msg =>
-        {
-            // The pipe fires on its own thread; hop to the UI thread so AgentActivity's events
-            // (which touch the tray + overlay) stay single-threaded, like every other callback here.
-            if (_marshal.IsHandleCreated)
-                _marshal.BeginInvoke(new Action(() => HandleAgentEvent(msg)));
-        });
+        // The pipe fires on its own threads; hop to the UI thread so AgentActivity's events (which
+        // touch the tray + overlay) stay single-threaded, like every other callback here. A connection's
+        // messages and its release are posted from the same reader, so they keep their order.
+        _agentPipe = new AgentPipeServer(
+            (msg, lease) => Post(() => HandleAgentEvent(msg, lease)),
+            lease => Post(() => _agents.Release(LeaseOwner(lease))));
         _agentPipe.Start();
 
         // Sweep often (every 3 s) so even the shortest timeout (10 s) clears a stuck logo within a few
@@ -144,10 +167,57 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
         _agentSweep.Start();
     }
 
-    void HandleAgentEvent(AgentEventMessage msg)
+    void Post(Action action)
+    {
+        if (_marshal.IsHandleCreated) _marshal.BeginInvoke(action);
+    }
+
+    // The owner recorded on sessions reported over a plugin's persistent connection (null for hooks).
+    static string LeaseOwner(long lease) => "lease:" + lease;
+
+    void HandleAgentEvent(AgentEventMessage msg, long? lease)
     {
         if (msg.TryGetKind(out var kind))
-            _agents.Report(msg.Tool, msg.SessionId, msg.Project, kind, DateTime.UtcNow, msg.InputIds, msg.AgentId, msg.CallIds);
+            _agents.Report(msg.Tool, msg.SessionId, msg.Project, kind, DateTime.UtcNow, msg.InputIds, msg.AgentId,
+                msg.CallIds, lease is long id ? LeaseOwner(id) : null);
+    }
+
+    // Keeps the connections the user made pointing at this copy of AgentsCursor: a tool whose
+    // connection is ours but outdated (the app moved, was renamed from WormsCursor, or registered an
+    // older shape) is refreshed in place. Anything not connected, current or unreadable is left alone.
+    // When refreshed tools need a step of their own (Codex: approve the changed hooks), one balloon
+    // says so, and the Agents page shows each step on its card.
+    void RefreshAgentConnections()
+    {
+        var refreshed = new List<HookTool>();
+        foreach (var (tool, error) in AgentHookRegistrar.RefreshConnected())
+        {
+            if (error is null)
+            {
+                AppLog.Write($"updated the outdated {tool.DisplayName} connection to this copy of AgentsCursor");
+                _changedThisRun[tool.Id] = ConnectionChange.RefreshedAtStartup;
+                refreshed.Add(tool);
+            }
+            else
+            {
+                AppLog.Write($"couldn't update the outdated {tool.DisplayName} connection: {error}");
+                _refreshErrors[tool.Id] = error;
+            }
+        }
+        if (refreshed.Count > 0)
+            _tray.ShowBalloonTip(10_000, "AgentsCursor updated its agent connections", BalloonText(refreshed), ToolTipIcon.Info);
+    }
+
+    // One line per refreshed tool with the step it needs. A balloon holds at most 255 characters;
+    // when the steps don't fit, it names the tools, and the Agents page (where clicking the balloon
+    // leads) has each step on its card.
+    const int MaxBalloonText = 255;
+    static string BalloonText(IReadOnlyList<HookTool> tools)
+    {
+        string steps = string.Join("\n", tools.Select(t => $"{t.DisplayName}: {t.AfterChange}"));
+        return steps.Length <= MaxBalloonText
+            ? steps
+            : $"Updated {string.Join(", ", tools.Select(t => t.DisplayName))}. Click to see the step each one needs.";
     }
 
     void OnWaitingChanged(int count)
@@ -215,20 +285,12 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
         _marshal.BeginInvoke(() => OpenPanel(PanelSection.WhatsNew));
     }
 
-    // The app was called WormsCursor before; carry over what lived under that name: the settings file
-    // (copied, only while there is none of ours yet) and the Start with Windows entry. Hooks need no
-    // step here: the Agents page shows WormsCursor's as outdated, and Update replaces them. Best effort:
-    // a failure is logged and the app starts with what it has.
-    void MigrateFromWormsCursor()
+    // The app was called WormsCursor before. Its settings need no step here (SettingsStore.Load reads
+    // the old file while there is no new one), and neither do its hooks (the startup refresh replaces
+    // them, as outdated connections); only the Start with Windows entry moves. Best effort: a failure
+    // is logged and the app starts without it.
+    void MigrateAutostartFromWormsCursor()
     {
-        try
-        {
-            if (SettingsStore.CarryOverLegacy()) AppLog.Write("carried the settings over from WormsCursor");
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            AppLog.Write("couldn't carry the settings over from WormsCursor: " + ex.Message);
-        }
         try
         {
             if (_autostart.MigrateLegacy()) AppLog.Write("moved WormsCursor's Start with Windows entry over");

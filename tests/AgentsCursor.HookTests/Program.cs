@@ -1,11 +1,14 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Drawing;
+using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgentsCursor.App;
 using AgentsCursor.App.ControlPanel;
 using AgentsCursor.App.Services;
 using AgentsCursor.Core;
-using OpenCodeCursorOverlay;
 
 var tests = new (string Name, Action Run)[]
 {
@@ -33,13 +36,22 @@ var tests = new (string Name, Action Run)[]
     ("Corrupt and unwritable settings files are never destroyed", SettingsPersistence),
     ("Autostart only counts a Run entry that launches this exe", AutostartTarget),
     ("Autostart moves WormsCursor's Run entry over once, only if it was on", AutostartMigration),
-    ("Settings carry over from WormsCursor's folder only when there are none yet", SettingsCarryOver),
+    ("Settings load from WormsCursor's file, read-only, while there is none of ours", SettingsLegacyLoad),
     ("The panel theme defaults to System and round-trips through settings.json", ThemeSetting),
     ("Suppressed program names normalize and match case-insensitively", SuppressionMatching),
     ("The suppressed-program list round-trips through settings.json", SuppressionSettingsJson),
-    ("The OpenCode helper follows settings saves and survives a locked read", SuppressionListReload),
     ("Settings copies never share a mutable program list", SuppressionCopies),
     ("The foreground watcher and window listing resolve real exe names", ForegroundSmoke),
+    ("The pipe serves a persistent plugin and 20 hooks at once, tagged and in order", PipeConcurrentClients),
+    ("A closed plugin connection releases exactly its own sessions", PipeLeaseRelease),
+    ("An oversized line drops only its connection; malformed lines are skipped", PipeOversizedLine),
+    ("Releasing an owner drops its sessions with one change, and an unknown owner is a no-op", ActivityRelease),
+    ("Pi registration merges, refreshes outdated entries in place, and unregisters", PiRegistration),
+    ("PI_CODING_AGENT_DIR is respected, except under the test home", PiHome),
+    ("OpenCode JSONC edits keep comments, commas and line endings byte-identical", OpenCodeRegistration),
+    ("OpenCode's config is written in place, so a hard link to it sees the change", OpenCodeHardLink),
+    ("Startup refresh updates only outdated connections and leaves the rest untouched", RefreshConnectedOnly),
+    ("Every agent's original icon renders, fitted, with the badge on its top-right", BuiltInIcons),
 };
 foreach (var (name, run) in tests)
 {
@@ -410,12 +422,11 @@ static void BadgeDrawing()
 {
     var settings = new CursorSettings();
     using var renderer = new NotifierRenderer();
-    using var logos = new AgentLogos();
-    foreach (var tool in new[] { "claude-code", "codex" })
+    foreach (var tool in IconCatalog.Tools)
         foreach (int side in new[] { 48, 96, 192 })
             foreach (int others in new[] { 0, 3, 12 })
             {
-                var logo = logos.Fit(tool, new RectangleF(-side / 2f, -side / 2f, side, side));
+                var logo = IconBounds(tool, side);
                 var (center, r) = AttentionBadge.Place(logo, side);
                 int dim = side * 3, mid = dim / 2;
                 // A spot on the yellow face, left of the "?" glyph.
@@ -431,6 +442,15 @@ static void BadgeDrawing()
                         throw new InvalidOperationException($"{tool} {side}px +{others} blocked={blocked}: badge pixel was {c}.");
                 }
             }
+}
+
+// Where a tool's icon sits in a token of side <side> centred on the origin (as NotifierRenderer draws it).
+static RectangleF IconBounds(string tool, int side)
+{
+    using var sprites = new TokenSprites();
+    var sprite = sprites.Get(tool, IconCatalog.Original(tool)!.Id, side, side * 0.06f)!;
+    var v = sprite.Visual;
+    return new RectangleF(-side / 2f + v.X, -side / 2f + v.Y, v.Width, v.Height);
 }
 
 static void OverlappingAttention()
@@ -476,6 +496,8 @@ static void WithHome(Action<string> test)
     finally
     {
         AgentHookRegistrar.HomeOverride = null;
+        foreach (string file in Directory.GetFiles(home, "*", SearchOption.AllDirectories))
+            File.SetAttributes(file, FileAttributes.Normal); // a read-only test file (or its backup)
         Directory.Delete(home, recursive: true);
     }
 }
@@ -837,7 +859,6 @@ static void UnknownTool() => WithHome(home =>
 static void ConcurrentRendering()
 {
     var settings = new CursorSettings();
-    var face = new TokenFace("claude-code", Blocked: true, Others: 1);
     int failures = 0, frames = 0;
     var until = DateTime.UtcNow.AddSeconds(1.5);
     var threads = Enumerable.Range(0, 2).Select(_ => new Thread(() =>
@@ -849,7 +870,8 @@ static void ConcurrentRendering()
             try
             {
                 using var g = Graphics.FromImage(canvas);
-                renderer.DrawToken(g, settings, face, 128f, 128f, 96f, 0f);
+                var tool = IconCatalog.Tools[frames % IconCatalog.Tools.Count];
+                renderer.DrawToken(g, settings, new TokenFace(tool, Blocked: true, Others: 1), 128f, 128f, 96f, 0f);
                 Interlocked.Increment(ref frames);
             }
             catch (InvalidOperationException) { Interlocked.Increment(ref failures); }
@@ -1030,32 +1052,42 @@ static void AutostartMigration()
     Equal(0, none.Commands.Count);
 }
 
-static void SettingsCarryOver() => WithHome(home =>
+static void SettingsLegacyLoad() => WithHome(home =>
 {
     string target = Path.Combine(home, "AgentsCursor", "settings.json");
     string legacy = Path.Combine(home, "WormsCursor", "settings.json");
     Equal("AgentsCursor", Path.GetFileName(Path.GetDirectoryName(SettingsStore.DefaultPath)));
     Equal("WormsCursor", Path.GetFileName(Path.GetDirectoryName(SettingsStore.LegacyPath)));
 
-    // Neither: nothing is written and the app starts with the defaults.
-    Equal(false, SettingsStore.CarryOverLegacy(target, legacy));
+    // Neither: the defaults, and nothing is written.
+    Equal(96, SettingsStore.Load(target, legacy).Size);
     Equal(false, File.Exists(target));
-    Equal(96, SettingsStore.Load(target).Size);
 
-    // Only the old one: copied over as it is, and the old folder is left alone.
+    // Only the old one: its values are read, and it is left exactly as it was (nothing is copied).
     Directory.CreateDirectory(Path.GetDirectoryName(legacy)!);
     string old = "{\"Size\": 150, \"SuppressedPrograms\": [\"cs2.exe\"]}";
     File.WriteAllText(legacy, old);
-    Equal(true, SettingsStore.CarryOverLegacy(target, legacy));
-    Equal(old, File.ReadAllText(target));
+    var loaded = SettingsStore.Load(target, legacy);
+    Equal(150, loaded.Size);
+    Equal("cs2.exe", Joined(loaded.SuppressedPrograms));
+    Equal(false, File.Exists(target));
     Equal(old, File.ReadAllText(legacy));
-    Equal(150, SettingsStore.Load(target).Size);
-    Equal("cs2.exe", Joined(SettingsStore.Load(target).SuppressedPrograms));
 
-    // Both: the new one wins and is never overwritten.
-    File.WriteAllText(legacy, "{\"Size\": 60}");
-    Equal(false, SettingsStore.CarryOverLegacy(target, legacy));
-    Equal(150, SettingsStore.Load(target).Size);
+    // The first save writes the new file, and from then on that is what loads.
+    loaded.Size = 160;
+    SettingsStore.Save(loaded, target);
+    Equal(160, SettingsStore.Load(target, legacy).Size);
+    Equal(old, File.ReadAllText(legacy));
+
+    // Both: the new one wins.
+    Equal(160, SettingsStore.Load(target, legacy).Size);
+
+    // A corrupt new file never brings the old settings back: the defaults load.
+    File.WriteAllText(target, "{ not json");
+    Equal(96, SettingsStore.Load(target, legacy).Size);
+
+    // A caller naming its own path doesn't fall back to WormsCursor's real file.
+    Equal(96, SettingsStore.Load(Path.Combine(home, "elsewhere.json")).Size);
 });
 
 static void ThemeSetting() => WithHome(home =>
@@ -1116,7 +1148,6 @@ static void SuppressionSettingsJson() => WithHome(home =>
     var settings = new CursorSettings { SuppressedPrograms = Array.Empty<string>() };
     SettingsStore.Save(settings, path);
     Equal(0, SettingsStore.Load(path).SuppressedPrograms.Count);
-    Equal(0, SettingsStore.TryRead(path)!.SuppressedPrograms.Count);
 
     settings.SuppressedPrograms = new[] { "dota2.exe", "cs2.exe" };
     SettingsStore.Save(settings, path);
@@ -1127,37 +1158,6 @@ static void SuppressionSettingsJson() => WithHome(home =>
     Equal(0, SettingsStore.Load(path).SuppressedPrograms.Count);
     File.WriteAllText(path, """{"SuppressedPrograms": ["C:\\Games\\Dota2", "dota2.exe", ""]}""");
     Equal("Dota2.exe", Joined(SettingsStore.Load(path).SuppressedPrograms));
-
-    // The read-only path (the OpenCode helper) reports a corrupt file as unreadable, not as the
-    // defaults, and never moves it; a missing file does mean the defaults.
-    File.WriteAllText(path, "{ not json");
-    Equal<CursorSettings?>(null, SettingsStore.TryRead(path));
-    Equal(true, File.Exists(path));
-    Equal(0, Directory.GetFiles(home, "settings.json.corrupt-*").Length);
-    File.Delete(path);
-    Equal("dota2.exe", Joined(SettingsStore.TryRead(path)!.SuppressedPrograms));
-});
-
-// The OpenCode helper's view of the list: a save is announced whatever has focus, and a read that
-// fails (the file locked mid-save) keeps the last good list rather than reverting to the defaults.
-static void SuppressionListReload() => WithHome(home =>
-{
-    string path = Path.Combine(home, "AgentsCursor", "settings.json");
-    using var list = new SuppressionListFile(path);
-    using var saved = new ManualResetEventSlim(false);
-    list.Changed += saved.Set;
-    Equal("dota2.exe", Joined(list.Current())); // nothing saved yet
-
-    SettingsStore.Save(new CursorSettings { SuppressedPrograms = Array.Empty<string>() }, path);
-    Equal(true, saved.Wait(TimeSpan.FromSeconds(5)));
-    Equal(0, list.Current().Count);
-
-    saved.Reset();
-    SettingsStore.Save(new CursorSettings { SuppressedPrograms = new[] { "cs2.exe" } }, path); // a replace
-    Equal(true, saved.Wait(TimeSpan.FromSeconds(5)));
-    using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
-        Equal(0, list.Current().Count); // locked: the last good list, not ["dota2.exe"]
-    Equal("cs2.exe", Joined(list.Current())); // retried once readable
 });
 
 static void SuppressionCopies()
@@ -1211,6 +1211,469 @@ static void ForegroundSmoke()
         Equal(true, foreground is null || foreground.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
     }
     Equal(true, DateTime.UtcNow - started < TimeSpan.FromSeconds(2));
+}
+
+// ---------- the pipe: hooks and persistent plugin connections ----------
+
+static string PrivatePipe() => "AgentsCursorTest." + Guid.NewGuid().ToString("N");
+
+static string Line(string tool, string ev, string? session = null, params string[] items)
+    => new AgentEventMessage { Tool = tool, Event = ev, SessionId = session, InputIds = items.Length > 0 ? items : null }.ToJsonLine();
+
+static NamedPipeClientStream Connect(string pipe)
+{
+    var client = new NamedPipeClientStream(".", pipe, PipeDirection.Out);
+    client.Connect(2_000);
+    return client;
+}
+
+static void WaitUntil(Func<bool> condition, string what)
+{
+    var deadline = DateTime.UtcNow.AddSeconds(5);
+    while (!condition())
+    {
+        if (DateTime.UtcNow > deadline) throw new InvalidOperationException("Timed out waiting for " + what + ".");
+        Thread.Sleep(10);
+    }
+}
+
+static void PipeConcurrentClients()
+{
+    string pipe = PrivatePipe();
+    var received = new ConcurrentQueue<(AgentEventMessage Message, long? Lease)>();
+    var released = new ConcurrentQueue<long>();
+    using var server = new AgentPipeServer((m, lease) => received.Enqueue((m, lease)), released.Enqueue, pipe);
+    server.Start();
+
+    // A plugin host holds its connection open for its whole life...
+    using var plugin = Connect(pipe);
+    using var writer = new StreamWriter(plugin) { AutoFlush = true };
+    writer.WriteLine(Line("pi", AgentEventMessage.AttachEvent));
+    writer.WriteLine(Line("pi", "awaiting_user", "p", "ui:1"));
+
+    // ...while 20 throwaway hooks connect at once, each well inside the bridge's 500 ms budget.
+    var hooks = Enumerable.Range(0, 20).Select(i => Task.Run(() =>
+    {
+        var clock = Stopwatch.StartNew();
+        using var hook = Connect(pipe);
+        long connectMs = clock.ElapsedMilliseconds;
+        using var w = new StreamWriter(hook) { AutoFlush = true };
+        w.WriteLine(Line("claude-code", "turn_complete", "hook-" + i));
+        return connectMs;
+    })).ToArray();
+    Task.WaitAll(hooks);
+    foreach (var hook in hooks)
+        if (hook.Result >= 500) throw new InvalidOperationException($"A hook took {hook.Result} ms to connect.");
+
+    for (int i = 2; i <= 6; i++) writer.WriteLine(Line("pi", "input_answered", "p", "ui:" + i));
+    WaitUntil(() => received.Count == 26, "every message");
+
+    var fromPlugin = received.Where(r => r.Message.Tool == "pi").ToArray();
+    Equal(1, fromPlugin.Select(r => r.Lease).Distinct().Count());
+    Equal(true, fromPlugin[0].Lease is long);
+    Equal("ui:1,ui:2,ui:3,ui:4,ui:5,ui:6", string.Join(',', fromPlugin.Select(r => r.Message.InputIds![0])));
+    Equal(20, received.Count(r => r.Message.Tool == "claude-code" && r.Lease is null));
+    Equal(false, received.Any(r => r.Message.Event == AgentEventMessage.AttachEvent)); // consumed by the server
+    Equal(0, released.Count); // hooks hold no lease, and the plugin is still connected
+}
+
+static void PipeLeaseRelease()
+{
+    string pipe = PrivatePipe();
+    var now = DateTime.UtcNow;
+    var activity = new AgentActivity(TimeSpan.FromSeconds(10));
+    var released = new ConcurrentQueue<long>();
+    var gate = new object();
+    // As the tray does: the message's lease becomes the session's owner, a release drops its sessions.
+    using var server = new AgentPipeServer(
+        (m, lease) => { lock (gate) { m.TryGetKind(out var kind); activity.Report(m.Tool, m.SessionId, m.Project, kind, now, m.InputIds, owner: lease?.ToString()); } },
+        lease => { lock (gate) activity.Release(lease.ToString()); released.Enqueue(lease); },
+        pipe);
+    server.Start();
+
+    var pi = Connect(pipe);
+    var piWriter = new StreamWriter(pi) { AutoFlush = true };
+    piWriter.WriteLine(Line("pi", AgentEventMessage.AttachEvent));
+    piWriter.WriteLine(Line("pi", "awaiting_user", "pi-session", "ui:1"));
+
+    using var openCode = Connect(pipe);
+    using var openCodeWriter = new StreamWriter(openCode) { AutoFlush = true };
+    openCodeWriter.WriteLine(Line("opencode", AgentEventMessage.AttachEvent));
+    openCodeWriter.WriteLine(Line("opencode", "turn_complete", "root"));
+
+    using (var hook = Connect(pipe))
+    using (var w = new StreamWriter(hook) { AutoFlush = true })
+        w.WriteLine(Line("codex", "awaiting_user", "codex-session"));
+
+    WaitUntil(() => activity.WaitingCount == 3, "three waiting sessions");
+    Equal(0, released.Count); // the hook's disconnect means nothing
+
+    // Pi is killed while blocked on you: its connection closes, and only its session goes.
+    pi.Dispose();
+    WaitUntil(() => released.Count == 1, "the release");
+    Equal("codex:Blocked,opencode:Finished", string.Join(',', activity.Waiting.Select(w => $"{w.Tool}:{w.State}").Order()));
+}
+
+static void PipeOversizedLine()
+{
+    string pipe = PrivatePipe();
+    var received = new ConcurrentQueue<AgentEventMessage>();
+    var released = new ConcurrentQueue<long>();
+    using var server = new AgentPipeServer((m, _) => received.Enqueue(m), released.Enqueue, pipe);
+    server.Start();
+
+    using var steady = Connect(pipe);
+    using var steadyWriter = new StreamWriter(steady) { AutoFlush = true };
+    steadyWriter.WriteLine(Line("opencode", AgentEventMessage.AttachEvent));
+    steadyWriter.WriteLine("{ not json");
+    steadyWriter.WriteLine(Line("opencode", "turn_complete", "a"));
+
+    using var flood = Connect(pipe);
+    var floodWriter = new StreamWriter(flood) { AutoFlush = true };
+    floodWriter.WriteLine(Line("pi", AgentEventMessage.AttachEvent));
+    bool cut = false;
+    try { floodWriter.WriteLine(new string('x', AgentPipeServer.MaxLineBytes + 10)); floodWriter.WriteLine(Line("pi", "turn_complete", "b")); }
+    catch (IOException) { cut = true; } // the server may hang up before the whole line is written
+    WaitUntil(() => released.Count == 1, "the oversized connection to end");
+
+    steadyWriter.WriteLine(Line("opencode", "turn_complete", "c"));
+    WaitUntil(() => received.Count == 2, "the steady connection's messages");
+    Equal("a,c", string.Join(',', received.Select(m => m.SessionId)));
+    Equal(false, received.Any(m => m.Tool == "pi"));
+    _ = cut;
+}
+
+static void ActivityRelease()
+{
+    var now = DateTime.UtcNow;
+    var activity = new AgentActivity(TimeSpan.FromSeconds(10));
+    var changes = new List<int>();
+    activity.WaitingChanged += changes.Add;
+    activity.Report("pi", "a", null, AgentEventKind.AwaitingUser, now, new[] { "ui:1" }, owner: "1");
+    activity.Report("pi", "b", null, AgentEventKind.TurnComplete, now, owner: "1");
+    activity.Report("opencode", "c", null, AgentEventKind.TurnComplete, now, owner: "2");
+    activity.Report("claude-code", "d", null, AgentEventKind.TurnComplete, now);
+    changes.Clear();
+
+    activity.Release("unknown");
+    Equal(0, changes.Count);
+    activity.Release("1");
+    Equal("2", string.Join(',', changes)); // once, for both of its sessions
+    Equal("claude-code,opencode", string.Join(',', activity.Waiting.Select(w => w.Tool).Order()));
+    activity.Release("1");
+    Equal(1, changes.Count);
+}
+
+// ---------- Pi and OpenCode registration ----------
+
+static void PiRegistration() => WithHome(home =>
+{
+    string path = AgentHookRegistrar.PiPath;
+    Equal(Path.Combine(home, ".pi", "agent", "settings.json"), path);
+    string plugin = AgentHookRegistrar.PluginDir("pi");
+    Equal(true, File.Exists(Path.Combine(plugin, "index.ts"))); // shipped next to the exe
+    string[] Extensions() => JsonNode.Parse(File.ReadAllText(path))!["extensions"]!.AsArray().Select(e => e!.GetValue<string>()).ToArray();
+
+    // No settings yet: created with just our entry, and nothing to back up.
+    Equal(HookState.NotRegistered, AgentHookRegistrar.GetState("pi"));
+    AgentHookRegistrar.Register("pi");
+    Equal(HookState.Registered, AgentHookRegistrar.GetState("pi"));
+    Equal(plugin, string.Join('|', Extensions()));
+    Equal(false, File.Exists(path + ".agentscursor.bak"));
+
+    // An older copy's entry is replaced where it was; the user's entries, order and settings stay.
+    string original = JsonSerializer.Serialize(new
+    {
+        theme = "powerline-aura",
+        extensions = new[] { "-builtin:mcp", @"C:\Users\me\WormsCursor\integrations\pi", "./extensions/mine" },
+        packages = new[] { "npm:pi-web-access" },
+    });
+    File.WriteAllText(path, original);
+    Equal(HookState.Outdated, AgentHookRegistrar.GetState("pi"));
+    AgentHookRegistrar.Register("pi");
+    Equal(HookState.Registered, AgentHookRegistrar.GetState("pi"));
+    Equal($"-builtin:mcp|{plugin}|./extensions/mine", string.Join('|', Extensions()));
+    var root = JsonNode.Parse(File.ReadAllText(path))!;
+    Equal("powerline-aura", root["theme"]!.GetValue<string>());
+    Equal("npm:pi-web-access", root["packages"]![0]!.GetValue<string>());
+    Equal(original, File.ReadAllText(path + ".agentscursor.bak"));
+    string once = File.ReadAllText(path);
+    AgentHookRegistrar.Register("pi");
+    Equal(once, File.ReadAllText(path));
+    Equal(original, File.ReadAllText(path + ".agentscursor.bak")); // the backup is taken once
+
+    // Other forms of our entry are outdated and become today's single entry, in place.
+    foreach (var entries in new[]
+             {
+                 new[] { "a", "+" + plugin, "b" },
+                 new[] { "a", Path.Combine(plugin, "index.ts"), "b" },
+                 new[] { "a", plugin.Replace('\\', '/') + "/", "b" },
+                 new[] { "a", plugin, "b", plugin.ToUpperInvariant() },
+             })
+    {
+        File.WriteAllText(path, JsonSerializer.Serialize(new { extensions = entries }));
+        Equal(HookState.Outdated, AgentHookRegistrar.GetState("pi"));
+        AgentHookRegistrar.Register("pi");
+        Equal($"a|{plugin}|b", string.Join('|', Extensions()));
+    }
+
+    // An exclusion naming a plugin folder is the user's, not ours.
+    File.WriteAllText(path, JsonSerializer.Serialize(new { extensions = new[] { "-" + plugin } }));
+    Equal(HookState.NotRegistered, AgentHookRegistrar.GetState("pi"));
+
+    // Unregister removes only ours, and the list when nothing is left.
+    File.WriteAllText(path, JsonSerializer.Serialize(new { extensions = new[] { "-builtin:mcp", plugin } }));
+    AgentHookRegistrar.Unregister("pi");
+    Equal("-builtin:mcp", string.Join('|', Extensions()));
+    File.WriteAllText(path, JsonSerializer.Serialize(new { quietStartup = true, extensions = new[] { plugin } }));
+    AgentHookRegistrar.Unregister("pi");
+    Equal(false, JsonNode.Parse(File.ReadAllText(path))!.AsObject().ContainsKey("extensions"));
+    Equal(HookState.NotRegistered, AgentHookRegistrar.GetState("pi"));
+
+    // A list that isn't a list of paths can't be merged safely: it's reported and left alone.
+    foreach (string raw in new[] { "{\"extensions\": \"x\"}", "{\"extensions\": [1]}", "{", "[]" })
+    {
+        File.WriteAllText(path, raw);
+        Equal(HookState.ConfigConflict, AgentHookRegistrar.GetState("pi"));
+        foreach (Action action in new Action[] { () => AgentHookRegistrar.Register("pi"), () => AgentHookRegistrar.Unregister("pi") })
+        {
+            bool rejected = false;
+            try { action(); }
+            catch (InvalidOperationException) { rejected = true; }
+            Equal(true, rejected);
+            Equal(raw, File.ReadAllText(path));
+        }
+    }
+});
+
+static void PiHome()
+{
+    string? previous = Environment.GetEnvironmentVariable("PI_CODING_AGENT_DIR");
+    try
+    {
+        Environment.SetEnvironmentVariable("PI_CODING_AGENT_DIR", @"C:\custom-pi");
+        Equal(@"C:\custom-pi\settings.json", AgentHookRegistrar.PiPath);
+        WithHome(home => Equal(Path.Combine(home, ".pi", "agent", "settings.json"), AgentHookRegistrar.PiPath));
+    }
+    finally { Environment.SetEnvironmentVariable("PI_CODING_AGENT_DIR", previous); }
+}
+
+static void OpenCodeRegistration() => WithHome(home =>
+{
+    string dir = Path.Combine(home, ".config", "opencode");
+    string path = Path.Combine(dir, "opencode.jsonc");
+    Equal(path, AgentHookRegistrar.OpenCodePath);
+    string entry = new Uri(AgentHookRegistrar.PluginDir("opencode")).AbsoluteUri;
+    string quoted = "\"" + entry + "\"";
+
+    // No config yet: one is created with OpenCode's schema and our entry.
+    AgentHookRegistrar.Register("opencode");
+    Equal(HookState.Registered, AgentHookRegistrar.GetState("opencode"));
+    Equal("{\n  \"plugins\": [" + quoted + "],\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n", File.ReadAllText(path));
+    File.Delete(path);
+
+    // The old repo checkout's plugin (an object carrying the retired plugin's options) is ours but
+    // outdated: it becomes the bare entry at the same position, and nothing else changes by a byte,
+    // CRLF line ends, comments and trailing commas included.
+    const string oldPlugin = "{\r\n      \"package\": \"file:///C:/Users/hoang/Lumicity/Projects/Personal/WormsCursor/integrations/opencode\",\r\n      \"options\": { \"enabled\": true, \"tokenSize\": 64 } // tuned\r\n    }";
+    string Config(string plugins) => "{\r\n  // my config\r\n  \"$schema\": \"https://opencode.ai/config.json\",\r\n  \"plugins\": [\r\n    \"opencode-foo@1.0\", // pinned\r\n"
+        + plugins + "    \"./plugins/mine\",\r\n  ],\r\n  /* block */ \"model\": \"anthropic/x\", // ünïcode\r\n}\r\n";
+    string original = Config("    " + oldPlugin + ",\r\n");
+    Directory.CreateDirectory(dir);
+    File.WriteAllText(path, original);
+    Equal(HookState.Outdated, AgentHookRegistrar.GetState("opencode"));
+    AgentHookRegistrar.Register("opencode");
+    Equal(HookState.Registered, AgentHookRegistrar.GetState("opencode"));
+    Equal(Config("    " + quoted + ",\r\n"), File.ReadAllText(path));
+    Equal(original, File.ReadAllText(path + ".agentscursor.bak"));
+
+    // Unregister takes the element and its line out; Register then adds it last, in the list's own
+    // style (one per line, trailing comma), and Unregister restores the text exactly.
+    AgentHookRegistrar.Unregister("opencode");
+    string without = Config("");
+    Equal(without, File.ReadAllText(path));
+    AgentHookRegistrar.Register("opencode");
+    Equal(without.Replace("    \"./plugins/mine\",\r\n", "    \"./plugins/mine\",\r\n    " + quoted + ",\r\n"), File.ReadAllText(path));
+    AgentHookRegistrar.Unregister("opencode");
+    Equal(without, File.ReadAllText(path));
+    Equal(original, File.ReadAllText(path + ".agentscursor.bak")); // still the first original
+    File.Delete(path + ".agentscursor.bak");
+
+    // Layouts: no plugins key (removing the only entry restores the original), an empty list, an
+    // inline list, a multi-line list without a trailing comma.
+    foreach (var (before, after) in new[]
+             {
+                 ("{\n  \"$schema\": \"x\"\n}\n", "{\n  \"plugins\": [" + quoted + "],\n  \"$schema\": \"x\"\n}\n"),
+                 ("{ \"theme\": \"y\" }", "{ \"plugins\": [" + quoted + "], \"theme\": \"y\" }"),
+                 ("{\n  \"plugins\": []\n}", "{\n  \"plugins\": [" + quoted + "]\n}"),
+                 ("{\n  \"plugins\": [\"a\"]\n}", "{\n  \"plugins\": [\"a\", " + quoted + "]\n}"),
+                 ("{\n\t\"plugins\": [\n\t\t\"a\" // first\n\t]\n}", "{\n\t\"plugins\": [\n\t\t\"a\", // first\n\t\t" + quoted + "\n\t]\n}"),
+             })
+    {
+        File.WriteAllText(path, before);
+        AgentHookRegistrar.Register("opencode");
+        Equal(after, File.ReadAllText(path));
+        Equal(HookState.Registered, AgentHookRegistrar.GetState("opencode"));
+        AgentHookRegistrar.Unregister("opencode");
+        Equal(HookState.NotRegistered, AgentHookRegistrar.GetState("opencode"));
+        if (!before.Contains("[]")) Equal(before, File.ReadAllText(path)); // an emptied list goes with the key
+    }
+
+    // Duplicates and other copies collapse into one entry, where the first one was.
+    File.WriteAllText(path, "{\"plugins\": [\"x\", \"file:///D:/Apps/AgentsCursor/integrations/opencode/\", \"y\", " + quoted + ", \"C:\\\\old\\\\integrations\\\\opencode\\\\index.ts\"]}");
+    Equal(HookState.Outdated, AgentHookRegistrar.GetState("opencode"));
+    AgentHookRegistrar.Register("opencode");
+    Equal("{\"plugins\": [\"x\", " + quoted + ", \"y\"]}", File.ReadAllText(path));
+
+    // Package names and unrelated folders are never ours.
+    string others = "{\"plugins\": [\"opencode-integrations-opencode\", \"file:///C:/x/integrations/opencode-extra\", {\"package\": \"@scope/opencode\"}]}";
+    File.WriteAllText(path, others);
+    Equal(HookState.NotRegistered, AgentHookRegistrar.GetState("opencode"));
+    AgentHookRegistrar.Unregister("opencode");
+    Equal(others, File.ReadAllText(path));
+
+    // A config that can't be edited safely is reported and left alone.
+    foreach (string raw in new[] { "{", "[1]", "{\"plugins\": {}}", "{\"plugins\": \"x\"}" })
+    {
+        File.WriteAllText(path, raw);
+        Equal(HookState.ConfigConflict, AgentHookRegistrar.GetState("opencode"));
+        foreach (Action action in new Action[] { () => AgentHookRegistrar.Register("opencode"), () => AgentHookRegistrar.Unregister("opencode") })
+        {
+            bool rejected = false;
+            try { action(); }
+            catch (InvalidOperationException) { rejected = true; }
+            Equal(true, rejected);
+            Equal(raw, File.ReadAllText(path));
+        }
+    }
+
+    // With only opencode.json, that is the file used (and no .jsonc appears).
+    File.Delete(path);
+    string json = Path.Combine(dir, "opencode.json");
+    File.WriteAllText(json, "{\"plugins\": []}");
+    Equal(json, AgentHookRegistrar.OpenCodePath);
+    AgentHookRegistrar.Register("opencode");
+    Equal("{\"plugins\": [" + quoted + "]}", File.ReadAllText(json));
+    Equal(false, File.Exists(path));
+
+    // A UTF-8 byte order mark is kept.
+    File.WriteAllText(json, "{\"plugins\": []}", new System.Text.UTF8Encoding(true));
+    AgentHookRegistrar.Register("opencode");
+    Equal(true, File.ReadAllBytes(json).AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }));
+});
+
+static void OpenCodeHardLink() => WithHome(home =>
+{
+    // Orca's OpenCode overlay is a hard link to the user's config: a write must go through the link.
+    string path = AgentHookRegistrar.OpenCodePath;
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    File.WriteAllText(path, "{\n  // mine\n  \"plugins\": []\n}\n");
+    string overlay = Path.Combine(home, "orca", "opencode-config-overlays", "hash", "opencode.jsonc");
+    Directory.CreateDirectory(Path.GetDirectoryName(overlay)!);
+    if (!HardLinks.Create(overlay, path)) throw new InvalidOperationException("Couldn't create a hard link: " + Marshal.GetLastWin32Error());
+    AgentHookRegistrar.Register("opencode");
+    string written = File.ReadAllText(path);
+    Equal(true, written.Contains(new Uri(AgentHookRegistrar.PluginDir("opencode")).AbsoluteUri));
+    Equal(written, File.ReadAllText(overlay));
+    AgentHookRegistrar.Unregister("opencode");
+    Equal(File.ReadAllText(path), File.ReadAllText(overlay));
+});
+
+static void RefreshConnectedOnly() => WithHome(home =>
+{
+    // Claude: connected and current. Codex: connected from an old exe path. OpenCode: the old repo
+    // checkout's plugin. Pi: not connected.
+    AgentHookRegistrar.Register("claude-code");
+    string claude = AgentHookRegistrar.ClaudePath;
+    File.Delete(claude + ".agentscursor.bak");
+    var claudeTime = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    File.SetLastWriteTimeUtc(claude, claudeTime);
+    string claudeBytes = File.ReadAllText(claude);
+
+    AgentHookRegistrar.Register("codex");
+    string codex = AgentHookRegistrar.CodexPath;
+    string exe = JsonSerializer.Serialize(Environment.ProcessPath!)[1..^1];
+    File.WriteAllText(codex, File.ReadAllText(codex).Replace(exe, @"C:\\Users\\me\\AppData\\Local\\WormsCursor\\current\\WormsCursor.exe"));
+    File.Delete(codex + ".agentscursor.bak");
+    Equal(HookState.Outdated, AgentHookRegistrar.GetState("codex"));
+
+    string openCode = AgentHookRegistrar.OpenCodePath;
+    Directory.CreateDirectory(Path.GetDirectoryName(openCode)!);
+    File.WriteAllText(openCode, "{\"plugins\": [\"file:///C:/src/WormsCursor/integrations/opencode\"]}");
+
+    string pi = AgentHookRegistrar.PiPath;
+    Directory.CreateDirectory(Path.GetDirectoryName(pi)!);
+    string piText = "{\"extensions\": [\"-builtin:mcp\"]}";
+    File.WriteAllText(pi, piText);
+
+    var results = AgentHookRegistrar.RefreshConnected();
+    Equal("codex:,opencode:", string.Join(',', results.Select(r => $"{r.Tool.Id}:{r.Error}")));
+    foreach (var tool in AgentHookRegistrar.Tools)
+        Equal(tool.Id == "pi" ? HookState.NotRegistered : HookState.Registered, AgentHookRegistrar.GetState(tool.Id));
+    // Untouched: not a byte, not the write time, no backup.
+    Equal(claudeBytes, File.ReadAllText(claude));
+    Equal(claudeTime, File.GetLastWriteTimeUtc(claude));
+    Equal(false, File.Exists(claude + ".agentscursor.bak"));
+    Equal(piText, File.ReadAllText(pi));
+    Equal(false, File.Exists(pi + ".agentscursor.bak"));
+    // A second start finds nothing to do.
+    Equal(0, AgentHookRegistrar.RefreshConnected().Count);
+
+    // An unreadable config stays as it is; a write that fails is reported for that tool only.
+    File.WriteAllText(claude, "{ broken");
+    File.WriteAllText(pi, "{\"extensions\": [\"C:\\\\old\\\\integrations\\\\pi\"]}");
+    File.SetAttributes(pi, FileAttributes.ReadOnly);
+    try
+    {
+        var failed = AgentHookRegistrar.RefreshConnected();
+        Equal(1, failed.Count);
+        Equal("pi", failed[0].Tool.Id);
+        Equal(true, failed[0].Error is { Length: > 0 });
+        Equal(HookState.Outdated, AgentHookRegistrar.GetState("pi"));
+        Equal("{ broken", File.ReadAllText(claude));
+        Equal(HookState.ConfigConflict, AgentHookRegistrar.GetState("claude-code"));
+    }
+    finally { File.SetAttributes(pi, FileAttributes.Normal); }
+});
+
+// ---------- icons ----------
+
+static void BuiltInIcons()
+{
+    Equal("claude-code,codex,opencode,pi", string.Join(',', IconCatalog.Tools));
+    using var sprites = new TokenSprites();
+    foreach (string tool in IconCatalog.Tools)
+    {
+        var icon = IconCatalog.Original(tool)!;
+        Equal($"{tool}.original", icon.Id);
+        foreach (int side in new[] { 48, 96 })
+        {
+            var sprite = sprites.Get(tool, icon.Id, side, side * 0.06f) ?? throw new InvalidOperationException($"{tool} has no sprite.");
+            var v = sprite.Visual;
+            // Fitted by its visible pixels: it fills the box along its longer side, and stays inside.
+            Equal(true, v.X >= -0.01f && v.Y >= -0.01f && v.Right <= side + 0.01f && v.Bottom <= side + 0.01f);
+            Equal(true, Math.Max(v.Width, v.Height) >= side - 0.5f);
+            int opaque = 0;
+            for (int y = 0; y < sprite.Image.Height; y++)
+                for (int x = 0; x < sprite.Image.Width; x++)
+                    if (sprite.Image.GetPixel(x, y).A > 200) opaque++;
+            Equal(true, opaque > side * side / 8);
+            // The badge sits on the icon's top-right.
+            var (center, _) = AttentionBadge.Place(new RectangleF(v.X, v.Y, v.Width, v.Height), side);
+            Equal(true, center.X > v.X + v.Width / 2 && center.Y < v.Y + v.Height / 2);
+        }
+    }
+    Equal<IconInfo?>(null, IconCatalog.Original("mystery"));
+    Equal<TokenSprites.Sprite?>(null, sprites.Get("mystery", "mystery.original", 48, 3));
+}
+
+/// <summary>Creates hard links, as Orca does for its OpenCode config overlay.</summary>
+static class HardLinks
+{
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CreateHardLink(string link, string existing, IntPtr security);
+
+    public static bool Create(string link, string existing) => CreateHardLink(link, existing, IntPtr.Zero);
 }
 
 /// <summary>In-memory Run / StartupApproved entries for the autostart tests.</summary>

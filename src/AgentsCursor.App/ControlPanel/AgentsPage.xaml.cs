@@ -9,9 +9,10 @@ using AgentsCursor.Core;
 namespace AgentsCursor.App.ControlPanel;
 
 /// <summary>
-/// The agent tools AgentsCursor listens to: one card per tool with its connection status and Connect /
-/// Update / Disconnect (or, for a config it can't read, Show file), how long the token stays after an
-/// agent is done, and an on-screen preview that shows pretend waiting agents on the real token.
+/// The agent tools AgentsCursor listens to (Claude Code, Codex, OpenCode, Pi): one card per tool with
+/// its connection status and Connect / Update / Disconnect (or, for a config it can't read, Show file),
+/// how long the token stays after an agent is done, and an on-screen preview that shows pretend waiting
+/// agents on the real token.
 /// Connecting edits the tool's own config (backed up first); the status is re-read whenever the page is
 /// shown and after every action.
 /// </summary>
@@ -111,11 +112,25 @@ public partial class AgentsPage : Page
         {
             _logoDpi = dpi;
             _rows = AgentHookRegistrar.Tools
-                .Select(tool => new ToolRow(tool, ToolLogo.Render(tool.Id, 28, dpi), AgentHookRegistrar.ConfigPath(tool.Id)))
+                .Select(tool => new ToolRow(tool, ToolLogo.Render(tool.Id, 28, dpi)))
                 .ToArray();
             ToolList.ItemsSource = _rows;
         }
-        foreach (var row in _rows) row.Refresh();
+        foreach (var row in _rows) Refresh(row);
+        ShowRefreshErrors();
+    }
+
+    void Refresh(ToolRow row)
+        => row.Refresh(_host.ChangedThisRun.TryGetValue(row.Tool.Id, out var change) ? change : null);
+
+    // A connection the startup refresh couldn't update stays "Needs update"; say why, so the user can
+    // fix the file and press Update.
+    void ShowRefreshErrors()
+    {
+        var failed = _rows.Where(r => r.State == HookState.Outdated && _host.RefreshErrors.ContainsKey(r.Tool.Id)).ToArray();
+        if (failed.Length == 0) return;
+        ShowError(failed.Length == 1 ? $"Couldn't update {failed[0].Name} automatically" : "Couldn't update some connections automatically",
+            string.Join(Environment.NewLine, failed.Select(r => (failed.Length == 1 ? "" : r.Name + ": ") + _host.RefreshErrors[r.Tool.Id])));
     }
 
     void OnPrimary(object sender, RoutedEventArgs e)
@@ -123,27 +138,32 @@ public partial class AgentsPage : Page
         if (((FrameworkElement)sender).DataContext is not ToolRow row) return;
         switch (row.PrimaryAction)
         {
-            case ToolAction.Connect: Act(row, AgentHookRegistrar.Register); break;
-            case ToolAction.Disconnect: Act(row, AgentHookRegistrar.Unregister); break;
+            case ToolAction.Connect: Act(row, AgentHookRegistrar.Register, _host.NoteConnected); break;
+            case ToolAction.Disconnect: Act(row, AgentHookRegistrar.Unregister, _host.NoteDisconnected); break;
             case ToolAction.ShowFile: ShowFile(row); break;
         }
     }
 
     void OnDisconnect(object sender, RoutedEventArgs e)
     {
-        if (((FrameworkElement)sender).DataContext is ToolRow row) Act(row, AgentHookRegistrar.Unregister);
+        if (((FrameworkElement)sender).DataContext is ToolRow row) Act(row, AgentHookRegistrar.Unregister, _host.NoteDisconnected);
     }
 
-    // Runs a connect/disconnect; a failure (a malformed or locked config) shows in the error bar.
-    void Act(ToolRow row, Action<string> action)
+    // Runs a connect/disconnect and tells the host; a failure (a malformed or locked config, or a copy
+    // without the tool's plugin) shows in the error bar.
+    void Act(ToolRow row, Action<string> action, Action<string> done)
     {
         ErrorBar.IsOpen = false;
-        try { action(row.Tool.Id); }
+        try
+        {
+            action(row.Tool.Id);
+            done(row.Tool.Id);
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             ShowError($"Couldn't change {row.Name}", ex.Message);
         }
-        row.Refresh();
+        Refresh(row);
     }
 
     // Opens the config's folder in File Explorer with the file selected, so it can be fixed by hand.

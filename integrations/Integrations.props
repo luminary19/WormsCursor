@@ -1,0 +1,15 @@
+<Project>
+  <!-- The Pi and OpenCode plugins ship with the app: copied next to the exe as
+       integrations\{shared,pi,opencode}\ (bin, publish and the Velopack package alike), which is where
+       AgentHookRegistrar.PluginDir points the agents. Only the runtime files go: no tests, no
+       node_modules (OpenCode supplies @opencode/plugin itself; Pi runs the TypeScript through jiti).
+       Imported by the app and by the tests, so the registrar tests see the real layout. -->
+  <PropertyGroup>
+    <IntegrationsRoot>$(MSBuildThisFileDirectory)</IntegrationsRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="$(IntegrationsRoot)shared\*.ts" LinkBase="integrations\shared" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(IntegrationsRoot)pi\*.ts;$(IntegrationsRoot)pi\package.json" LinkBase="integrations\pi" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(IntegrationsRoot)opencode\*.ts;$(IntegrationsRoot)opencode\package.json" LinkBase="integrations\opencode" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

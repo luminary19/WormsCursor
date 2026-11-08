@@ -6,7 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
+    <!-- Core as a reference (its internals are visible here); the App's UI-free pieces as linked source. -->
+    <ProjectReference Include="../../src/AgentsCursor.Core/AgentsCursor.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../../src/AgentsCursor.App/AgentHookBridge.cs" Link="AgentHookBridge.cs" />
@@ -15,19 +16,11 @@
     <Compile Include="../../src/AgentsCursor.App/Autostart.cs" Link="Autostart.cs" />
     <Compile Include="../../src/AgentsCursor.App/ControlPanel/ReleaseNotesFormat.cs" Link="ReleaseNotesFormat.cs" />
     <Compile Include="../../src/AgentsCursor.App/Services/AgentHookRegistrar.cs" Link="AgentHookRegistrar.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/AgentActivity.cs" Link="AgentActivity.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/AgentEventMessage.cs" Link="AgentEventMessage.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/AgentLogos.cs" Link="AgentLogos.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/AttentionBadge.cs" Link="AttentionBadge.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/CursorSettings.cs" Link="CursorSettings.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/ForegroundWatcher.cs" Link="ForegroundWatcher.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/LiveSettings.cs" Link="LiveSettings.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/NotifierRenderer.cs" Link="NotifierRenderer.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/ProgramSuppression.cs" Link="ProgramSuppression.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/SettingsStore.cs" Link="SettingsStore.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/SvgPath.cs" Link="SvgPath.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/TokenFace.cs" Link="TokenFace.cs" />
-    <Compile Include="../../src/AgentsCursor.Core/WindowPrograms.cs" Link="WindowPrograms.cs" />
-    <Compile Include="../../src/AgentsCursor.OpenCodeOverlay/SuppressionListFile.cs" Link="SuppressionListFile.cs" />
+    <Compile Include="../../src/AgentsCursor.App/Services/HooksJson.cs" Link="HooksJson.cs" />
+    <Compile Include="../../src/AgentsCursor.App/Services/JsoncEdit.cs" Link="JsoncEdit.cs" />
+    <Compile Include="../../src/AgentsCursor.App/Services/OpenCodePlugins.cs" Link="OpenCodePlugins.cs" />
+    <Compile Include="../../src/AgentsCursor.App/Services/PiExtensions.cs" Link="PiExtensions.cs" />
   </ItemGroup>
+  <!-- The plugins next to the test exe, as next to AgentsCursor.exe, for the registrar tests. -->
+  <Import Project="../../integrations/Integrations.props" />
 </Project>

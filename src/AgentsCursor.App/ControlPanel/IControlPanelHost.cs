@@ -16,6 +16,19 @@ public interface IControlPanelHost
     IAutostart Autostart { get; }
     UpdateService Updates { get; }
 
+    /// <summary>The tools whose connection AgentsCursor changed during this run, and how: the Agents
+    /// page then shows the step that tool needs before the change takes effect.</summary>
+    IReadOnlyDictionary<string, ConnectionChange> ChangedThisRun { get; }
+
+    /// <summary>Why the startup refresh couldn't bring a tool's outdated connection up to date.</summary>
+    IReadOnlyDictionary<string, string> RefreshErrors { get; }
+
+    /// <summary>The user connected (or updated) <paramref name="toolId"/> on the Agents page.</summary>
+    void NoteConnected(string toolId);
+
+    /// <summary>The user disconnected <paramref name="toolId"/> on the Agents page.</summary>
+    void NoteDisconnected(string toolId);
+
     /// <summary>Shows that many pretend agents (all blocked on you) on the real token, or with null
     /// ends the preview and shows the real ones again.</summary>
     void Preview(int? waitingAgents);
@@ -23,4 +36,13 @@ public interface IControlPanelHost
     /// <summary>Exits so <paramref name="release"/> can be installed, then the new version starts.
     /// Throws, leaving everything running, if the updater can't be started.</summary>
     void RestartToUpdate(VelopackAsset release);
+}
+
+/// <summary>How a tool's connection changed during this run.</summary>
+public enum ConnectionChange
+{
+    /// <summary>AgentsCursor updated an outdated connection when it started.</summary>
+    RefreshedAtStartup,
+    /// <summary>The user connected or updated it on the Agents page.</summary>
+    ByYou,
 }

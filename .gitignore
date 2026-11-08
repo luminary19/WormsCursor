@@ -3,7 +3,7 @@
 [Oo]bj/
 [Pp]ublish/
 artifacts/
-integrations/opencode/node_modules/
+integrations/node_modules/
 # Velopack release output (release.yml)
 velopack-output/
 

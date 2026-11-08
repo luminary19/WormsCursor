@@ -36,39 +36,22 @@ public static class SettingsStore
         "WormsCursor",
         "settings.json");
 
-    /// <summary>The one-time carry-over from before the rename: when <paramref name="target"/> doesn't
-    /// exist yet and <paramref name="legacy"/> does, copies the old file to the new place (the old
-    /// folder is left as it was). An existing <paramref name="target"/> always wins. Returns whether it
-    /// copied; throws <see cref="IOException"/>/<see cref="UnauthorizedAccessException"/> if the copy
-    /// fails, and the caller decides whether that's fatal.</summary>
-    public static bool CarryOverLegacy(string? target = null, string? legacy = null)
-    {
-        target ??= DefaultPath;
-        legacy ??= LegacyPath;
-        if (File.Exists(target) || !File.Exists(legacy)) return false;
-        var dir = Path.GetDirectoryName(target);
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
-        File.Copy(legacy, target, overwrite: false);
-        return true;
-    }
-
     /// <summary>Loads settings, or returns normalized defaults if missing/corrupt/unreadable. Never
-    /// touches the file: a corrupt one stays where it is, and <see cref="Save"/> keeps a copy of it
-    /// before replacing it. For the owning app; another process that only reads the file uses
-    /// <see cref="TryRead"/>, which tells a failed read apart from the defaults.</summary>
-    public static CursorSettings Load(string? path = null)
-        => TryParse(path ?? DefaultPath, out _) ?? new CursorSettings();
-
-    /// <summary>For a read-only consumer in another process (the OpenCode helper), which must not move
-    /// the tray app's settings out from under it: never touches the file. Returns the defaults when no
-    /// file exists yet (nothing saved), but null when one exists and can't be read or parsed right now
-    /// (locked mid-save, ACL-denied, corrupt), so the caller keeps what it had instead of mistaking a
-    /// failed read for the default settings.</summary>
-    public static CursorSettings? TryRead(string? path = null)
+    /// touches any file: a corrupt one stays where it is, and <see cref="Save"/> keeps a copy of it
+    /// before replacing it.
+    ///
+    /// It also owns the carry-over from before the rename: while <paramref name="path"/> doesn't exist
+    /// yet, the settings are read from <paramref name="legacyPath"/> (by default, for the default path,
+    /// WormsCursor's <see cref="LegacyPath"/>) when that exists. The old file is only ever read; the
+    /// first <see cref="Save"/> writes the new one, so there is no copy step that can fail and be
+    /// forgotten. A new file that exists but can't be read never falls back to the old one, which
+    /// would bring back stale settings.</summary>
+    public static CursorSettings Load(string? path = null, string? legacyPath = null)
     {
-        var source = path ?? DefaultPath;
-        return File.Exists(source) ? TryParse(source, out _) : new CursorSettings();
+        legacyPath ??= path is null ? LegacyPath : null;
+        string source = path ?? DefaultPath;
+        if (!File.Exists(source) && legacyPath is not null && File.Exists(legacyPath)) source = legacyPath;
+        return TryParse(source, out _) ?? new CursorSettings();
     }
 
     // The settings in `source`, normalized; null when it is missing, unreadable (locked, ACL-denied)
