@@ -1,10 +1,14 @@
+using System.Globalization;
+using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using AgentsCursor.Core;
 
 namespace AgentsCursor.App.ControlPanel;
 
 /// <summary>
-/// The token's look: the master switch, the size, where it shows (below, above or beside the pointer,
+/// The token's look: the master switch, the size (the slider, or double-click the "px" label to type
+/// an exact size), where it shows (below, above or beside the pointer,
 /// or one of the four screen corners, as one choice), and a live preview of a pointer gliding over dark
 /// and light with the token following it the chosen way (the faces and icons are the Icons page's). Every control writes its own fields through
 /// <see cref="LiveSettings.Change"/> and the page redraws from the settings on each change, so it also
@@ -47,6 +51,42 @@ public partial class TokenPage : Page
     void SetEnabled(bool on)
     {
         if (on != _settings.Live.AgentNotifierEnabled) _settings.Change(s => s.AgentNotifierEnabled = on);
+    }
+
+    // ---------- typing an exact size ----------
+
+    void OnSizeTextClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount != 2) return;
+        SizeEdit.Text = _settings.Live.Size.ToString(CultureInfo.CurrentCulture);
+        SizeText.Visibility = Visibility.Collapsed; // the box takes the label's fixed-width slot
+        SizeEdit.Visibility = Visibility.Visible;
+        SizeEdit.Focus();
+        SizeEdit.SelectAll();
+        e.Handled = true;
+    }
+
+    void OnSizeEditKey(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) EndSizeEdit(apply: true);
+        else if (e.Key == Key.Escape) EndSizeEdit(apply: false);
+        else return;
+        e.Handled = true;
+    }
+
+    void OnSizeEditLostFocus(object sender, KeyboardFocusChangedEventArgs e) => EndSizeEdit(apply: true);
+
+    // A number (a trailing "px" is fine) is clamped into the allowed range; anything else changes nothing.
+    void EndSizeEdit(bool apply)
+    {
+        if (SizeEdit.Visibility != Visibility.Visible) return;
+        SizeEdit.Visibility = Visibility.Collapsed;
+        SizeText.Visibility = Visibility.Visible;
+        string typed = SizeEdit.Text.Trim();
+        if (typed.EndsWith("px", StringComparison.OrdinalIgnoreCase)) typed = typed[..^2].TrimEnd();
+        if (!apply || !int.TryParse(typed, NumberStyles.Integer, CultureInfo.CurrentCulture, out int size)) return;
+        size = Math.Clamp(size, CursorSettings.MinSize, CursorSettings.MaxSize);
+        if (size != _settings.Live.Size) _settings.Change(s => s.Size = size);
     }
 
     void Refresh()

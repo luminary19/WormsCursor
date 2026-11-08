@@ -60,13 +60,30 @@
                 <local:SettingHeader Title="Size" />
             </ui:CardControl.Header>
             <StackPanel Orientation="Horizontal">
-                <ui:TextBlock
-                    x:Name="SizeText"
-                    MinWidth="52"
+                <!--  The size in px; double-click it to type an exact size (Enter or leaving applies,
+                      Esc cancels).  -->
+                <Grid
+                    Width="72"
                     Margin="0,0,12,0"
-                    VerticalAlignment="Center"
-                    Style="{StaticResource Secondary}"
-                    TextAlignment="Right" />
+                    VerticalAlignment="Center">
+                    <ui:TextBlock
+                        x:Name="SizeText"
+                        VerticalAlignment="Center"
+                        Background="Transparent"
+                        MouseLeftButtonDown="OnSizeTextClick"
+                        Style="{StaticResource Secondary}"
+                        TextAlignment="Right"
+                        ToolTip="Double-click to type a size" />
+                    <ui:TextBox
+                        x:Name="SizeEdit"
+                        Width="72"
+                        AutomationProperties.Name="Token size in pixels"
+                        ClearButtonEnabled="False"
+                        KeyDown="OnSizeEditKey"
+                        LostKeyboardFocus="OnSizeEditLostFocus"
+                        TextAlignment="Right"
+                        Visibility="Collapsed" />
+                </Grid>
                 <Slider
                     x:Name="SizeSlider"
                     Width="220"

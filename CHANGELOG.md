@@ -68,6 +68,8 @@ GitHub releases. The release workflow pulls the matching section into each relea
   machine.
 
 ### Changed
+- **Type an exact token size.** Double-click the size (for example "96 px") on the **Token** page to
+  type a number; Enter or clicking away applies it (kept within 48-192 px), Esc cancels.
 - **Double-click the tray icon to open the control panel.** It used to switch the token on and off;
   that stays one right-click away as **Enabled**.
 - **A quieter control panel.** The pages drop their explanatory lines, so each setting is just its
