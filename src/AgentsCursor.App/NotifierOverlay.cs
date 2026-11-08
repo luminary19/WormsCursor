@@ -15,12 +15,16 @@ namespace AgentsCursor.App;
 /// SetSystemCursor charm entirely, so the token no longer rides on a themed cursor: it shows whatever
 /// the system cursor is, decoupled from any cursor theming.
 ///
-/// Two placements (see <see cref="CursorSettings.Placement"/>):
+/// Placements (see <see cref="CursorSettings.Placement"/>):
 /// <list type="bullet">
-/// <item><b>Cursor</b> — the token hangs off the mouse pointer on a springy pendulum and follows it,
-/// swinging as you move and settling (with a gentle idle bob) when you stop.</item>
+/// <item><b>Below / above / beside the pointer</b> — the token is tied to the pointer by a springy
+/// string (<see cref="TokenMotion.Step"/>) and follows it, swinging as you move and settling (with a
+/// gentle idle bob) at its rest offset when you stop; near a screen edge the offset mirrors so the token
+/// stays on screen.</item>
 /// <item><b>Corner</b> — the token pins to a screen corner and bounces in place.</item>
 /// </list>
+/// The layered window is re-centred on the token every frame, sized for any tilt plus the badges
+/// (<see cref="TokenCanvas"/>), so no swing or offset can clip it.
 ///
 /// The window is painted with <c>UpdateLayeredWindow</c> (true per-pixel alpha). The animation runs on
 /// a dedicated background thread with a high-resolution clock (<c>timeBeginPeriod(1)</c> +
@@ -51,7 +55,7 @@ public sealed class NotifierOverlay : IDisposable
     volatile bool _active;
     volatile TokenFace? _face;       // what the token shows; null = nothing waiting
     volatile bool _entrancePending;  // pop-in bounce when the token first appears
-    volatile bool _resetPhysics;     // re-seed the pendulum on (re)appearance
+    volatile bool _resetPhysics;     // re-seed the motion on (re)appearance
     bool _disposed;
 
     // --- animation state (touched only by the animation thread) ---
@@ -59,9 +63,10 @@ public sealed class NotifierOverlay : IDisposable
     bool _frameFailureLogged; // log the first failed frame only, so a persistent fault can't flood the log
     Bitmap? _buffer;          // reused back-buffer, sized to the current canvas
     int _canvas;              // current back-buffer side (physical px)
-    float _t;                 // master clock (s)
-    bool _physInit;           // pendulum bob seeded?
-    float _bx, _by, _vbx, _vby; // pendulum bob position + velocity, in absolute screen px
+    float _t;                 // master clock (s), for the corner bounce
+    TetherState _tether;      // the pointer placements' spring (seeded on first use)
+    Flip _flip;               // which axes the rest offset is mirrored on, near screen edges
+    NotifierPlacement _placement; // the placement the motion state belongs to
 
     const int SleepMs = 6;    // ~150 Hz loop cap; real elapsed dt keeps the motion time-correct
     const float MaxDt = 0.05f;// clamp a scheduling hiccup so the explicit-Euler spring can't blow up
@@ -169,54 +174,64 @@ public sealed class NotifierOverlay : IDisposable
         var face = _face;
         if (face is null) return;
 
-        if (_resetPhysics) { _physInit = false; _t = 0f; _resetPhysics = false; }
+        var placement = _settings.Placement;
+        if (_resetPhysics || placement != _placement)
+        {
+            _tether = default; _flip = Flip.None; _t = 0f; _resetPhysics = false; _placement = placement;
+        }
         _t += dt;
 
-        bool corner = _settings.Placement == NotifierPlacement.Corner;
-
-        // Anchor (screen px) the token is positioned around, plus the DPI of the monitor it's on, so
-        // the token keeps a consistent physical size across mixed-DPI monitors.
-        int anchorX, anchorY;
-        float dpi;
-        if (corner)
+        // The token centre (screen px), its tilt, and the DPI of the monitor it's on, so the token keeps
+        // a consistent physical size across mixed-DPI monitors.
+        float cx, cy, swing, tokenPx;
+        if (placement == NotifierPlacement.Corner)
         {
             var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
-            dpi = DpiScaleForPoint(wa.Left + wa.Width / 2, wa.Top + wa.Height / 2);
-            float tpx = _settings.Size * dpi;
+            float dpi = DpiScaleForPoint(wa.Left + wa.Width / 2, wa.Top + wa.Height / 2);
+            tokenPx = _settings.Size * dpi;
             // Room for the bounce (0.22) and the "?" badge's reach past the logo, so the hopping
             // token stays fully on screen in a top corner.
-            int margin = (int)(tpx * (0.25f + AttentionBadge.Overhang)) + (int)(16 * dpi);
-            int half = (int)(tpx / 2f);
-            anchorX = _settings.Corner is ScreenCorner.TopLeft or ScreenCorner.BottomLeft
+            int margin = (int)(tokenPx * (0.25f + AttentionBadge.Overhang)) + (int)(16 * dpi);
+            int half = (int)(tokenPx / 2f);
+            int anchorX = _settings.Corner is ScreenCorner.TopLeft or ScreenCorner.BottomLeft
                 ? wa.Left + margin + half : wa.Right - margin - half;
-            anchorY = _settings.Corner is ScreenCorner.TopLeft or ScreenCorner.TopRight
+            int anchorY = _settings.Corner is ScreenCorner.TopLeft or ScreenCorner.TopRight
                 ? wa.Top + margin + half : wa.Bottom - margin - half;
+            var pose = TokenMotion.CornerBounce(_t, tokenPx);
+            (cx, cy, swing) = (anchorX + pose.OffsetX, anchorY + pose.OffsetY, pose.SwingDeg);
         }
         else
         {
             GetCursorPos(out POINT c);
-            anchorX = c.x; anchorY = c.y;
-            dpi = DpiScaleForPoint(c.x, c.y);
+            float dpi = DpiScaleForPoint(c.x, c.y);
+            tokenPx = _settings.Size * dpi;
+            // Mirror the rest offset per axis near the edges of the monitor under the pointer
+            // (physical px under PerMonitorV2), then slide it along an edge it would still overhang;
+            // the spring carries the token across.
+            var work = Screen.FromPoint(new Point(c.x, c.y)).WorkingArea;
+            _flip = TokenMotion.Edges(_flip, new PointF(c.x, c.y), TokenMotion.RestFor(placement, tokenPx, dpi, Flip.None), tokenPx, work);
+            var rest = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, tokenPx, dpi, _flip), new PointF(c.x, c.y), tokenPx, work);
+            float maxSwing = placement == NotifierPlacement.BesidePointer ? TokenMotion.BesideMaxSwing : 180f;
+            var pose = TokenMotion.Step(ref _tether, c.x, c.y, rest, tokenPx, dt, _entrancePending, maxSwing, work);
+            _entrancePending = false;
+            (cx, cy, swing) = (c.x + pose.OffsetX, c.y + pose.OffsetY, pose.SwingDeg);
         }
 
-        float tokenPx = _settings.Size * dpi;
-        int canvas = Math.Max(8, (int)MathF.Ceiling(tokenPx * 2.6f));
+        // The canvas is centred on the token, sized for any tilt plus the badges, so nothing clips.
+        int canvas = TokenCanvas.Side(tokenPx);
         EnsureBuffer(canvas);
-
-        float offX, offY, swing;
-        if (corner) ComputeCornerBounce(tokenPx, out offX, out offY, out swing);
-        else ComputeCursorPendulum(anchorX, anchorY, tokenPx, dt, out offX, out offY, out swing);
+        int left = (int)MathF.Round(cx) - canvas / 2, top = (int)MathF.Round(cy) - canvas / 2;
 
         using (var g = Graphics.FromImage(_buffer!))
         {
             g.Clear(Color.Transparent);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            _renderer.DrawToken(g, _settings, face,
-                canvas / 2f + offX, canvas / 2f + offY, tokenPx, swing);
+            // The sub-pixel remainder keeps slow motion smooth while the window moves in whole pixels.
+            _renderer.DrawToken(g, _settings, face, cx - left, cy - top, tokenPx, swing);
         }
 
-        SetBitmap(_hwnd, _buffer!, anchorX - canvas / 2, anchorY - canvas / 2);
+        SetBitmap(_hwnd, _buffer!, left, top);
     }
 
     // A frame threw: log the first failure, park the token off-screen, and pause before retrying.
@@ -229,52 +244,6 @@ public sealed class NotifierOverlay : IDisposable
         }
         try { HideToken(); } catch { /* best-effort; the next good frame repaints anyway */ }
         Thread.Sleep(FailureBackoffMs);
-    }
-
-    // The pointer pendulum: a springy string from the cursor (anchor) to the token (bob), under
-    // gravity, integrated in screen coords so moving the cursor whips the anchor and the token
-    // lags/swings, then settles straight below with a gentle idle bob. Ported from the old engine's
-    // "below" pendulum (same constants), so it bounces exactly like the cursor charm used to.
-    void ComputeCursorPendulum(int ax, int ay, float tokenPx, float dt, out float offX, out float offY, out float swing)
-    {
-        const float pendK = 130f, pendC = 3f;
-        float drop = tokenPx * 0.42f;          // rest distance below the cursor
-        float gravity = drop * pendK;          // equilibrium = drop below the anchor
-        float maxLen = tokenPx * 0.70f;        // taut-string clamp
-
-        if (!_physInit)
-        {
-            _bx = ax; _by = ay + drop; _vbx = 0; _vby = 0; _physInit = true;
-            if (_entrancePending) { _vby = -tokenPx * 3f; _entrancePending = false; } // hop up, then settle
-        }
-        _vbx += ((ax - _bx) * pendK - _vbx * pendC) * dt;
-        _vby += ((ay - _by) * pendK + gravity - _vby * pendC) * dt;
-        _bx += _vbx * dt; _by += _vby * dt;
-
-        float dx = _bx - ax, dy = _by - ay;
-        float len = MathF.Sqrt(dx * dx + dy * dy);
-        if (len > maxLen)
-        {
-            float nx = dx / len, ny = dy / len;
-            _bx = ax + nx * maxLen; _by = ay + ny * maxLen;
-            float vd = _vbx * nx + _vby * ny;
-            if (vd > 0) { _vbx -= vd * nx; _vby -= vd * ny; }
-            dx = _bx - ax; dy = _by - ay;
-        }
-
-        float idle = TokenMotion.IdleBob(_t, tokenPx); // alive even when the mouse is still
-        offX = dx;
-        offY = dy + idle;
-        swing = MathF.Atan2(dy, dx) * 180f / MathF.PI - 90f; // 0 = hanging straight down
-    }
-
-    // The corner badge's bounce (shared with the control panel's preview).
-    void ComputeCornerBounce(float tokenPx, out float offX, out float offY, out float swing)
-    {
-        var pose = TokenMotion.CornerBounce(_t, tokenPx);
-        offX = pose.OffsetX;
-        offY = pose.OffsetY;
-        swing = pose.SwingDeg;
     }
 
     void EnsureBuffer(int canvas)

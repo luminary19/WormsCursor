@@ -53,9 +53,18 @@
             </ui:CardControl.Header>
             <ComboBox
                 x:Name="PositionBox"
-                MinWidth="200"
+                MinWidth="220"
                 AutomationProperties.Name="Position">
-                <ComboBoxItem Content="Follow the pointer" />
+                <ComboBoxItem Content="Below the pointer" />
+                <ComboBoxItem Content="Above the pointer" />
+                <ComboBoxItem Content="Beside the pointer" />
+                <ComboBoxItem
+                    Padding="0"
+                    Focusable="False"
+                    IsEnabled="False"
+                    IsHitTestVisible="False">
+                    <Separator Width="180" Margin="0,2,0,2" />
+                </ComboBoxItem>
                 <ComboBoxItem Content="Top left corner" />
                 <ComboBoxItem Content="Top right corner" />
                 <ComboBoxItem Content="Bottom left corner" />
@@ -65,42 +74,15 @@
         <ui:Button
             x:Name="ResetButton"
             Margin="0,12,0,0"
-            Content="Reset size and position"
+            Content="Reset size, position and icons"
             Icon="{ui:SymbolIcon ArrowReset24}" />
 
         <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Preview" />
         <Border Padding="16,16,16,12" Style="{StaticResource Surface}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="16" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-
-                <!--  Each swatch is half dark, half light, with the token across the seam,
-                      so one glance shows how it reads on both.  -->
-                <Grid Grid.Column="0" AutomationProperties.Name="Preview: agent is done">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Border Background="#202020" CornerRadius="6,0,0,6" />
-                    <Border
-                        Grid.Column="1"
-                        Background="#F3F3F3"
-                        CornerRadius="0,6,6,0" />
-                    <Border
-                        Grid.ColumnSpan="2"
-                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="6" />
-                    <local:TokenPreview x:Name="DonePreview" Grid.ColumnSpan="2" />
-                </Grid>
-                <Grid Grid.Column="2" AutomationProperties.Name="Preview: agent needs you">
+            <StackPanel>
+                <!--  Half dark, half light, with the pointer gliding across the seam, so one glance
+                      shows where the token goes and how it reads on both.  -->
+                <Grid AutomationProperties.Name="Preview: the token following a pointer">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
@@ -116,29 +98,18 @@
                         BorderThickness="1"
                         CornerRadius="6" />
                     <local:TokenPreview
-                        x:Name="BlockedPreview"
+                        x:Name="Preview"
                         Grid.ColumnSpan="2"
-                        Blocked="True" />
+                        Blocked="True"
+                        ClipToBounds="True"
+                        Roam="True" />
                 </Grid>
-
-                <StackPanel Grid.Row="1" Margin="2,12,0,0">
-                    <ui:TextBlock FontTypography="BodyStrong" Text="Done" />
-                    <ui:TextBlock
-                        FontTypography="Caption"
-                        Style="{StaticResource Secondary}"
-                        Text="The agent finished its turn." />
-                </StackPanel>
-                <StackPanel
-                    Grid.Row="1"
-                    Grid.Column="2"
-                    Margin="2,12,0,0">
-                    <ui:TextBlock FontTypography="BodyStrong" Text="Needs you" />
-                    <ui:TextBlock
-                        FontTypography="Caption"
-                        Style="{StaticResource Secondary}"
-                        Text="The agent is waiting for your answer." />
-                </StackPanel>
-            </Grid>
+                <ui:TextBlock
+                    Margin="2,12,0,0"
+                    FontTypography="Caption"
+                    Style="{StaticResource Secondary}"
+                    Text="Shown as it looks when an agent needs your answer. Change each agent's look on the Icons page." />
+            </StackPanel>
         </Border>
     </StackPanel>
 </Page>

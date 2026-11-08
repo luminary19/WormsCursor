@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace AgentsCursor.Core;
@@ -62,21 +63,41 @@ public static class SettingsStore
         if (!File.Exists(source)) return null;
         try
         {
-            var loaded = JsonSerializer.Deserialize<CursorSettings>(File.ReadAllText(source), JsonOptions);
+            var node = JsonNode.Parse(File.ReadAllText(source), documentOptions: NodeOptions);
+            if (node is JsonObject settings) Migrate(settings);
+            var loaded = node?.Deserialize<CursorSettings>(JsonOptions);
             if (loaded is null) { corrupt = true; return null; } // a bare `null` document
-            // Migration hook: when Version changes in future, upgrade here.
             loaded.Normalize();
             return loaded;
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
-            corrupt = true; // unparseable (bad syntax, unknown enum name, …)
+            // Unparseable: bad syntax, an unknown enum name, or a property named twice (JsonObject
+            // refuses duplicate names with an ArgumentException).
+            corrupt = true;
             return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
             return null;
         }
+    }
+
+    static readonly JsonDocumentOptions NodeOptions = new()
+    {
+        AllowTrailingCommas = true,
+        CommentHandling = JsonCommentHandling.Skip,
+    };
+
+    // Brings an older file's JSON up to <see cref="CursorSettings.CurrentVersion"/> before it is read.
+    // A file without a Version is version 1. Version 2 renamed the placement "Cursor" (hanging below
+    // the pointer) to "BelowPointer"; its number, 0, is unchanged.
+    static void Migrate(JsonObject settings)
+    {
+        int version = settings["Version"] is JsonValue v && v.TryGetValue(out int n) ? n : 1;
+        if (version < 2 && settings["Placement"] is JsonValue p && p.TryGetValue(out string? placement)
+            && string.Equals(placement, "Cursor", StringComparison.OrdinalIgnoreCase))
+            settings["Placement"] = nameof(NotifierPlacement.BelowPointer);
     }
 
     /// <summary>Saves settings atomically (write tmp, then replace). An existing file that doesn't

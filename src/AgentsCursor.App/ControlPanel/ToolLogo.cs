@@ -6,12 +6,18 @@ using GdiImaging = System.Drawing.Imaging;
 
 namespace AgentsCursor.App.ControlPanel;
 
-/// <summary>A tool's logo as a WPF image, drawn by Core's renderer, for the Agents page cards.</summary>
+/// <summary>A tool's icon as a WPF image, drawn by Core's renderer: the Agents page cards (always the
+/// original logo, since a card identifies the agent) and the Icons page's tiles.</summary>
 static class ToolLogo
 {
-    /// <summary>The logo of <paramref name="toolId"/> at <paramref name="sizeDip"/> DIPs, rendered at
-    /// <paramref name="dpiScale"/> so it is crisp. Uses a renderer of its own on the calling (UI) thread.</summary>
+    /// <summary>The original logo of <paramref name="toolId"/> at <paramref name="sizeDip"/> DIPs, rendered
+    /// at <paramref name="dpiScale"/> so it is crisp.</summary>
     public static BitmapSource Render(string toolId, double sizeDip, double dpiScale)
+        => Render(toolId, IconCatalog.OriginalId(toolId), sizeDip, dpiScale);
+
+    /// <summary>The icon <paramref name="iconId"/> of <paramref name="toolId"/> at <paramref name="sizeDip"/>
+    /// DIPs, rendered at <paramref name="dpiScale"/>. Uses a renderer of its own on the calling (UI) thread.</summary>
+    public static BitmapSource Render(string toolId, string iconId, double sizeDip, double dpiScale)
     {
         int px = Math.Max(1, (int)Math.Round(sizeDip * dpiScale));
         using var renderer = new NotifierRenderer();
@@ -20,7 +26,7 @@ static class ToolLogo
         {
             g.Clear(Gdi.Color.Transparent);
             // The renderer's contrast rim reaches a little past the box; leave it room.
-            renderer.DrawToken(g, new CursorSettings(), new TokenFace(toolId, Blocked: false, Others: 0),
+            renderer.DrawToken(g, new CursorSettings(), new TokenFace(toolId, Blocked: false, Others: 0), iconId,
                 px / 2f, px / 2f, px * 0.86f, 0f);
         }
 

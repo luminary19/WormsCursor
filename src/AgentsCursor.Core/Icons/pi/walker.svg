@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100" shape-rendering="crispEdges">
+  <!-- Pi walker: the Powerline pi strolling right, eyes on its top bar (pi-cursor's column palette). -->
+  <path fill="#ff00af" d="M0 0H10V12H0Z"/>
+  <path fill="#e817b6" d="M10 0H20V30H10ZM15 50H20V70H15ZM10 70H20V90H10ZM10 90H20V100H10Z"/>
+  <path fill="#d12ebe" d="M20 0H30V30H20ZM20 30H30V50H20ZM20 50H30V70H20ZM20 70H30V90H20ZM20 90H30V100H20Z"/>
+  <path fill="#ba45c5" d="M30 0H40V30H30ZM30 30H40V50H30ZM30 50H35V70H30ZM30 90H40V100H30Z"/>
+  <path fill="#a35ccc" d="M40 0H50V30H40Z"/>
+  <path fill="#8c73d3" d="M50 0H60V30H50Z"/>
+  <path fill="#758bdb" d="M60 0H70V30H60Z"/>
+  <path fill="#5ea2e2" d="M70 0H80V30H70Z"/>
+  <path fill="#47b9e9" d="M80 0H90V30H80ZM80 30H90V50H80ZM85 50H90V70H85Z"/>
+  <path fill="#30d0f0" d="M90 0H100V30H90ZM90 30H100V50H90ZM90 50H100V70H90ZM90 70H100V90H90ZM90 90H100V100H90Z"/>
+  <path fill="#19e7f8" d="M100 0H110V30H100ZM100 50H105V70H100ZM100 70H110V90H100ZM100 90H110V100H100Z"/>
+  <path fill="#02feff" d="M110 0H120V12H110ZM110 90H120V100H110Z"/>
+  <path fill="#ffffff" d="M32 7H48V25H32ZM72 7H88V25H72Z"/>
+  <path fill="#1d1230" d="M40 11H47V22H40ZM80 11H87V22H80Z"/>
+  <path fill="#ffffff" d="M41 12H44V15H41ZM81 12H84V15H81Z"/>
+</svg>

@@ -80,4 +80,109 @@
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
+    <!--  A gallery tile: a radio choice drawn as a card (the Icons page's agents and icons). The
+          selected one has an accent border and a check; keyboard focus gets the system focus ring.  -->
+    <Style x:Key="ChoiceTile" TargetType="RadioButton">
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Grid>
+                        <Border
+                            x:Name="Card"
+                            Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6">
+                            <ContentPresenter Margin="{TemplateBinding Padding}" />
+                        </Border>
+                        <Border
+                            x:Name="Check"
+                            Width="20"
+                            Height="20"
+                            Margin="0,6,6,0"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Background="{DynamicResource AccentFillColorDefaultBrush}"
+                            CornerRadius="10"
+                            Visibility="Collapsed">
+                            <ui:SymbolIcon
+                                FontSize="12"
+                                Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
+                                Symbol="Checkmark12" />
+                        </Border>
+                        <Border
+                            x:Name="Focus"
+                            Margin="-3"
+                            BorderBrush="{DynamicResource FocusStrokeColorOuterBrush}"
+                            BorderThickness="2"
+                            CornerRadius="8"
+                            Visibility="Collapsed" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Card" Property="Background" Value="{DynamicResource CardBackgroundFillColorSecondaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                            <Setter TargetName="Card" Property="BorderThickness" Value="2" />
+                            <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Focus" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <!--  Tag="NoCheck": the accent border alone marks the choice (a compact tile).  -->
+                        <Trigger Property="Tag" Value="NoCheck">
+                            <Setter TargetName="Check" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  The "Add SVG…" tile: a dashed card that opens the file picker.  -->
+    <Style x:Key="AddTile" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <Rectangle
+                            x:Name="Dash"
+                            Fill="Transparent"
+                            RadiusX="6"
+                            RadiusY="6"
+                            Stroke="{DynamicResource ControlStrongStrokeColorDefaultBrush}"
+                            StrokeDashArray="4 3"
+                            StrokeThickness="1.5" />
+                        <ContentPresenter Margin="{TemplateBinding Padding}" />
+                        <Border
+                            x:Name="Focus"
+                            Margin="-3"
+                            BorderBrush="{DynamicResource FocusStrokeColorOuterBrush}"
+                            BorderThickness="2"
+                            CornerRadius="8"
+                            Visibility="Collapsed" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Dash" Property="Fill" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Focus" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 </ResourceDictionary>

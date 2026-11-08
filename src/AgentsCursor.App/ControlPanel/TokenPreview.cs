@@ -4,14 +4,21 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using AgentsCursor.Core;
 using Gdi = System.Drawing;
+using GdiDrawing2D = System.Drawing.Drawing2D;
 using GdiImaging = System.Drawing.Imaging;
 
 namespace AgentsCursor.App.ControlPanel;
 
 /// <summary>
 /// A live, animated picture of the token, drawn by Core's <see cref="NotifierRenderer"/> (so it is
-/// exactly what the overlay draws, badge and all) at its real size, bouncing the way the chosen
-/// placement bounces. Transparent around the token: the page puts the backdrop behind it.
+/// exactly what the overlay draws, badge, "+N" and chosen icon included) at its real size, moving with
+/// Core's <see cref="TokenMotion"/>. Transparent around the token: the page puts the backdrop behind it.
+///
+/// Two modes. By default the token stays in place and only does its idle motion (a bob along its
+/// string, or the corner hop): the Icons page uses this. With <see cref="Roam"/> a small drawn pointer
+/// glides along a slow loop and the token follows it the way the chosen placement does (below, above,
+/// beside, mirrored at the preview's edges), or waits in that corner of the preview: the Token page uses
+/// this to show where the token goes.
 ///
 /// The renderer is this control's own and lives on the UI thread from Loaded to Unloaded, never
 /// shared with the overlay's animation thread (GDI+ objects are not thread-safe). Frames come from
@@ -20,19 +27,32 @@ namespace AgentsCursor.App.ControlPanel;
 /// </summary>
 public sealed class TokenPreview : FrameworkElement
 {
-    const string Tool = "claude-code";
-    const float HeadroomRatio = 1.5f; // token size -> canvas height: the hop plus the badge's reach
     const double Padding = 12;        // DIPs around the token's travel
+    const float MaxDt = 0.05f;        // as the overlay: a hiccup can't blow up the spring
+    const float LoopSeconds = 9f;     // one lap of the roaming pointer
 
     NotifierRenderer? _renderer;
     Gdi.Bitmap? _buffer;          // GDI+ back-buffer, premultiplied BGRA like the WPF bitmap
     WriteableBitmap? _bitmap;     // what OnRender shows
     readonly Stopwatch _clock = Stopwatch.StartNew();
+    double _last;                 // clock reading of the previous frame
     CursorSettings _look = new();
     bool _animating;
+    TetherState _tether;
+    Flip _flip;
+    NotifierPlacement _motionFor; // the placement the tether belongs to
+
+    /// <summary>The agent whose icon is shown.</summary>
+    public string Tool { get; set; } = "claude-code";
 
     /// <summary>Show the "blocked on you" face (with the yellow "?") instead of the plain one.</summary>
     public bool Blocked { get; set; }
+
+    /// <summary>How many other sessions the "+N" pill counts (0 = no pill).</summary>
+    public int Others { get; set; }
+
+    /// <summary>Draw a roaming pointer and follow it the way the placement does.</summary>
+    public bool Roam { get; set; }
 
     public TokenPreview()
     {
@@ -50,7 +70,7 @@ public sealed class TokenPreview : FrameworkElement
         IsVisibleChanged += (_, _) => UpdateAnimation();
     }
 
-    /// <summary>Draws the token with <paramref name="look"/>'s size, placement and colours.</summary>
+    /// <summary>Draws the token with <paramref name="look"/>'s size, placement and icons.</summary>
     public void Show(CursorSettings look)
     {
         _look = look;
@@ -61,7 +81,9 @@ public sealed class TokenPreview : FrameworkElement
     protected override Size MeasureOverride(Size available)
     {
         double side = _look.Size;
-        return new Size(side * 1.4 + 2 * Padding, side * HeadroomRatio + 2 * Padding);
+        if (!Roam) return new Size(side * 1.5 + 2 * Padding, side * 1.55 + 2 * Padding);
+        double width = double.IsInfinity(available.Width) ? side * 4 : available.Width;
+        return new Size(width, side * 2.5 + 2 * Padding);
     }
 
     protected override void OnRenderSizeChanged(SizeChangedInfo info)
@@ -82,7 +104,12 @@ public sealed class TokenPreview : FrameworkElement
     void UpdateAnimation()
     {
         bool animate = IsVisible && _renderer is not null && SystemParameters.ClientAreaAnimation;
-        if (animate && !_animating) { CompositionTarget.Rendering += OnFrame; _animating = true; }
+        if (animate && !_animating)
+        {
+            CompositionTarget.Rendering += OnFrame;
+            _animating = true;
+            _last = _clock.Elapsed.TotalSeconds;
+        }
         else if (!animate) StopAnimation();
         RenderFrame();
     }
@@ -103,22 +130,19 @@ public sealed class TokenPreview : FrameworkElement
         int w = (int)Math.Round(ActualWidth * dpi.DpiScaleX), h = (int)Math.Round(ActualHeight * dpi.DpiScaleY);
         bool reallocated = EnsureBuffers(w, h, dpi);
 
-        float tokenPx = (float)(_look.Size * dpi.DpiScaleX);
-        float t = _animating ? (float)_clock.Elapsed.TotalSeconds : 0f;
-        bool corner = _look.Placement == NotifierPlacement.Corner;
-        var pose = corner
-            ? TokenMotion.CornerBounce(t, tokenPx)
-            : new TokenMotion.Pose(0f, TokenMotion.IdleBob(t, tokenPx), 0f);
-        // Centre the token's travel: it hops up from its resting point by up to `hop`.
-        float hop = tokenPx * (corner ? TokenMotion.CornerHop : TokenMotion.IdleBobHeight);
-        float badgeReach = tokenPx * AttentionBadge.Overhang;
-        float cx = w / 2f + pose.OffsetX;
-        float cy = h / 2f + (hop + badgeReach) / 2f + pose.OffsetY;
+        double now = _clock.Elapsed.TotalSeconds;
+        float dt = _animating ? (float)Math.Min(MaxDt, now - _last) : 0f;
+        _last = now;
+        float t = _animating ? (float)now : 0f;
+        float tokenPx = (float)(_look.Size * dpi.DpiScaleX), scale = (float)dpi.DpiScaleX;
 
         using (var g = Gdi.Graphics.FromImage(_buffer!))
         {
             g.Clear(Gdi.Color.Transparent);
-            _renderer.DrawToken(g, _look, new TokenFace(Tool, Blocked, 0), cx, cy, tokenPx, pose.SwingDeg);
+            g.SmoothingMode = GdiDrawing2D.SmoothingMode.AntiAlias;
+            var (cx, cy, swing, pointer) = Roam ? RoamPose(w, h, t, dt, tokenPx, scale) : IdlePose(w, h, t, tokenPx, scale);
+            _renderer.DrawToken(g, _look, new TokenFace(Tool, Blocked, Others), cx, cy, tokenPx, swing);
+            if (pointer is { } p) DrawPointer(g, p, scale); // the real pointer is always on top too
         }
 
         var rect = new Gdi.Rectangle(0, 0, w, h);
@@ -127,6 +151,70 @@ public sealed class TokenPreview : FrameworkElement
         finally { _buffer.UnlockBits(data); }
 
         if (reallocated) InvalidateVisual();
+    }
+
+    // In place: the corner hop, or a bob along the placement's string (from an imaginary pointer).
+    (float X, float Y, float Swing, Gdi.PointF? Pointer) IdlePose(int w, int h, float t, float tokenPx, float scale)
+    {
+        float badge = tokenPx * AttentionBadge.Overhang;
+        if (_look.Placement == NotifierPlacement.Corner)
+        {
+            var pose = TokenMotion.CornerBounce(t, tokenPx);
+            float hop = tokenPx * TokenMotion.CornerHop;
+            return (w / 2f + pose.OffsetX, h / 2f + (hop + badge) / 2f + pose.OffsetY, pose.SwingDeg, null);
+        }
+        var rest = TokenMotion.RestFor(_look.Placement, tokenPx, scale, Flip.None);
+        float bob = TokenMotion.IdleBob(t, tokenPx), len = Math.Max(1e-3f, rest.Length);
+        float travel = tokenPx * TokenMotion.IdleBobHeight;
+        return (w / 2f + rest.Dx / len * (bob + travel / 2f), h / 2f + badge / 2f + rest.Dy / len * (bob + travel / 2f), 0f, null);
+    }
+
+    // Following a pointer that glides along a slow loop through the preview.
+    (float X, float Y, float Swing, Gdi.PointF? Pointer) RoamPose(int w, int h, float t, float dt, float tokenPx, float scale)
+    {
+        var placement = _look.Placement;
+        if (placement != _motionFor) { _tether = default; _flip = Flip.None; _motionFor = placement; }
+
+        // The loop: wide and slow side to side, a gentle rise and fall, around a centre that leaves the
+        // token room on its rest side.
+        var plain = TokenMotion.RestFor(placement == NotifierPlacement.Corner ? NotifierPlacement.BelowPointer : placement, tokenPx, scale, Flip.None);
+        float phase = t / LoopSeconds * 2f * MathF.PI;
+        float spanX = Math.Max(0f, w / 2f - tokenPx * 0.9f - 24f * scale);
+        float ax = w / 2f + spanX * MathF.Sin(phase) - plain.Dx / 2f;
+        float ay = h / 2f - plain.Dy / 2f + tokenPx * 0.12f * MathF.Sin(phase * 2f);
+        var pointer = new Gdi.PointF(ax, ay);
+
+        if (placement == NotifierPlacement.Corner)
+        {
+            var pose = TokenMotion.CornerBounce(t, tokenPx);
+            float inset = tokenPx * (0.5f + AttentionBadge.Overhang) + 8f * scale;
+            float x = _look.Corner is ScreenCorner.TopLeft or ScreenCorner.BottomLeft ? inset : w - inset;
+            float y = _look.Corner is ScreenCorner.TopLeft or ScreenCorner.TopRight
+                ? inset + tokenPx * TokenMotion.CornerHop : h - inset;
+            return (x + pose.OffsetX, y + pose.OffsetY, pose.SwingDeg, pointer);
+        }
+
+        var area = new Gdi.RectangleF(0, 0, w, h);
+        _flip = TokenMotion.Edges(_flip, pointer, plain, tokenPx, area);
+        var rest = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, tokenPx, scale, _flip), pointer, tokenPx, area);
+        float maxSwing = placement == NotifierPlacement.BesidePointer ? TokenMotion.BesideMaxSwing : 180f;
+        var step = TokenMotion.Step(ref _tether, ax, ay, rest, tokenPx, dt, entrance: false, maxSwing, area);
+        return (ax + step.OffsetX, ay + step.OffsetY, step.SwingDeg, pointer);
+    }
+
+    // The standard Windows arrow, white with a dark edge, its tip at the pointer.
+    static void DrawPointer(Gdi.Graphics g, Gdi.PointF tip, float scale)
+    {
+        Gdi.PointF[] arrow =
+        {
+            new(0, 0), new(0, 16), new(4, 12.2f), new(6.9f, 18.6f), new(9.3f, 17.6f), new(6.5f, 11.3f), new(11.6f, 11.3f),
+        };
+        for (int i = 0; i < arrow.Length; i++)
+            arrow[i] = new Gdi.PointF(tip.X + arrow[i].X * scale * 1.15f, tip.Y + arrow[i].Y * scale * 1.15f);
+        using var path = new GdiDrawing2D.GraphicsPath();
+        path.AddPolygon(arrow);
+        using (var fill = new Gdi.SolidBrush(Gdi.Color.White)) g.FillPath(fill, path);
+        using (var edge = new Gdi.Pen(Gdi.Color.Black, 1.2f * scale) { LineJoin = GdiDrawing2D.LineJoin.Miter }) g.DrawPath(edge, path);
     }
 
     // (Re)allocates both buffers when the pixel size or DPI changed; true when it did.

@@ -1,12 +1,18 @@
 namespace AgentsCursor.Core;
 
-/// <summary>Where the bouncing agent token is drawn while an agent is waiting.</summary>
+/// <summary>Where the bouncing agent token is drawn while an agent is waiting. The explicit values
+/// keep the numbers older settings files may hold meaning the same thing (0 was "Cursor", which is
+/// now <see cref="BelowPointer"/>).</summary>
 public enum NotifierPlacement
 {
-    /// <summary>The token hangs next to the mouse pointer and follows it (pendulum bounce).</summary>
-    Cursor,
+    /// <summary>The token hangs below the mouse pointer on a springy string and follows it.</summary>
+    BelowPointer = 0,
     /// <summary>The token sits in a fixed screen corner and bounces in place.</summary>
-    Corner,
+    Corner = 1,
+    /// <summary>The token floats above the pointer, like a balloon on a string.</summary>
+    AbovePointer = 2,
+    /// <summary>The token trails off the pointer's bottom-right, like a tooltip.</summary>
+    BesidePointer = 3,
 }
 
 /// <summary>Which screen corner the <see cref="NotifierPlacement.Corner"/> token pins to.</summary>
@@ -25,9 +31,13 @@ public enum ThemePreference { System, Light, Dark }
 /// </summary>
 public sealed class CursorSettings
 {
+    /// <summary>The schema version this build writes. 2 renamed the placement "Cursor" to
+    /// "BelowPointer" (<see cref="SettingsStore"/> migrates older files on load).</summary>
+    public const int CurrentVersion = 2;
+
     /// <summary>Schema version — bump when the shape changes in a non-additive way so
     /// a future load can migrate. Additive changes are handled by tolerant JSON.</summary>
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = CurrentVersion;
 
     /// <summary>The range <see cref="Size"/> is clamped to.</summary>
     public const int MinSize = 48, MaxSize = 192;
@@ -56,9 +66,9 @@ public sealed class CursorSettings
     /// never sends a closing event. Default 20s; clamped to 10s–30min.</summary>
     public int AgentNotifierTimeoutSeconds { get; set; } = 20;
 
-    /// <summary>Where the token is drawn: hanging off the mouse pointer, or pinned to a screen
-    /// corner. Defaults to following the cursor.</summary>
-    public NotifierPlacement Placement { get; set; } = NotifierPlacement.Cursor;
+    /// <summary>Where the token is drawn: below, above or beside the mouse pointer (following it), or
+    /// pinned to a screen corner. Defaults to below the pointer.</summary>
+    public NotifierPlacement Placement { get; set; } = NotifierPlacement.BelowPointer;
 
     /// <summary>Which corner the token pins to when <see cref="Placement"/> is
     /// <see cref="NotifierPlacement.Corner"/>. Defaults to the bottom-right.</summary>
@@ -76,6 +86,23 @@ public sealed class CursorSettings
         set => _suppressedPrograms = ProgramSuppression.Normalize(value);
     }
     IReadOnlyList<string> _suppressedPrograms = ProgramSuppression.Defaults;
+
+    /// <summary>The icon each agent's token shows: tool id -> icon id (a built-in
+    /// <c>&lt;tool&gt;.&lt;variant&gt;</c>, or <c>custom:&lt;hash&gt;</c> for an uploaded SVG). Agents not
+    /// listed show their original logo. Every assignment is normalized by
+    /// <see cref="IconChoices.Normalize"/> into a fresh read-only dictionary (known tools only, unknown
+    /// built-in ids and originals dropped, malformed custom ids dropped), and an edit replaces it rather
+    /// than changing it in place, so settings copies can share it safely. A JSON <c>null</c> loads as
+    /// "all originals".</summary>
+    public IReadOnlyDictionary<string, string> Icons
+    {
+        get => _icons;
+        set => _icons = IconChoices.Normalize(value);
+    }
+    IReadOnlyDictionary<string, string> _icons = IconChoices.None;
+
+    /// <summary>The icon id <paramref name="tool"/>'s token shows: the chosen one, else its original.</summary>
+    public string IconFor(string tool) => _icons.TryGetValue(tool, out var id) ? id : IconCatalog.OriginalId(tool);
 
     // ---------- control panel (preferences UI) ----------
 
@@ -95,10 +122,14 @@ public sealed class CursorSettings
         Size = Math.Clamp(Size, MinSize, MaxSize);
         AgentNotifierTimeoutSeconds = Math.Clamp(AgentNotifierTimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds);
         if (!Enum.IsDefined(Theme)) Theme = ThemePreference.System; // a hand-edited number out of range
+        if (!Enum.IsDefined(Placement)) Placement = NotifierPlacement.BelowPointer;
+        if (!Enum.IsDefined(Corner)) Corner = ScreenCorner.BottomRight;
+        Version = CurrentVersion; // a loaded older file has been migrated by now
     }
 
-    /// <summary>Puts the token's look back to the defaults: size, placement, corner and outline
-    /// colour. Leaves the notifier switch, the linger timeout and the hidden-while-using list alone.</summary>
+    /// <summary>Puts the token's look back to the defaults: size, placement, corner, outline colour
+    /// and every agent's icon. Leaves the notifier switch, the linger timeout and the hidden-while-using
+    /// list alone.</summary>
     public void ResetAppearance()
     {
         var defaults = new CursorSettings();
@@ -106,6 +137,7 @@ public sealed class CursorSettings
         Placement = defaults.Placement;
         Corner = defaults.Corner;
         OutlineColor = defaults.OutlineColor;
+        Icons = defaults.Icons;
     }
 
     /// <summary>True when the look <see cref="ResetAppearance"/> resets is already the default. (A
@@ -114,11 +146,12 @@ public sealed class CursorSettings
     {
         var defaults = new CursorSettings();
         return Size == defaults.Size && Placement == defaults.Placement && Corner == defaults.Corner
-               && string.Equals(OutlineColor, defaults.OutlineColor, StringComparison.OrdinalIgnoreCase);
+               && string.Equals(OutlineColor, defaults.OutlineColor, StringComparison.OrdinalIgnoreCase)
+               && Icons.Count == 0;
     }
 
-    /// <summary>An independent copy. Every field is a value type, an immutable string, or the read-only
-    /// <see cref="SuppressedPrograms"/> list (replaced on edit, never changed in place), so a member-wise
-    /// clone is already a safe snapshot (<see cref="LiveSettings.Current"/>).</summary>
+    /// <summary>An independent copy. Every field is a value type, an immutable string, or a read-only
+    /// collection (<see cref="SuppressedPrograms"/>, <see cref="Icons"/>: replaced on edit, never changed
+    /// in place), so a member-wise clone is already a safe snapshot (<see cref="LiveSettings.Current"/>).</summary>
     public CursorSettings Clone() => (CursorSettings)MemberwiseClone();
 }

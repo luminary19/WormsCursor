@@ -7,6 +7,20 @@ GitHub releases. The release workflow pulls the matching section into each relea
 ## Unreleased
 
 ### Added
+- **Pick each agent's look, mascots included.** The new **Icons** page lets every agent wear its own
+  logo, one of three mascots drawn for it, or a picture of your own. Claude Code can wave, party or
+  play peekaboo; Codex comes as a googly-eyed buddy, mid-spin or dozing off; OpenCode's mark gets a
+  face, bracket arms or a stack of windows; Pi strolls, wears 8-bit shades or turns into a slice of
+  pie. **Add SVG…** takes your own file (up to 256 KB, 24 per agent): it's cleaned before it's kept,
+  so nothing in it can run or fetch anything from elsewhere, and if it can't be used the page says why
+  and the agent keeps its icon. The yellow "?" and the "+N" sit on every icon, and the page previews
+  both looks over dark and light. **Reset all icons to the originals** puts everything back.
+- **Above or beside the pointer, not just below.** **Position** now offers **Below the pointer** (the
+  hanging token you know), **Above the pointer** (floating like a balloon on a string) and **Beside
+  the pointer** (trailing off the arrow like a tooltip), plus the four corners. Near the edge of a
+  screen the token flips to the other side or slides along the edge, so it never leaves the screen,
+  and it never gets clipped however hard it swings. The **Token** page's preview now shows a pointer
+  gliding about with the token following it the way you chose.
 - **Pi and OpenCode, in the same token.** The **Agents** page now connects **OpenCode** and **Pi**
   next to Claude Code and Codex, with the same card for all four. Their plugins ship with AgentsCursor
   (`integrations\` next to the exe), and they report into the one tray, so Pi and OpenCode get
@@ -24,9 +38,9 @@ GitHub releases. The release workflow pulls the matching section into each relea
   Codex hooks under `/hooks` (also in Codex sessions Orca starts).
 - **A new control panel.** **Preferences…** now opens one window in the style of Windows 11
   Settings: Mica, rounded cards, switches, and it follows your Windows light or dark mode as it
-  changes, or stays light or dark if you pick that under **About → Theme**. A sidebar holds four pages:
-  **Token** (the on/off switch, a live animated preview of both looks over dark and light, size and
-  position), **Agents** (Connect / Update / Disconnect for each tool with a clear status, how long the
+  changes, or stays light or dark if you pick that under **About → Theme**. A sidebar holds five pages:
+  **Token** (the on/off switch, size, position and a live animated preview), **Icons** (each agent's
+  look), **Agents** (Connect / Update / Disconnect for each tool with a clear status, how long the
   token stays after an agent is done, and **Preview on screen**), **Apps** (the apps that hide the
   token, with their icons and names when they're open) and **About** (version, updates, *What's new*,
   the theme, *Start with Windows*, links).
@@ -75,10 +89,11 @@ GitHub releases. The release workflow pulls the matching section into each relea
   enable any of the *Worms*-style cursors to see it. It's drawn by its own transparent, click-through
   overlay (true per-pixel alpha via `UpdateLayeredWindow`) that touches no system state — nothing to
   restore on exit, and it's invisible/zero-cost when no agent is waiting.
-- **The token bounces, and you choose where.** On the **Token** page pick **Follow the pointer**
-  (it hangs off the pointer on a springy pendulum and follows it, with a gentle idle bob) or **Screen
-  corner** (it sits in the corner you choose and bounces in place). Plus a **size** slider and a live
-  preview. The DPI of the monitor it's shown on is honoured, so the token keeps a
+- **The token bounces, and you choose where.** On the **Token** page pick a position next to the
+  pointer (it follows on a springy string, with a gentle idle bob) or a **screen corner** (it sits in
+  the corner you choose and bounces in place). Plus a **size** slider and a live preview.
+  **Reset size, position and icons** puts the look back. Settings saved by this version name the
+  position differently, so an older AgentsCursor reading them starts from its defaults. The DPI of the monitor it's shown on is honoured, so the token keeps a
   consistent size across mixed-DPI setups — which also retires the old mixed-DPI cursor flicker.
 - **The bounce is fluid.** The token animates on a dedicated high-resolution thread
   (`timeBeginPeriod(1)` + real elapsed delta-time) instead of a coarse UI timer, so the motion is

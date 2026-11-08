@@ -4,9 +4,9 @@ using AgentsCursor.Core;
 namespace AgentsCursor.App.ControlPanel;
 
 /// <summary>
-/// The token's look: the master switch, the size, where it shows (following the pointer, or one of the
-/// four screen corners, as one choice), and a live preview of both faces (done, and the yellow "?" for
-/// "needs you") over dark and light. Every control writes its own fields through
+/// The token's look: the master switch, the size, where it shows (below, above or beside the pointer,
+/// or one of the four screen corners, as one choice), and a live preview of a pointer gliding over dark
+/// and light with the token following it the chosen way (the faces and icons are the Icons page's). Every control writes its own fields through
 /// <see cref="LiveSettings.Change"/> and the page redraws from the settings on each change, so it also
 /// follows edits made elsewhere (the tray's "Enabled").
 /// </summary>
@@ -29,13 +29,14 @@ public partial class TokenPage : Page
             int size = (int)Math.Round(e.NewValue);
             if (size != _settings.Live.Size) _settings.Change(s => s.Size = size);
         };
-        // Choosing "Follow the pointer" keeps the corner last chosen, for when a corner comes back.
+        // Choosing a pointer position keeps the corner last chosen, for when a corner comes back.
         PositionBox.SelectionChanged += (_, _) =>
         {
             int index = PositionBox.SelectedIndex;
             if (index < 0 || index == PositionIndex(_settings.Live)) return;
-            if (index == 0) _settings.Change(s => s.Placement = NotifierPlacement.Cursor);
-            else _settings.Change(s => { s.Placement = NotifierPlacement.Corner; s.Corner = (ScreenCorner)(index - 1); });
+            if (index < PointerPositions.Length) _settings.Change(s => s.Placement = PointerPositions[index]);
+            else if (index > PointerPositions.Length)
+                _settings.Change(s => { s.Placement = NotifierPlacement.Corner; s.Corner = (ScreenCorner)(index - FirstCorner); });
         };
         ResetButton.Click += (_, _) => _settings.Change(s => s.ResetAppearance());
 
@@ -57,11 +58,15 @@ public partial class TokenPage : Page
         PositionBox.SelectedIndex = PositionIndex(s);
         ResetButton.IsEnabled = !s.HasDefaultAppearance();
 
-        DonePreview.Show(s);
-        BlockedPreview.Show(s);
+        Preview.Tool = IconCatalog.Tools[0];
+        Preview.Show(s);
     }
 
-    // The Position list: "Follow the pointer", then the corners in ScreenCorner order.
+    // The Position list: the pointer positions, a separator, then the corners in ScreenCorner order.
+    static readonly NotifierPlacement[] PointerPositions =
+        { NotifierPlacement.BelowPointer, NotifierPlacement.AbovePointer, NotifierPlacement.BesidePointer };
+    static readonly int FirstCorner = PointerPositions.Length + 1;
+
     static int PositionIndex(CursorSettings s)
-        => s.Placement == NotifierPlacement.Corner ? 1 + (int)s.Corner : 0;
+        => s.Placement == NotifierPlacement.Corner ? FirstCorner + (int)s.Corner : Array.IndexOf(PointerPositions, s.Placement);
 }

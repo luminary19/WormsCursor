@@ -45,8 +45,9 @@ internal sealed class TokenSprites : IDisposable
     }
 
     /// <summary>The sprite of <paramref name="iconId"/> for <paramref name="tool"/> in a box of side
-    /// <paramref name="side"/> px with a rim <paramref name="rim"/> px wide, built on first use; null
-    /// when the tool has no icon (the caller draws a placeholder).</summary>
+    /// <paramref name="side"/> px with a rim <paramref name="rim"/> px wide, built on first use (the
+    /// tool's original when that icon can't be loaded or drawn); null when the tool has no icon (the
+    /// caller draws a placeholder).</summary>
     public Sprite? Get(string tool, string iconId, float side, float rim)
     {
         int px = Math.Max(1, (int)MathF.Round(side));
@@ -54,10 +55,34 @@ internal sealed class TokenSprites : IDisposable
         var key = (tool, iconId, px, rimKey);
         if (!_sprites.TryGetValue(key, out var sprite))
         {
-            sprite = Parse(tool, iconId) is { } parsed ? Build(parsed, px, rimKey / 4f) : null;
+            sprite = ParseOrOriginal(tool, iconId) is { } parsed ? Build(parsed, px, rimKey / 4f) : null;
             _sprites[key] = sprite;
         }
         return sprite;
+    }
+
+    /// <summary>The pixel size of what <paramref name="svgText"/> draws when its whole viewBox is fitted
+    /// into <paramref name="px"/> x <paramref name="px"/>; null when it draws nothing. Parses its own
+    /// document, so any thread may call it.</summary>
+    internal static SizeF? VisibleSize(string svgText, int px)
+    {
+        var document = SvgDocument.FromSvg<SvgDocument>(svgText);
+        var view = ViewBoxOf(document);
+        if (MeasureVisible(document) is not { } visible) return null;
+        float scale = px / Math.Max(view.Width, view.Height);
+        return new SizeF(visible.Width * scale, visible.Height * scale);
+    }
+
+    // The icon, or the tool's original when it can't be drawn (a broken or empty upload), so a bad
+    // icon never leaves the token blank. Null only when even the original can't be drawn.
+    Parsed? ParseOrOriginal(string tool, string iconId)
+    {
+        var parsed = Parse(tool, iconId);
+        string original = IconCatalog.OriginalId(tool);
+        if (parsed is not null || iconId == original) return parsed;
+        if (IconCatalog.Original(tool) is null) return null;
+        IconSource.Report(tool, iconId, "couldn't be drawn");
+        return Parse(tool, original);
     }
 
     Parsed? Parse(string tool, string iconId)
@@ -72,10 +97,12 @@ internal sealed class TokenSprites : IDisposable
                 var document = SvgDocument.FromSvg<SvgDocument>(text);
                 if (MeasureVisible(document) is { } visible) parsed = new Parsed(document, visible);
             }
-            catch (Exception ex) when (ex is System.Xml.XmlException or InvalidOperationException
-                                          or ArgumentException or SvgException)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                IconSource.Log?.Invoke($"icon '{iconId}' for {tool} couldn't be drawn: {ex.Message}");
+                // An uploaded file is untrusted input, and SVG.NET reports a malformed value with whatever
+                // its parsers throw. Any failure means "can't be drawn": logged, and the caller falls back
+                // to the original, instead of failing every frame.
+                IconSource.Log?.Invoke($"icon '{iconId}' for {tool} couldn't be parsed: {ex.Message}");
             }
         }
         _parsed[cacheKey] = parsed;

@@ -4,9 +4,10 @@ using System.Drawing.Drawing2D;
 namespace AgentsCursor.Core;
 
 /// <summary>
-/// Draws the agent-notifier token for a <see cref="TokenFace"/>: one waiting agent's icon (Claude
-/// Code's critter, Codex's OpenAI knot, OpenCode's mark, Pi's Powerline pi — see
-/// <see cref="IconCatalog"/>) as a bare, free-floating glyph, with the yellow "?"
+/// Draws the agent-notifier token for a <see cref="TokenFace"/>: one waiting agent's icon (the one
+/// <see cref="CursorSettings.IconFor"/> picks: its original logo — Claude Code's critter, Codex's OpenAI
+/// knot, OpenCode's mark, Pi's Powerline pi — a mascot from <see cref="IconCatalog"/>, or an uploaded
+/// SVG) as a bare, free-floating glyph, with the yellow "?"
 /// <see cref="AttentionBadge"/> on its top-right when that session is blocked on you, and a small "+N"
 /// count pill beside it when other sessions wait too.
 ///
@@ -30,6 +31,12 @@ public sealed class NotifierRenderer : IDisposable
     /// rim keeps the bare logo legible over any window behind it. Leaves no transform behind.</summary>
     public void DrawToken(Graphics g, CursorSettings s, TokenFace face,
                           float centerX, float centerY, float tokenSidePx, float swingDeg)
+        => DrawToken(g, s, face, s.IconFor(face.Tool), centerX, centerY, tokenSidePx, swingDeg);
+
+    /// <summary>As the other overload, but with <paramref name="iconId"/> instead of the icon the
+    /// settings choose for the agent (the panel's icon gallery draws every choice).</summary>
+    public void DrawToken(Graphics g, CursorSettings s, TokenFace face, string iconId,
+                          float centerX, float centerY, float tokenSidePx, float swingDeg)
     {
         float box = Math.Max(8f, tokenSidePx);
         float edge = box * 0.06f;          // contrast rim so a bare logo reads on any background
@@ -41,7 +48,7 @@ public sealed class NotifierRenderer : IDisposable
         g.TranslateTransform(centerX, centerY);
         g.RotateTransform(swingDeg);
 
-        var icon = DrawIcon(g, face.Tool, square, edge);
+        var icon = DrawIcon(g, face.Tool, iconId, square, edge);
         var (corner, radius) = AttentionBadge.Place(icon, box);
         if (face.Others > 0)
             DrawCount(g, face.Others, corner, face.Blocked ? radius : 0f, box, Parse(s.OutlineColor, Color.Black));
@@ -59,10 +66,9 @@ public sealed class NotifierRenderer : IDisposable
     // Blits the tool's icon sprite (fitted to the box, rim included) and returns the rectangle the
     // icon actually covers, which the badges anchor to. A tool without an icon gets a grey dot, so a
     // future or unmapped tool still shows something.
-    RectangleF DrawIcon(Graphics g, string tool, RectangleF box, float edge)
+    RectangleF DrawIcon(Graphics g, string tool, string iconId, RectangleF box, float edge)
     {
-        var icon = IconCatalog.Original(tool);
-        var sprite = icon is null ? null : _sprites.Get(tool, icon.Id, box.Width, edge);
+        var sprite = _sprites.Get(tool, iconId, box.Width, edge);
         if (sprite is null)
         {
             float d = Math.Min(box.Width, box.Height) * DotRatio;

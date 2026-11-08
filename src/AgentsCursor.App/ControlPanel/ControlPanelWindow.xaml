@@ -42,6 +42,10 @@
                     Icon="{ui:SymbolIcon CursorHover24}"
                     TargetPageType="{x:Type local:TokenPage}" />
                 <ui:NavigationViewItem
+                    Content="Icons"
+                    Icon="{ui:SymbolIcon Emoji24}"
+                    TargetPageType="{x:Type local:IconsPage}" />
+                <ui:NavigationViewItem
                     Content="Agents"
                     Icon="{ui:SymbolIcon Bot24}"
                     TargetPageType="{x:Type local:AgentsPage}" />

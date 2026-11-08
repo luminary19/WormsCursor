@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="1 -2 30 23" shape-rendering="crispEdges">
+  <!-- Claude Code waving: the pixel critter with its left arm raised (clear of the "?" badge) in a wave, happy ^ ^ eyes and motion ticks. -->
+  <g transform="translate(31 0) scale(-1 1)">
+    <path fill="#D97757" d="M3 5H21V17H3ZM0 11H3V14H0ZM21 9.5H25.5V12.5H21ZM22.5 3H25.5V9.5H22.5ZM22 0H26V3H22ZM4.5 17H6V20H4.5ZM7.5 17H9V20H7.5ZM15 17H16.5V20H15ZM18 17H19.5V20H18Z"/>
+    <path fill="#2B1B14" d="M4.5 9.5H6V11H4.5ZM6 8H7.5V9.5H6ZM7.5 9.5H9V11H7.5ZM15 9.5H16.5V11H15ZM16.5 8H18V9.5H16.5ZM18 9.5H19.5V11H18ZM10.5 12.5H13.5V14H10.5Z"/>
+    <path fill="#D97757" d="M19 0H20.5V3H19ZM27.5 0H29V3H27.5Z"/>
+  </g>
+</svg>

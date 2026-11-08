@@ -4,8 +4,8 @@
 
 A tiny Windows tray utility that shows a **bouncing token when an AI agent is waiting on you**. When
 Claude Code, Codex, OpenCode or Pi is blocked on your decision or has finished its turn, its
-logo appears and bounces — either hanging off your mouse pointer and following it, or pinned to
-a screen corner. Reply (or the session ends) and it disappears. It's an ambient, peripheral-vision
+logo (or a playful mascot of it, or a picture of your own) appears and bounces — following your
+mouse pointer below, above or beside it, or pinned to a screen corner. Reply (or the session ends) and it disappears. It's an ambient, peripheral-vision
 nudge: no toast, no extra window to manage.
 
 It runs in the background from the system tray, with no main window.
@@ -35,11 +35,28 @@ overlay. It shows one tool logo, and a small **"+N"** pill when several sessions
   extension shows during a run, such as a permission or a question). If any waiting session is
   blocked, its logo is the one shown.
 
-Two placements (set on the **Token** page of **Preferences…**):
+Where it shows (set on the **Token** page of **Preferences…**):
 
-- **Next to the mouse cursor** — the token hangs off the pointer on a springy pendulum and follows it,
+- **Below the pointer** — the token hangs under the pointer on a springy string and follows it,
   swinging as you move and settling (with a gentle idle bob) when you stop.
-- **Pinned to a screen corner** — the token sits in the corner you choose and bounces in place.
+- **Above the pointer** — the same string, floating above the arrow like a balloon.
+- **Beside the pointer** — trailing off the arrow's bottom-right, like a tooltip.
+- **A screen corner** — the token sits in the corner you choose and bounces in place.
+
+Near the edge of a screen a pointer position mirrors (beside flips to the left at the right edge,
+above drops below at the top) or slides along the edge, so the token never leaves the screen.
+
+### Icons
+
+On the **Icons** page each agent gets its own look: its **original** logo, one of three mascots drawn
+for it (Claude Code: *Waving*, *Party*, *Peekaboo*; Codex: *Buddy*, *Spin*, *Sleepy*; OpenCode:
+*Buddy*, *Brackets*, *Stack*; Pi: *Walker*, *Shades*, *Pie*), or an **SVG of your own** (**Add SVG…**,
+up to 256 KB, 24 per agent). An added file is cleaned before it is kept: scripts, event handlers and
+links to anything outside the file are removed, and a file with a DTD, an `@import` or an outside
+`url()` is refused, so nothing in it can run or fetch anything. It must also draw something; if it
+can't be used, the page says why and the agent keeps its icon. Added icons live in
+`%LocalAppData%\AgentsCursor\icons\`. Every icon gets the same contrast rim, "?" badge and "+N", and
+the page previews both looks over dark and light. **Reset all icons to the originals** puts them back.
 
 The overlay touches no system state, so there's nothing to restore on exit, and it costs nothing when
 nothing's waiting (the animation only runs while at least one agent needs you).
@@ -176,23 +193,27 @@ AgentsCursor.sln
 │  │   ├─ NotifierRenderer.cs Draws the token (one tool logo, the "?" badge when blocked, a "+N" pill) at a given centre/size/swing
 │  │   ├─ TokenFace.cs        Picks what the token shows: which logo, badge on/off, how many others
 │  │   ├─ AttentionBadge.cs   The yellow "?" badge
-│  │   ├─ IconCatalog.cs      The built-in token icons (each agent's own logo), embedded from Icons/<tool>/*.svg
-│  │   ├─ IconSource.cs       An icon's SVG text, falling back to the agent's original logo
+│  │   ├─ IconCatalog.cs      The built-in token icons (each agent's logo + 3 mascots), embedded from Icons/<tool>/*.svg;
+│  │   │                      IconChoices normalises the per-agent choice
+│  │   ├─ IconSource.cs       An icon's SVG text (built-in or added), falling back to the agent's original logo
+│  │   ├─ CustomIconStore.cs  The SVGs you added: sanitised, content-addressed, in %LocalAppData%\AgentsCursor\icons
+│  │   ├─ SvgSanitizer.cs     Makes an untrusted SVG safe to keep and draw (no scripts, no outside references)
 │  │   ├─ TokenSprites.cs     Renders icons (SVG.NET) to cached sprites, fitted by visible pixels, with a contrast rim
 │  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe)
 │  │   ├─ AgentEventMessage.cs The normalised wire format (one JSON line per event)
-│  │   ├─ CursorSettings.cs   Token size / placement / corner / notifier settings / hidden-while-using programs (persisted as JSON)
+│  │   ├─ CursorSettings.cs   Token size / placement / corner / icons / notifier settings / hidden-while-using programs (persisted as JSON)
 │  │   ├─ LiveSettings.cs     The one owner of the running settings: every edit is a small Change, saved at once
-│  │   ├─ TokenMotion.cs      The token's corner bounce and idle bob, shared by the overlay and the panel preview
+│  │   ├─ TokenMotion.cs      The pointer tether (below / above / beside, edge flips), the corner bounce, the canvas size;
+│  │   │                      shared by the overlay and the panel preview
 │  │   ├─ SettingsStore.cs    Load/save settings in %LocalAppData%\AgentsCursor\
 │  │   ├─ ProgramSuppression.cs Normalizes program names and matches them against the hidden-while-using list
 │  │   ├─ WindowPrograms.cs   Window/process → exe name; the open programs the "Add a program" picker lists
 │  │   └─ ForegroundWatcher.cs Event-driven foreground-program tracker (WinEvent hook, no polling)
 │  └─ AgentsCursor.App/       Tray shell (WinForms tray icon + overlay; WPF control panel)
 │      ├─ Program.cs                   Entry point (Velopack + single-instance guard; `hook` verb short-circuits first)
-│      ├─ NotifierOverlay.cs          The layered overlay window + bounce animation (cursor / corner)
+│      ├─ NotifierOverlay.cs          The layered overlay window + animation (pointer positions / corner)
 │      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the overlay, pipe server, settings and control panel
-│      ├─ ControlPanel/               The WPF-UI control panel: one window, sidebar pages Token / Agents / Apps / About
+│      ├─ ControlPanel/               The WPF-UI control panel: one window, sidebar pages Token / Icons / Agents / Apps / About
 │      ├─ AgentPipeServer.cs          Named-pipe server: many connections at once, hooks and plugin leases
 │      ├─ AgentHookBridge.cs          The `hook` verb: normalises a tool's payload → one pipe line, fail-silent
 │      ├─ Services/AgentHookRegistrar.cs Connects each tool (backup + merge); HooksJson.cs (Claude, Codex),
@@ -228,10 +249,12 @@ notifier on/off. Only one instance runs — launching it again just opens the co
 
 **Preferences…** opens the control panel, a Windows 11 Settings-style window that follows your
 Windows light or dark mode, or the theme you pick under **About**. Every change applies the moment you
-make it. Its sidebar has four pages:
+make it. Its sidebar has five pages:
 
-- **Token** — the master switch, a live preview of both looks (done, and the yellow "?" for "needs
-  you") on dark and light, the size, and where it shows (next to the pointer, or a screen corner).
+- **Token** — the master switch, the size, where it shows (below, above or beside the pointer, or a
+  screen corner), and a live preview of a pointer gliding over dark and light with the token following it.
+- **Icons** — each agent's icon: its original logo, a mascot, or an SVG you add, with a preview of
+  both looks (done, and the yellow "?" with a "+N" for "needs you").
 - **Agents** — connect, update or disconnect Claude Code, Codex, OpenCode and Pi, how long the token
   stays after an agent is done, and **Preview on screen**, which shows pretend agents on the real token.
 - **Apps** — the **Hide the token while using** list.

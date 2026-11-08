@@ -52,6 +52,14 @@ var tests = new (string Name, Action Run)[]
     ("OpenCode's config is written in place, so a hard link to it sees the change", OpenCodeHardLink),
     ("Startup refresh updates only outdated connections and leaves the rest untouched", RefreshConnectedOnly),
     ("Every agent's original icon renders, fitted, with the badge on its top-right", BuiltInIcons),
+    ("Placement \"Cursor\" migrates to BelowPointer; numbers, unknowns and v2 files load right", AppearanceTests.PlacementMigration),
+    ("Icon choices normalize, round-trip, copy safely and reset", AppearanceTests.IconSettings),
+    ("The SVG sanitiser strips active and external content and rejects what it can't trust", AppearanceTests.Sanitizer),
+    ("Added icons are content-addressed, immutable, limited, and removal falls back to the original", AppearanceTests.CustomStore),
+    ("A missing or broken added icon draws the original, logs once, and renders on two threads", AppearanceTests.CustomFallback),
+    ("Every built-in icon is non-empty, solid, within its aspect limits and small", AppearanceTests.BuiltInMascots),
+    ("At any swing, every icon with its badge and +9 stays inside the canvas", AppearanceTests.CanvasExtent),
+    ("Every pointer placement settles at rest, stays on its string, hops in and flips at edges", AppearanceTests.Tether),
 };
 foreach (var (name, run) in tests)
 {
@@ -416,17 +424,18 @@ static void TokenFaceSelection()
     Equal(new TokenFace("claude-code", false, 0), TokenFace.For(activity.Waiting));
 }
 
-// Pixels, not just logic: the yellow disc appears only for a blocked face, at the logo's top-right,
-// for every tool and token size, and the "+N" pill beside it never covers it.
+// Pixels, not just logic: the yellow disc appears only for a blocked face, at the icon's top-right,
+// for every built-in icon (originals and mascots) and token size, and the "+N" pill beside it never
+// covers it.
 static void BadgeDrawing()
 {
     var settings = new CursorSettings();
     using var renderer = new NotifierRenderer();
-    foreach (var tool in IconCatalog.Tools)
+    foreach (var icon in IconCatalog.BuiltIns)
         foreach (int side in new[] { 48, 96, 192 })
             foreach (int others in new[] { 0, 3, 12 })
             {
-                var logo = IconBounds(tool, side);
+                var logo = IconBounds(icon.Tool, icon.Id, side);
                 var (center, r) = AttentionBadge.Place(logo, side);
                 int dim = side * 3, mid = dim / 2;
                 // A spot on the yellow face, left of the "?" glyph.
@@ -435,20 +444,20 @@ static void BadgeDrawing()
                 {
                     using var canvas = new Bitmap(dim, dim);
                     using (var g = Graphics.FromImage(canvas))
-                        renderer.DrawToken(g, settings, new TokenFace(tool, blocked, others), mid, mid, side, 0f);
+                        renderer.DrawToken(g, settings, new TokenFace(icon.Tool, blocked, others), icon.Id, mid, mid, side, 0f);
                     var c = canvas.GetPixel(px, py);
                     bool yellow = c.A > 240 && c.R > 230 && c.G > 170 && c.B < 90;
                     if (yellow != blocked)
-                        throw new InvalidOperationException($"{tool} {side}px +{others} blocked={blocked}: badge pixel was {c}.");
+                        throw new InvalidOperationException($"{icon.Id} {side}px +{others} blocked={blocked}: badge pixel was {c}.");
                 }
             }
 }
 
-// Where a tool's icon sits in a token of side <side> centred on the origin (as NotifierRenderer draws it).
-static RectangleF IconBounds(string tool, int side)
+// Where an icon sits in a token of side <side> centred on the origin (as NotifierRenderer draws it).
+static RectangleF IconBounds(string tool, string iconId, int side)
 {
     using var sprites = new TokenSprites();
-    var sprite = sprites.Get(tool, IconCatalog.Original(tool)!.Id, side, side * 0.06f)!;
+    var sprite = sprites.Get(tool, iconId, side, side * 0.06f)!;
     var v = sprite.Visual;
     return new RectangleF(-side / 2f + v.X, -side / 2f + v.Y, v.Width, v.Height);
 }
@@ -912,7 +921,13 @@ static void LiveSettingsEdits()
     Equal(false, live.Live.HasDefaultAppearance());
     live.Change(s => s.ResetAppearance());
     Equal(true, live.Live.HasDefaultAppearance());
-    Equal(NotifierPlacement.Cursor, live.Live.Placement);
+    Equal(NotifierPlacement.BelowPointer, live.Live.Placement);
+    // Icons are part of the look.
+    live.Change(s => s.Icons = IconChoices.With(s.Icons, "pi", "pi.shades"));
+    Equal(false, live.Live.HasDefaultAppearance());
+    live.Change(s => s.ResetAppearance());
+    Equal(true, live.Live.HasDefaultAppearance());
+    Equal("pi.original", live.Live.IconFor("pi"));
     Equal(false, live.Live.AgentNotifierEnabled);
     Equal(CursorSettings.MinTimeoutSeconds, live.Live.AgentNotifierTimeoutSeconds);
     Equal("cs2.exe", Joined(live.Live.SuppressedPrograms));

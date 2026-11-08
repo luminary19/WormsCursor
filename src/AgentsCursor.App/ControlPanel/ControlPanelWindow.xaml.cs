@@ -10,10 +10,10 @@ using Wpf.Ui.Controls;
 namespace AgentsCursor.App.ControlPanel;
 
 /// <summary>The control panel's sidebar sections.</summary>
-public enum PanelSection { Token, Agents, Apps, About, WhatsNew }
+public enum PanelSection { Token, Icons, Agents, Apps, About, WhatsNew }
 
 /// <summary>
-/// The one control panel window: a Windows 11 Settings-style sidebar (Token, Agents, Apps, About).
+/// The one control panel window: a Windows 11 Settings-style sidebar (Token, Icons, Agents, Apps, About).
 /// Every change applies the moment it is made; there is no OK / Cancel.
 ///
 /// The tray creates it once and keeps it for the app's lifetime: closing only hides it, so it keeps
@@ -49,6 +49,7 @@ public partial class ControlPanelWindow : FluentWindow
         Navigation.SetPageProviderService(new PageProvider(new Dictionary<Type, object>
         {
             [typeof(TokenPage)] = new TokenPage(host.Settings),
+            [typeof(IconsPage)] = new IconsPage(host.Settings),
             [typeof(AgentsPage)] = _agents,
             [typeof(AppsPage)] = new AppsPage(host.Settings),
             [typeof(AboutPage)] = _about,
@@ -111,6 +112,7 @@ public partial class ControlPanelWindow : FluentWindow
     {
         Type page = section switch
         {
+            PanelSection.Icons => typeof(IconsPage),
             PanelSection.Agents => typeof(AgentsPage),
             PanelSection.Apps => typeof(AppsPage),
             PanelSection.About or PanelSection.WhatsNew => typeof(AboutPage),

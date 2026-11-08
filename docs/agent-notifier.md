@@ -9,7 +9,7 @@
 > **Superseded (rendering only).** This doc describes the original design where the notifier was
 > composited onto the *themed system cursors* by `CursorEngine`. The cursor-theming engine has since
 > been **removed**, and the token is now drawn by a standalone transparent overlay window
-> (`NotifierOverlay`) that follows the cursor *or* pins to a screen corner — no `SetSystemCursor`
+> (`NotifierOverlay`) that follows the pointer (below, above or beside it) *or* pins to a screen corner — no `SetSystemCursor`
 > involved. The **transport, wire format, `AgentActivity` state model, and hook registration below are
 > still accurate**; only the "Rendering"/engine-integration parts (and "Coverage: all themed cursors")
 > are historical. See `CLAUDE.md` / `README.md` for the current architecture.
@@ -177,11 +177,14 @@ is deliberately never a fan of logos — it stays legible on the tiny cursor can
 > yellow "?" `AttentionBadge` on its top-right; a plain logo means the turn just finished. The "+N"
 > is a small pill in the same corner, tucked beside the badge.
 
-> **Current icons** (supersede `SvgPath`/`AgentLogos` below): each agent's logo is an SVG embedded in
-> Core (`Icons/<tool>/original.svg`: the Claude critter, the OpenAI knot, OpenCode's compact mark and
-> pi-cursor's 12-column Powerline pi), rendered with SVG.NET by `TokenSprites`: fitted by its visible
-> pixels, given a generic contrast rim (its alpha mask dilated, light for a dark icon, dark for a light
-> one), and cached per size. The badge and the pill anchor to the icon's visible bounds.
+> **Current icons** (supersede `SvgPath`/`AgentLogos` below): every icon is an SVG. Each agent has its
+> logo (`Icons/<tool>/original.svg`: the Claude critter, the OpenAI knot, OpenCode's compact mark and
+> pi-cursor's 12-column Powerline pi) and three mascots embedded in Core, and the user can add SVGs
+> (sanitised by `SvgSanitizer`, kept by `CustomIconStore` in `%LocalAppData%\AgentsCursor\icons`);
+> `CursorSettings.Icons` picks one per agent. `TokenSprites` renders them with SVG.NET: fitted by
+> visible pixels, given a generic contrast rim (its alpha mask dilated, light for a dark icon, dark for
+> a light one), cached per size, falling back to the original when an icon can't be drawn. The badge
+> and the pill anchor to the icon's visible bounds.
 
 Logos were baked from each tool's SVG into vector geometry by `SvgPath` (a tiny path-data parser,
 mirroring `HandShape`) and held by `AgentLogos` (`claude-code` → the orange pixel critter; the

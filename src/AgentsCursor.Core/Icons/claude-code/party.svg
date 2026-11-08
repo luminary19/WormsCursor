@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -8 26 29" shape-rendering="crispEdges">
+  <!-- Claude Code party: the pixel critter in a striped party hat, with a little confetti. -->
+  <path fill="#D97757" d="M3 5H21V17H3ZM0 11H3V14H0ZM21 11H24V14H21ZM4.5 17H6V20H4.5ZM7.5 17H9V20H7.5ZM15 17H16.5V20H15ZM18 17H19.5V20H18Z"/>
+  <path fill="#2B1B14" d="M6 8H7.5V11H6ZM16.5 8H18V11H16.5ZM10.5 12.5H13.5V14H10.5Z"/>
+  <path fill="#3AA99F" d="M7.5 3.5H16.5V5H7.5ZM9 0.5H15V2H9ZM10.5 -2.5H13.5V-1H10.5Z"/>
+  <path fill="#FFF1DE" d="M8.25 2H15.75V3.5H8.25ZM9.75 -1H14.25V0.5H9.75ZM11.25 -4H12.75V-2.5H11.25ZM10.75 -7H13.25V-4.5H10.75Z"/>
+  <path fill="#3AA99F" d="M1 0H3V2H1ZM20 -3H22V-1H20Z"/>
+  <path fill="#FFF1DE" d="M3.5 -4H5.5V-2H3.5ZM21.5 1.5H23.5V3.5H21.5Z"/>
+</svg>
