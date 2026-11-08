@@ -1,5 +1,8 @@
 using System.IO.Pipes;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using WormsCursor.Core;
 
 namespace WormsCursor.App;
@@ -51,6 +54,12 @@ static class AgentHookBridge
             string? rawEvent = Str(root, "hook_event_name");
             var (norm, itemIds) = NormalizeClaude(root, rawEvent);
             if (norm is null) return null; // not an event we surface
+            string[]? callIds = rawEvent switch
+            {
+                "PermissionRequest" or "PreToolUse" when norm == "awaiting_user" => new[] { OpenedCall(root) },
+                "PostToolUse" or "PostToolUseFailure" => FinishedCall(root),
+                _ => null,
+            };
 
             return new AgentEventMessage
             {
@@ -62,6 +71,7 @@ static class AgentHookBridge
                 Project = Str(root, "cwd"),
                 Message = Str(root, "message"),
                 InputIds = itemIds,
+                CallIds = callIds,
                 Ts = DateTime.UtcNow.ToString("o"),
             };
         }
@@ -70,6 +80,11 @@ static class AgentHookBridge
 
     // Codex desktop and CLI share hooks.json and the same stdin lifecycle payloads.
     // Subagent completions use SubagentStop and must not ask the human to take over.
+    // A question tool's PreToolUse and its PostToolUse share the tool_use_id, so that prompt is keyed
+    // by its call. Codex's PermissionRequest carries no tool_use_id, and its tool_input is the approval
+    // request (e.g. the command plus a justification), not the call's own input, so nothing in it
+    // matches the call that later runs: that prompt names no call, and the agent's next tool event
+    // answers it (Codex sends no per-batch event that could do better).
     static AgentEventMessage? FromCodex(string json)
     {
         try
@@ -116,6 +131,12 @@ static class AgentHookBridge
                 Project = Str(root, "cwd"),
                 Message = Str(root, "last_assistant_message"),
                 InputIds = inputIds is { Length: > 0 } ? inputIds : null,
+                CallIds = norm switch
+                {
+                    "awaiting_user" when rawEvent == "PreToolUse" => new[] { OpenedCall(root) },
+                    "tool_use" when rawEvent == "PostToolUse" => FinishedCall(root),
+                    _ => null,
+                },
                 Ts = DateTime.UtcNow.ToString("o"),
             };
         }
@@ -184,7 +205,11 @@ static class AgentHookBridge
     // Every "blocked on you" state comes from an event that names its owner and has a matching
     // "resolved" event, so it can only ever be cleared by its own answer:
     //   - PermissionRequest and AskUserQuestion's PreToolUse run in the asking agent's context, so their
-    //     payload carries that subagent's agent_id; the same agent's next tool event resolves the prompt.
+    //     payload carries that subagent's agent_id, and they name the tool call they block (see
+    //     OpenedCall). That call's PostToolUse / PostToolUseFailure answers the prompt; another call
+    //     finishing does not, even the same agent's parallel one. A denied call never runs, so it has
+    //     no Post event: PostToolBatch, which fires once every call of the agent's batch has resolved,
+    //     answers whatever is left (it also covers an approval that rewrote the call's input).
     //   - Elicitation (an MCP server asking for input) runs outside any agent's context, so it carries
     //     no agent_id. It is keyed by its own identity instead, which ElicitationResult repeats.
     // Notification is deliberately NOT a blocked signal: it carries no agent_id, so a subagent's prompt
@@ -199,6 +224,7 @@ static class AgentHookBridge
         "PermissionRequest" => ("awaiting_user", null),
         "PreToolUse" when Str(root, "tool_name") == "AskUserQuestion" => ("awaiting_user", null),
         "PreToolUse" or "PostToolUse" or "PostToolUseFailure" => ("tool_use", null),
+        "PostToolBatch" => ("tools_resolved", null),
         "Elicitation" => ("awaiting_user", new[] { ElicitationId(root) }),
         "ElicitationResult" => ("input_answered", new[] { ElicitationId(root) }),
         "Notification" when Str(root, "notification_type") == "idle_prompt" => ("turn_complete", null),
@@ -225,6 +251,28 @@ static class AgentHookBridge
            && root.TryGetProperty("background_tasks", out var tasks)
            && tasks.ValueKind == JsonValueKind.Array
            && tasks.EnumerateArray().Any(t => Str(t, "type") is "subagent" or "workflow");
+
+    // The identity of the call a prompt blocks: its tool_use_id when the payload has one (a question
+    // tool's PreToolUse), else its tool name and input (PermissionRequest has no tool_use_id).
+    static string OpenedCall(JsonElement root)
+        => Str(root, "tool_use_id") is { Length: > 0 } id ? "call:" + id : InputFingerprint(root);
+
+    // Every identity of a call that just finished, so it matches the prompt about it either way.
+    static string[] FinishedCall(JsonElement root)
+        => Str(root, "tool_use_id") is { Length: > 0 } id
+            ? new[] { "call:" + id, InputFingerprint(root) }
+            : new[] { InputFingerprint(root) };
+
+    // The tool name plus a hash of the compact tool_input JSON (the input can be a whole file, so the
+    // pipe line carries only the hash). Both sides of a call serialize the same input the same way.
+    static string InputFingerprint(JsonElement root)
+    {
+        string input = root.TryGetProperty("tool_input", out var value)
+            ? JsonNode.Parse(value.GetRawText())?.ToJsonString() ?? "null"
+            : "";
+        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input)), 0, 12);
+        return $"input:{Str(root, "tool_name")}:{hash}";
+    }
 
     static void Send(AgentEventMessage msg)
     {

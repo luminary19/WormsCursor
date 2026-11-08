@@ -3,8 +3,9 @@ using System.Text;
 
 namespace WormsCursor.Core;
 
-/// <summary>A program that owns a visible top-level window: its exe file name and that window's title.</summary>
-public sealed record WindowProgram(string Program, string Title);
+/// <summary>A program that owns a visible top-level window: its exe file name, that window's title, and
+/// the exe's full path.</summary>
+public sealed record WindowProgram(string Program, string Title, string Path);
 
 /// <summary>
 /// Maps windows to the programs that own them (Win32 only, no UI framework). The process is opened
@@ -24,6 +25,10 @@ public static class WindowPrograms
 
     /// <summary>Exe file name of process <paramref name="pid"/>, or null if it can't be queried.</summary>
     public static string? ProgramForProcess(uint pid)
+        => ExePath(pid) is string path ? Path.GetFileName(path) : null;
+
+    // Full exe path of process <pid>, or null if it can't be queried.
+    static string? ExePath(uint pid)
     {
         IntPtr process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
         if (process == IntPtr.Zero) return null;
@@ -31,9 +36,7 @@ public static class WindowPrograms
         {
             var path = new StringBuilder(1024);
             int length = path.Capacity;
-            return QueryFullProcessImageName(process, 0, path, ref length)
-                ? Path.GetFileName(path.ToString(0, length))
-                : null;
+            return QueryFullProcessImageName(process, 0, path, ref length) ? path.ToString(0, length) : null;
         }
         finally { CloseHandle(process); }
     }
@@ -41,20 +44,23 @@ public static class WindowPrograms
     /// <summary>
     /// Programs that currently show a window a person would recognise: visible, unowned, titled
     /// top-level windows that aren't tool windows or cloaked by DWM (a suspended Store app's frame, a
-    /// window on another virtual desktop), excluding this process. One entry per program (the first
-    /// window found supplies the title), sorted by program name.
+    /// window on another virtual desktop), excluding this process and the Windows shell (the process
+    /// behind the desktop and taskbar, which also hosts File Explorer windows: hiding the token while it
+    /// is in front would hide it on the desktop). One entry per program (the first window found
+    /// supplies the title), sorted by program name.
     /// </summary>
     public static IReadOnlyList<WindowProgram> ListVisible()
     {
         uint self = (uint)Environment.ProcessId;
+        GetWindowThreadProcessId(GetShellWindow(), out uint shell);
         var byProgram = new Dictionary<string, WindowProgram>(StringComparer.OrdinalIgnoreCase);
         EnumWindows((hwnd, _) =>
         {
             if (!IsCandidate(hwnd)) return true;
             GetWindowThreadProcessId(hwnd, out uint pid);
-            if (pid == 0 || pid == self) return true;
-            if (ProgramForProcess(pid) is string program && !byProgram.ContainsKey(program))
-                byProgram[program] = new WindowProgram(program, WindowTitle(hwnd));
+            if (pid == 0 || pid == self || pid == shell) return true;
+            if (ExePath(pid) is string path && Path.GetFileName(path) is var program && !byProgram.ContainsKey(program))
+                byProgram[program] = new WindowProgram(program, WindowTitle(hwnd), path);
             return true;
         }, IntPtr.Zero);
         return byProgram.Values
@@ -87,6 +93,7 @@ public static class WindowPrograms
 
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll")] static extern IntPtr GetShellWindow();
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hwnd, uint command);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] static extern int GetWindowLong(IntPtr hwnd, int index); // exists on x86 and x64

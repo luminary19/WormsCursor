@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Media;
 using Wpf.Ui.Appearance;
 using Wpf.Ui.Markup;
 
@@ -23,5 +24,34 @@ static class WpfHost
         // Before anything touches WPF-UI's UiApplication (it caches whether these are present).
         app.Resources.MergedDictionaries.Add(new ThemesDictionary { Theme = ApplicationTheme.Light });
         app.Resources.MergedDictionaries.Add(new ControlsDictionary());
+        UseOpaqueText(app.Resources);
+        ApplicationThemeManager.Changed += (_, _) => UseOpaqueText(app.Resources);
+    }
+
+    // The Fluent text colours are translucent (secondary text is 62% black, for one), which WinUI's
+    // DirectWrite blends exactly. WPF's text renderer doesn't: dark text drawn with a translucent brush
+    // comes out much lighter than the colour says (light-theme secondary text measured 3.2:1 against
+    // its card, under WCAG AA, where the same colour drawn opaque measures 6.1:1). So the text brushes
+    // are replaced with the opaque colour each one would blend to over the theme's base background,
+    // and refreshed whenever the theme dictionary is swapped.
+    static readonly string[] TextColors = { "TextFillColorPrimary", "TextFillColorSecondary", "TextFillColorTertiary" };
+
+    static void UseOpaqueText(ResourceDictionary resources)
+    {
+        if (resources["SolidBackgroundFillColorBase"] is not Color backdrop) return;
+        foreach (string key in TextColors)
+        {
+            if (resources[key] is not Color text) continue;
+            var brush = new SolidColorBrush(Over(text, backdrop));
+            brush.Freeze();
+            resources[key + "Brush"] = brush;
+        }
+    }
+
+    static Color Over(Color top, Color bottom)
+    {
+        float a = top.A / 255f;
+        byte Mix(byte t, byte b) => (byte)Math.Round(t * a + b * (1 - a));
+        return Color.FromRgb(Mix(top.R, bottom.R), Mix(top.G, bottom.G), Mix(top.B, bottom.B));
     }
 }

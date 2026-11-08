@@ -20,8 +20,9 @@ public enum HookState
     ConfigConflict,
 }
 
-/// <summary>A supported agent tool and where its hook config lives.</summary>
-public sealed record HookTool(string Id, string DisplayName, string ConfigHint);
+/// <summary>A supported agent tool and where its hook config lives. <paramref name="SetupNote"/> is a
+/// step the tool itself still needs once our hooks are in its config, if any.</summary>
+public sealed record HookTool(string Id, string DisplayName, string ConfigHint, string? SetupNote = null);
 
 /// <summary>
 /// Registers / unregisters / inspects WormsCursor's <c>hook</c> bridge in each AI agent tool's
@@ -34,19 +35,20 @@ public sealed record HookTool(string Id, string DisplayName, string ConfigHint);
 /// </summary>
 public static class AgentHookRegistrar
 {
-    // The events we register with Claude Code, each with its matcher. Pre/PostToolUse(+Failure) are
-    // registered so the token clears the instant an agent resumes work after you respond — approving a
-    // permission prompt fires no UserPromptSubmit — and PreToolUse of AskUserQuestion is a question.
-    // The cost is one hook process per tool call during an active turn (fail-silent, sub-½ s). The
-    // other events: UserPromptSubmit + SessionStart clear when you come back with a prompt; Stop /
-    // StopFailure end the turn; PermissionRequest is an approval scoped to the asking (sub)agent;
-    // Elicitation / ElicitationResult open and answer an MCP server's request for input; SessionEnd
-    // drops the session on exit. Notification is registered only for the idle_prompt reminder: it
-    // carries no agent_id, so it is never used for a "blocked on you" state.
-    static readonly (string Event, string Matcher)[] ClaudeEvents =
+    // The events we register with Claude Code, each with its matcher (null: the event takes none).
+    // Pre/PostToolUse(+Failure) are registered so the token clears the instant an approved call runs —
+    // approving a permission prompt fires no UserPromptSubmit — and PreToolUse of AskUserQuestion is a
+    // question. PostToolBatch answers what is left once all of an agent's parallel calls have resolved
+    // (a denied call has no Post event). The cost is one hook process per tool call during an active
+    // turn (fail-silent, sub-½ s). The other events: UserPromptSubmit + SessionStart clear when you come
+    // back with a prompt; Stop / StopFailure end the turn; PermissionRequest is an approval scoped to the
+    // asking (sub)agent and its call; Elicitation / ElicitationResult open and answer an MCP server's
+    // request for input; SessionEnd drops the session on exit. Notification is registered only for the
+    // idle_prompt reminder: it carries no agent_id, so it is never used for a "blocked on you" state.
+    static readonly (string Event, string? Matcher)[] ClaudeEvents =
     {
         ("UserPromptSubmit", "*"), ("PreToolUse", "*"), ("PostToolUse", "*"), ("PostToolUseFailure", "*"),
-        ("PermissionRequest", "*"), ("Elicitation", "*"), ("ElicitationResult", "*"),
+        ("PostToolBatch", null), ("PermissionRequest", "*"), ("Elicitation", "*"), ("ElicitationResult", "*"),
         ("Notification", "idle_prompt"), ("Stop", "*"), ("StopFailure", "*"), ("SessionStart", "*"), ("SessionEnd", "*"),
     };
 
@@ -99,7 +101,9 @@ public static class AgentHookRegistrar
     public static IReadOnlyList<HookTool> Tools { get; } = new[]
     {
         new HookTool("claude-code", "Claude Code", "~/.claude/settings.json"),
-        new HookTool("codex", "Codex (desktop + CLI)", "CODEX_HOME/hooks.json"),
+        // Codex runs a changed hook only after you trust it (Codex: Hooks).
+        new HookTool("codex", "Codex (desktop + CLI)", "CODEX_HOME/hooks.json",
+            "In Codex, approve the WormsCursor hooks under Hooks, then start a new session."),
     };
 
     /// <summary>The config file <paramref name="toolId"/>'s hooks are written to.</summary>
@@ -144,9 +148,18 @@ public static class AgentHookRegistrar
 
     const string ClaudeFile = "Claude settings.json";
     const string ClaudeMarker = "hook --tool claude-code";
-    static string ClaudeCommand => $"\"{Exe}\" {ClaudeMarker}";
+    static readonly string[] ClaudeArgs = ClaudeMarker.Split(' ');
 
-    static JsonObject ClaudeHandler() => new() { ["type"] = "command", ["command"] = ClaudeCommand };
+    // Exec form: Claude Code starts the exe directly with these arguments, no shell involved. A
+    // shell-form command needs a shell that parses it, and on Windows without Git Bash that shell is
+    // PowerShell, which rejects a quoted exe path followed by arguments — and a failing PreToolUse or
+    // PermissionRequest hook there blocks every tool call.
+    static JsonObject ClaudeHandler() => new()
+    {
+        ["type"] = "command",
+        ["command"] = Exe,
+        ["args"] = new JsonArray(ClaudeArgs.Select(a => (JsonNode)a).ToArray()),
+    };
 
     static HookState ClaudeState()
     {
@@ -157,7 +170,7 @@ public static class AgentHookRegistrar
             if (hooks is null || !HasAnyHandler(hooks, IsClaudeHandler)) return HookState.NotRegistered;
             // Today's shape exactly: every event carries one handler of ours, in a group with the
             // expected matcher, with the current command. Anything else (a missing event, an old exe
-            // path, the retired per-type Notification entries) needs a refresh.
+            // path, the shell-form command, the retired per-type Notification entries) needs a refresh.
             bool current = ClaudeEvents.All(ev => hooks[ev.Event] is JsonArray groups
                 && HasExactlyHandler(groups, IsClaudeHandler, g => StringValue(g["matcher"]) == ev.Matcher, ClaudeHandler()));
             return current ? HookState.Registered : HookState.Outdated;
@@ -182,13 +195,20 @@ public static class AgentHookRegistrar
         foreach (var (ev, matcher) in ClaudeEvents)
         {
             if (hooks[ev] is not JsonArray groups) { groups = new JsonArray(); hooks[ev] = groups; }
-            groups.Add(new JsonObject { ["matcher"] = matcher, ["hooks"] = new JsonArray(ClaudeHandler()) });
+            var group = new JsonObject();
+            if (matcher is not null) group["matcher"] = matcher;
+            group["hooks"] = new JsonArray(ClaudeHandler());
+            groups.Add(group);
         }
         BackupAndWrite(ClaudePath, root.ToJsonString(Indented));
     }
 
+    // Ours in either form: today's exec form (our arguments in args), or the shell-form command
+    // earlier versions wrote (the marker inside the command string), so a refresh replaces it.
     static bool IsClaudeHandler(JsonNode? node)
-        => node is JsonObject hook && StringValue(hook["command"])?.Contains(ClaudeMarker, StringComparison.Ordinal) == true;
+        => node is JsonObject hook
+           && (StringValue(hook["command"])?.Contains(ClaudeMarker, StringComparison.Ordinal) == true
+               || (hook["args"] is JsonArray args && args.Select(StringValue).SequenceEqual(ClaudeArgs)));
 
     // ---------- Codex (hooks.json merge) ----------
 

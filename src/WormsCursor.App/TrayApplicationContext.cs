@@ -161,7 +161,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
     void HandleAgentEvent(AgentEventMessage msg)
     {
         if (msg.TryGetKind(out var kind))
-            _agents.Report(msg.Tool, msg.SessionId, msg.Project, kind, DateTime.UtcNow, msg.InputIds, msg.AgentId);
+            _agents.Report(msg.Tool, msg.SessionId, msg.Project, kind, DateTime.UtcNow, msg.InputIds, msg.AgentId, msg.CallIds);
     }
 
     void OnWaitingChanged(int count)

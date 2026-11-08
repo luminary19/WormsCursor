@@ -43,7 +43,7 @@
                             <ui:TextBlock
                                 Margin="0,2,0,0"
                                 FontTypography="Caption"
-                                Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                 Text="{Binding ConfigPath}"
                                 TextTrimming="CharacterEllipsis"
                                 ToolTip="{Binding ConfigPath}" />
@@ -62,10 +62,10 @@
                             Orientation="Horizontal">
                             <ui:Button
                                 Margin="0,0,8,0"
-                                AutomationProperties.Name="{Binding Name, StringFormat='Unregister {0}'}"
-                                Click="OnUnregister"
-                                Content="Unregister"
-                                Visibility="{Binding ShowUnregister, Converter={StaticResource VisibleWhen}}" />
+                                AutomationProperties.Name="{Binding Name, StringFormat='Disconnect {0}'}"
+                                Click="OnDisconnect"
+                                Content="Disconnect"
+                                Visibility="{Binding ShowDisconnect, Converter={StaticResource VisibleWhen}}" />
                             <ui:Button
                                 x:Name="Primary"
                                 MinWidth="112"
@@ -117,18 +117,18 @@
             Margin="2,8,0,0"
             FontTypography="Caption"
             Style="{StaticResource Secondary}"
-            Text="WormsCursor backs up each config file before its first change. In Codex, approve the WormsCursor hooks under Hooks before you start a new session." />
+            Text="WormsCursor backs up each config file before its first change." />
 
-        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Notices" />
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Timing" />
         <ui:CardControl Icon="{ui:SymbolIcon Timer24}">
             <ui:CardControl.Header>
-                <local:SettingHeader Title="Clear a finished notice after" Description="A notice that needs your answer stays until you respond." />
+                <local:SettingHeader Title="Clear the token after an agent is done" Description="When an agent needs your answer, the token stays until you respond." />
             </ui:CardControl.Header>
             <StackPanel Orientation="Horizontal">
                 <ui:NumberBox
                     x:Name="TimeoutBox"
                     Width="132"
-                    AutomationProperties.Name="Seconds before a finished notice clears"
+                    AutomationProperties.Name="Seconds before the token clears after an agent is done"
                     ClearButtonEnabled="False"
                     LargeChange="60"
                     MaxDecimalPlaces="0"
@@ -146,25 +146,33 @@
             <ui:CardControl.Header>
                 <local:SettingHeader x:Name="PreviewHeader" Title="Preview on screen" />
             </ui:CardControl.Header>
-            <StackPanel Orientation="Horizontal">
-                <ui:NumberBox
-                    x:Name="PreviewCountBox"
-                    Width="112"
-                    AutomationProperties.Name="Pretend agents to show"
-                    ClearButtonEnabled="False"
-                    MaxDecimalPlaces="0"
-                    SmallChange="1"
-                    SpinButtonPlacementMode="Inline" />
-                <ui:TextBlock
-                    x:Name="PreviewCountLabel"
-                    Margin="10,0,16,0"
-                    VerticalAlignment="Center"
-                    Text="agents" />
+            <Grid>
                 <ui:Button
-                    x:Name="PreviewButton"
+                    x:Name="TurnOnButton"
                     MinWidth="104"
-                    Appearance="Primary" />
-            </StackPanel>
+                    HorizontalAlignment="Right"
+                    Appearance="Primary"
+                    Content="Turn on" />
+                <StackPanel x:Name="PreviewControls" Orientation="Horizontal">
+                    <ui:NumberBox
+                        x:Name="PreviewCountBox"
+                        Width="112"
+                        AutomationProperties.Name="Pretend agents to show"
+                        ClearButtonEnabled="False"
+                        MaxDecimalPlaces="0"
+                        SmallChange="1"
+                        SpinButtonPlacementMode="Inline" />
+                    <ui:TextBlock
+                        x:Name="PreviewCountLabel"
+                        Margin="10,0,16,0"
+                        VerticalAlignment="Center"
+                        Text="agents" />
+                    <ui:Button
+                        x:Name="PreviewButton"
+                        MinWidth="104"
+                        Appearance="Primary" />
+                </StackPanel>
+            </Grid>
         </ui:CardControl>
     </StackPanel>
 </Page>

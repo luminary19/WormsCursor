@@ -25,8 +25,8 @@ public sealed class NotifierRenderer : IDisposable
     /// <summary>Draws <paramref name="face"/>'s logo in a box of side <paramref name="tokenSidePx"/>
     /// centred at (<paramref name="centerX"/>/<paramref name="centerY"/>) and tilted by
     /// <paramref name="swingDeg"/> (0 = upright), plus its badges: the "+N" pill when others wait and
-    /// the "?" badge (drawn last, on top) when it is blocked on you. A thin contrast rim keeps the
-    /// bare logo legible over any window behind it. Leaves no transform behind.</summary>
+    /// the "?" badge (drawn last, on top, and kept upright) when it is blocked on you. A thin contrast
+    /// rim keeps the bare logo legible over any window behind it. Leaves no transform behind.</summary>
     public void DrawToken(Graphics g, CursorSettings s, TokenFace face,
                           float centerX, float centerY, float tokenSidePx, float swingDeg)
     {
@@ -53,19 +53,25 @@ public sealed class NotifierRenderer : IDisposable
     public void Dispose() => _logos.Dispose();
 
     // The "+N" count for the other waiting sessions: white bold digits on a pill filled with the
-    // theme outline colour, ringed in a light hairline so it reads on dark and light screens. It lives
-    // in the logo's top-right badge corner (the side facing the cursor, so it never swings out of the
-    // canvas). Alone it is centred on that corner; beside the "?" badge (radius > 0) it tucks under the
-    // badge's left edge, the digits centred in the part left showing, so the two read as one cluster.
+    // theme outline colour, ringed in a light hairline and then a thin dark edge, so it reads as its own
+    // shape on dark and light screens (the dark edge also parts it from dark logo strokes behind it). It
+    // lives in the logo's top-right badge corner (the side facing the cursor, so it never swings out of
+    // the canvas). Alone it is centred on that corner; beside the "?" badge (radius > 0) it tucks under
+    // the badge's left edge, the digits centred in the part left showing, so the two read as one cluster.
+    // The digits scale with the token but never drop below MinDigitsPx, where the "+" would blur into a dot.
+    const float MinDigitsPx = 11f;
+    const float DigitsRatio = 0.19f, PillRatio = 0.24f; // of the token side, before the floor
+
     static void DrawCount(Graphics g, int others, PointF corner, float badgeRadius, float box, Color backing)
     {
+        float em = Math.Max(box * DigitsRatio, MinDigitsPx);
         using var text = new GraphicsPath();
         using (var fam = new FontFamily(System.Drawing.Text.GenericFontFamilies.SansSerif))
         using (var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-            text.AddString("+" + others, fam, (int)FontStyle.Bold, box * 0.19f, PointF.Empty, fmt);
+            text.AddString("+" + others, fam, (int)FontStyle.Bold, em, PointF.Empty, fmt);
         var ink = text.GetBounds();
 
-        float h = box * 0.24f;
+        float h = em * (PillRatio / DigitsRatio);
         float shown = Math.Max(h, ink.Width + h * 0.62f);     // the pill's visible length
         // Tucking a full pill height under the badge hides the pill's whole rounded end inside the disc.
         float tuck = badgeRadius > 0f ? h : 0f;
@@ -80,9 +86,12 @@ public sealed class NotifierRenderer : IDisposable
         }
 
         using var pill = Pill(left, cy - h / 2f, right - left, h);
+        float rimWidth = Math.Max(1f, box * 0.018f);
         using (var fill = new SolidBrush(backing))
             g.FillPath(fill, pill);
-        using (var rim = new Pen(Color.FromArgb(230, 255, 255, 255), Math.Max(1f, box * 0.018f)))
+        using (var edge = new Pen(Color.FromArgb(170, 0, 0, 0), rimWidth + 2f)) // 1 px past the hairline
+            g.DrawPath(edge, pill);
+        using (var rim = new Pen(Color.FromArgb(230, 255, 255, 255), rimWidth))
             g.DrawPath(rim, pill);
         using (var digits = new SolidBrush(Color.White))
             g.FillPath(digits, text);

@@ -21,6 +21,53 @@
             <ui:ToggleSwitch x:Name="EnabledSwitch" AutomationProperties.Name="Show the token" />
         </ui:CardControl>
 
+        <!--  The controls sit above the preview: the preview grows with the size, and below the
+              slider that growth can never move the slider out from under the pointer.  -->
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Size and position" />
+        <ui:CardControl Icon="{ui:SymbolIcon ResizeLarge24}">
+            <ui:CardControl.Header>
+                <local:SettingHeader Title="Size" Description="How big the token is on screen." />
+            </ui:CardControl.Header>
+            <StackPanel Orientation="Horizontal">
+                <ui:TextBlock
+                    x:Name="SizeText"
+                    MinWidth="52"
+                    Margin="0,0,12,0"
+                    VerticalAlignment="Center"
+                    Style="{StaticResource Secondary}"
+                    TextAlignment="Right" />
+                <Slider
+                    x:Name="SizeSlider"
+                    Width="220"
+                    VerticalAlignment="Center"
+                    AutomationProperties.Name="Token size"
+                    IsSnapToTickEnabled="True"
+                    LargeChange="24"
+                    SmallChange="8"
+                    TickFrequency="8" />
+            </StackPanel>
+        </ui:CardControl>
+        <ui:CardControl Icon="{ui:SymbolIcon CursorHover24}">
+            <ui:CardControl.Header>
+                <local:SettingHeader Title="Position" Description="Follow the pointer, or wait in a corner of your main screen." />
+            </ui:CardControl.Header>
+            <ComboBox
+                x:Name="PositionBox"
+                MinWidth="200"
+                AutomationProperties.Name="Position">
+                <ComboBoxItem Content="Follow the pointer" />
+                <ComboBoxItem Content="Top left corner" />
+                <ComboBoxItem Content="Top right corner" />
+                <ComboBoxItem Content="Bottom left corner" />
+                <ComboBoxItem Content="Bottom right corner" />
+            </ComboBox>
+        </ui:CardControl>
+        <ui:Button
+            x:Name="ResetButton"
+            Margin="0,12,0,0"
+            Content="Reset size and position"
+            Icon="{ui:SymbolIcon ArrowReset24}" />
+
         <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Preview" />
         <Border Padding="16,16,16,12" Style="{StaticResource Surface}">
             <Grid>
@@ -93,62 +140,5 @@
                 </StackPanel>
             </Grid>
         </Border>
-
-        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Size and position" />
-        <ui:CardControl Icon="{ui:SymbolIcon ResizeLarge24}">
-            <ui:CardControl.Header>
-                <local:SettingHeader Title="Size" Description="How big the token is on screen." />
-            </ui:CardControl.Header>
-            <StackPanel Orientation="Horizontal">
-                <ui:TextBlock
-                    x:Name="SizeText"
-                    MinWidth="52"
-                    Margin="0,0,12,0"
-                    VerticalAlignment="Center"
-                    Style="{StaticResource Secondary}"
-                    TextAlignment="Right" />
-                <Slider
-                    x:Name="SizeSlider"
-                    Width="220"
-                    VerticalAlignment="Center"
-                    AutomationProperties.Name="Token size"
-                    IsSnapToTickEnabled="True"
-                    LargeChange="24"
-                    SmallChange="8"
-                    TickFrequency="8" />
-            </StackPanel>
-        </ui:CardControl>
-        <ui:CardControl Icon="{ui:SymbolIcon CursorHover24}">
-            <ui:CardControl.Header>
-                <local:SettingHeader Title="Position" Description="Follow the pointer, or wait in a corner of your main screen." />
-            </ui:CardControl.Header>
-            <ComboBox
-                x:Name="PlacementBox"
-                MinWidth="200"
-                AutomationProperties.Name="Position">
-                <ComboBoxItem Content="Follow the pointer" />
-                <ComboBoxItem Content="Screen corner" />
-            </ComboBox>
-        </ui:CardControl>
-        <ui:CardControl x:Name="CornerCard" Icon="{ui:SymbolIcon Desktop24}">
-            <ui:CardControl.Header>
-                <local:SettingHeader x:Name="CornerHeader" Title="Corner" />
-            </ui:CardControl.Header>
-            <ComboBox
-                x:Name="CornerBox"
-                MinWidth="200"
-                AutomationProperties.Name="Corner">
-                <ComboBoxItem Content="Top left" />
-                <ComboBoxItem Content="Top right" />
-                <ComboBoxItem Content="Bottom left" />
-                <ComboBoxItem Content="Bottom right" />
-            </ComboBox>
-        </ui:CardControl>
-
-        <ui:Button
-            x:Name="ResetButton"
-            Margin="0,16,0,0"
-            Content="Reset size and position"
-            Icon="{ui:SymbolIcon ArrowReset24}" />
     </StackPanel>
 </Page>

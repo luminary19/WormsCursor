@@ -17,6 +17,12 @@
     WindowCornerPreference="Round"
     WindowStartupLocation="CenterScreen">
 
+    <ui:FluentWindow.Resources>
+        <!--  The status dot for agents that are done: the theme's informational blue (Windows has no
+              ready-made brush for it), distinct from the caution yellow of "needs you".  -->
+        <SolidColorBrush x:Key="StatusDoneBrush" Color="{DynamicResource SystemFillColorAttention}" />
+    </ui:FluentWindow.Resources>
+
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -34,56 +40,32 @@
             TitleBar="{Binding ElementName=TitleBar, Mode=OneWay}"
             Transition="FadeInWithSlide">
 
-            <!--  At a glance: who this is and what the token is doing.  -->
+            <!--  At a glance: what the token is doing. The title bar already names the app. In the
+                  icon-only sidebar just the dot shows, with the words in its tooltip.  -->
             <ui:NavigationView.PaneHeader>
                 <Grid
-                    x:Name="PaneHeaderPanel"
-                    Margin="12,4,12,20"
-                    AutomationProperties.Name="Status">
+                    x:Name="StatusPanel"
+                    Height="36"
+                    Margin="0,0,0,8"
+                    Background="Transparent">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="40" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Border
-                        Width="52"
-                        Height="52"
-                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="12">
-                        <Image
-                            x:Name="AppIcon"
-                            Width="30"
-                            Height="30"
-                            RenderOptions.BitmapScalingMode="HighQuality" />
-                    </Border>
-                    <StackPanel
+                    <Ellipse
+                        x:Name="StatusDot"
+                        Width="10"
+                        Height="10"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center" />
+                    <ui:TextBlock
+                        x:Name="StatusText"
                         Grid.Column="1"
-                        Margin="12,0,0,0"
-                        VerticalAlignment="Center">
-                        <ui:TextBlock
-                            FontFamily="Segoe UI Variable Display, Segoe UI"
-                            FontTypography="Subtitle"
-                            Text="WormsCursor" />
-                        <Grid Margin="0,2,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Ellipse
-                                x:Name="StatusDot"
-                                Width="8"
-                                Height="8"
-                                Margin="1,5,8,0"
-                                VerticalAlignment="Top" />
-                            <ui:TextBlock
-                                x:Name="StatusText"
-                                Grid.Column="1"
-                                FontTypography="Caption"
-                                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                TextWrapping="Wrap" />
-                        </Grid>
-                    </StackPanel>
+                        Margin="2,0,12,1"
+                        VerticalAlignment="Center"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap" />
                 </Grid>
             </ui:NavigationView.PaneHeader>
 

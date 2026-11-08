@@ -50,8 +50,8 @@ the same list.
 
 ## How the notifier works
 
-Set it up on the **Agents** page of **Preferences…**: register **Claude Code** or **Codex** there
-and set how long a finished notice stays (the master switch is on the **Token** page). Registering writes WormsCursor's
+Set it up on the **Agents** page of **Preferences…**: connect **Claude Code** or **Codex** there
+and set how long the token stays after an agent is done (the master switch is on the **Token** page). Connecting writes WormsCursor's
 `hook` command into the tool's config — `%CLAUDE_CONFIG_DIR%\settings.json` when that environment
 variable is set, otherwise `%USERPROFILE%\.claude\settings.json`; Codex uses
 `%CODEX_HOME%\hooks.json`, otherwise `%USERPROFILE%\.codex\hooks.json` — with backup-and-merge, so it preserves
@@ -64,20 +64,24 @@ tracks whether the ball is in *your* court:
 
 | The agent… | Claude hook | Token |
 |---|---|---|
-| asks for permission (main agent or a subagent) | `PermissionRequest` | **appears — stays until that agent moves on** |
-| asks you a question (main agent or a subagent) | `PreToolUse` of `AskUserQuestion` | **appears — stays until that agent moves on** |
+| asks for permission (main agent or a subagent) | `PermissionRequest` | **appears — stays until that call runs, or the agent moves on** |
+| asks you a question (main agent or a subagent) | `PreToolUse` of `AskUserQuestion` | **appears — stays until you answer it** |
 | relays an MCP server's request for input | `Elicitation` | **appears — stays until that request is answered** (`ElicitationResult`) |
 | sends the "still waiting for your input" reminder | `Notification` (`idle_prompt`) | **appears — clears after the timeout** |
 | finished its turn | `Stop` | **appears — clears after the timeout** |
 | ended on an error | `StopFailure` | **appears — clears after the timeout** |
 | started on your prompt, or you reopened the session | `UserPromptSubmit` / `SessionStart` | **clears** |
-| resumes tool work after you answered | `PreToolUse` / `PostToolUse` / `PostToolUseFailure` | **clears that agent's prompt** |
+| runs the call you approved or answered | `PostToolUse` / `PostToolUseFailure` of that call | **clears that call's prompt** |
+| moves on once every call it made at once has resolved (also after you deny one) | `PostToolBatch` | **clears that agent's prompts** |
 | exited cleanly (`/exit`, `Ctrl+C`, `/clear`, logout) | `SessionEnd` | **clears at once** |
 
 Every "blocked on you" row comes from a hook that says who is waiting and has a matching "answered"
-event. Permission requests and questions carry the asking agent's id, so only *that* agent's next
-tool call clears its prompt: a subagent still waiting keeps the token up while its siblings or the
-main agent work, and background subagents can't clear the main agent's question. An MCP request for
+event. Permission requests and questions carry the asking agent's id and name the call they block
+(its tool name and input, or its tool-call id), so only *that* call running, or that agent's batch of
+calls resolving, clears the prompt: a subagent still waiting keeps the token up while its siblings or
+the main agent work, background subagents can't clear the main agent's question, and a parallel call
+finishing first can't clear another call's approval. Claude's hooks are registered in exec form (the
+exe plus its arguments, no shell), so they run the same with or without Git Bash. An MCP request for
 input belongs to no agent, so only its own `ElicitationResult` clears it. Claude's `Notification`
 hook says nothing about which agent it is for, so it is never used for a blocked state.
 
@@ -99,7 +103,7 @@ PowerShell rejects, so every Codex hook failed; the **Agents** page shows it as 
 `CODEX_HOME=%APPDATA%\orca\codex-runtime-home\home`. Orca copies your hooks there but trusts only
 its own, so WormsCursor's hooks don't run in Orca-launched Codex until you trust them: open Codex
 from Orca, run `/hooks`, and trust the WormsCursor entries. Do this once, and again whenever the
-hook command changes (after **Re-register**, or when the WormsCursor exe moves).
+hook command changes (after **Update**, or when the WormsCursor exe moves).
 
 Codex currently has no failure lifecycle hook for model/API errors, and those errors can skip
 `Stop`. Consequently, these failures cannot reliably produce a completion token. Normal completion,
@@ -197,8 +201,8 @@ or dark theme. Every change applies the moment you make it. Its sidebar has four
 
 - **Token** — the master switch, a live preview of both looks (done, and the yellow "?" for "needs
   you") on dark and light, the size, and where it shows (next to the pointer, or a screen corner).
-- **Agents** — register, update or unregister the hooks for Claude Code and Codex, how long a
-  finished notice stays, and **Preview on screen**, which shows pretend agents on the real token.
+- **Agents** — connect, update or disconnect the hooks for Claude Code and Codex, how long the token
+  stays after an agent is done, and **Preview on screen**, which shows pretend agents on the real token.
 - **Apps** — the **Hide the token while using** list.
 - **About** — the version, **Check for updates**, **What's new**, **Start with Windows**, and links.
 

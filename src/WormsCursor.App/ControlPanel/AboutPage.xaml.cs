@@ -55,6 +55,12 @@ public partial class AboutPage : Page
     }
 
     // ---------- updates ----------
+    //
+    // Every step below runs from a click, so a failure must land on the card, never escape: the click
+    // handler is async void on a WPF dispatcher the WinForms loop pumps, where an unhandled exception
+    // ends the whole tray. Velopack's own failures (ChecksumFailedException, AcquireLockFailedException,
+    // NotInstalledException) derive straight from Exception, beside the HTTP and IO errors underneath,
+    // and that set isn't fixed, so each step catches every failure, logs it, and shows it.
 
     void ShowInitialUpdateState()
     {
@@ -83,8 +89,9 @@ public partial class AboutPage : Page
                 SetUpdateState($"Version {update.TargetFullRelease.Version} is available.",
                     ("Download and restart", () => DownloadAsync(update)), busy: false, accent: true);
         }
-        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException or TaskCanceledException)
+        catch (Exception ex)
         {
+            AppLog.Write("update check failed: " + ex);
             SetUpdateState("Couldn't check for updates: " + ex.Message, ("Try again", CheckAsync), busy: false);
         }
     }
@@ -98,8 +105,9 @@ public partial class AboutPage : Page
             await Updates.DownloadAsync(update, percent => Dispatcher.BeginInvoke(() =>
                 UpdateHeader.Description = $"Downloading version {version}... {percent}%"));
         }
-        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException or TaskCanceledException)
+        catch (Exception ex)
         {
+            AppLog.Write("update download failed: " + ex);
             SetUpdateState("Couldn't download the update: " + ex.Message, ("Try again", () => DownloadAsync(update)), busy: false);
             return;
         }
@@ -114,8 +122,9 @@ public partial class AboutPage : Page
     void Restart(VelopackAsset release)
     {
         try { _host.RestartToUpdate(release); }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
+        catch (Exception ex)
         {
+            AppLog.Write("updater didn't start: " + ex);
             SetUpdateState($"Version {release.Version} is downloaded, but the updater didn't start: {ex.Message}",
                 ("Try again", () => { Restart(release); return Task.CompletedTask; }), busy: false, accent: true);
         }

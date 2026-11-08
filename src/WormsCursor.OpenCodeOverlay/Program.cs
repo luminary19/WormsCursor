@@ -494,6 +494,16 @@ internal sealed class CursorOverlay : Form
         graphics.DrawImage(
             asset.Bitmap,
             new RectangleF(-asset.Width / 2f, -asset.Height / 2f, asset.Width, asset.Height));
+        if (asset.Badge is { } badge)
+        {
+            // The badge rides the swinging mark's corner but stays upright, so the "?" always reads.
+            var center = new[] { asset.BadgeCenter };
+            using (var transform = graphics.Transform) transform.TransformPoints(center);
+            graphics.ResetTransform();
+            graphics.CompositingMode = CompositingMode.SourceOver; // over the mark, not replacing it
+            var side = asset.BadgeSide;
+            graphics.DrawImage(badge, new RectangleF(center[0].X - side / 2f, center[0].Y - side / 2f, side, side));
+        }
         graphics.ResetTransform();
 
         var uploadStarted = metrics.IsEnabled ? Stopwatch.GetTimestamp() : 0;
@@ -570,40 +580,71 @@ internal sealed class LogoAsset : IDisposable
     // The badge's soft shadow reaches this far past its radius (see AttentionBadge.Draw).
     private const float BadgeShadowReach = 1.3f;
 
-    private LogoAsset(Bitmap bitmap, int tokenPixels, bool badged, float width, float height)
+    private LogoAsset(Bitmap bitmap, int tokenPixels, bool badged, float width, float height,
+        Bitmap? badge, PointF badgeCenter, float badgeSide)
     {
         Bitmap = bitmap;
         TokenPixels = tokenPixels;
         Badged = badged;
         Width = width;
         Height = height;
+        Badge = badge;
+        BadgeCenter = badgeCenter;
+        BadgeSide = badgeSide;
     }
 
+    /// <summary>The mark alone, centred (the overlay rotates it about its centre).</summary>
     public Bitmap Bitmap { get; }
     public int TokenPixels { get; }
     public bool Badged { get; }
     public float Width { get; }
     public float Height { get; }
 
-    /// <summary>The mark at <paramref name="tokenPixels"/> tall, with the shared "?" badge on its
-    /// top-right when <paramref name="badged"/>. The bitmap stays centred on the mark (the overlay
-    /// rotates it about its centre), so a badge grows it symmetrically.</summary>
+    /// <summary>The shared "?" badge, upright and centred in a square of side <see cref="BadgeSide"/>,
+    /// when <see cref="Badged"/>. It is a sprite of its own, not baked into the mark, so the overlay can
+    /// place it on the swinging mark's corner without tilting it.</summary>
+    public Bitmap? Badge { get; }
+
+    /// <summary>The badge's centre relative to the mark's centre, in the mark's unrotated frame.</summary>
+    public PointF BadgeCenter { get; }
+    public float BadgeSide { get; }
+
+    /// <summary>The mark at <paramref name="tokenPixels"/> tall, plus the shared "?" badge for its
+    /// top-right corner when <paramref name="badged"/>.</summary>
     public static LogoAsset Create(int tokenPixels, bool badged)
     {
         var logoHeight = (float)tokenPixels;
         var logoWidth = logoHeight * 0.8f;
         var padding = Math.Max(3f, tokenPixels * 0.025f);
-        var halfWidth = logoWidth / 2f + padding;
-        var halfHeight = logoHeight / 2f + padding;
-        var (badgeCenter, badgeRadius) = AttentionBadge.Place(
-            new RectangleF(-logoWidth / 2f, -logoHeight / 2f, logoWidth, logoHeight), tokenPixels);
-        if (badged)
+        var width = logoWidth + padding * 2f;
+        var height = logoHeight + padding * 2f;
+        var bitmap = Supersampled(width, height, (graphics, w, h) => DrawLogo(graphics, w / 2f, h / 2f, tokenPixels * RenderScale));
+        if (!badged) return new LogoAsset(bitmap, tokenPixels, badged, width, height, null, PointF.Empty, 0f);
+
+        try
         {
-            halfWidth = Math.Max(halfWidth, MathF.Abs(badgeCenter.X) + badgeRadius * BadgeShadowReach);
-            halfHeight = Math.Max(halfHeight, MathF.Abs(badgeCenter.Y) + badgeRadius * BadgeShadowReach);
+            var (badgeCenter, badgeRadius) = AttentionBadge.Place(
+                new RectangleF(-logoWidth / 2f, -logoHeight / 2f, logoWidth, logoHeight), tokenPixels);
+            var side = 2f * badgeRadius * BadgeShadowReach;
+            var badge = Supersampled(side, side, (graphics, w, h) => AttentionBadge.Draw(graphics, w / 2f, h / 2f, badgeRadius * RenderScale));
+            return new LogoAsset(bitmap, tokenPixels, badged, width, height, badge, badgeCenter, side);
         }
-        var width = halfWidth * 2f;
-        var height = halfHeight * 2f;
+        catch
+        {
+            bitmap.Dispose();
+            throw;
+        }
+    }
+
+    public void Dispose()
+    {
+        Bitmap.Dispose();
+        Badge?.Dispose();
+    }
+
+    // Draws at RenderScale x and scales down once, for smooth edges at any token size.
+    private static Bitmap Supersampled(float width, float height, Action<Graphics, float, float> draw)
+    {
         using var supersampled = new Bitmap(
             (int)MathF.Ceiling(width * RenderScale),
             (int)MathF.Ceiling(height * RenderScale),
@@ -612,12 +653,7 @@ internal sealed class LogoAsset : IDisposable
         {
             graphics.Clear(Color.Transparent);
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            DrawLogo(graphics, supersampled.Width / 2f, supersampled.Height / 2f, tokenPixels * RenderScale);
-            if (badged)
-                AttentionBadge.Draw(graphics,
-                    supersampled.Width / 2f + badgeCenter.X * RenderScale,
-                    supersampled.Height / 2f + badgeCenter.Y * RenderScale,
-                    badgeRadius * RenderScale);
+            draw(graphics, supersampled.Width, supersampled.Height);
         }
 
         var bitmap = new Bitmap(
@@ -636,7 +672,7 @@ internal sealed class LogoAsset : IDisposable
                 new RectangleF(0, 0, width, height),
                 new RectangleF(0, 0, supersampled.Width, supersampled.Height),
                 GraphicsUnit.Pixel);
-            return new LogoAsset(bitmap, tokenPixels, badged, width, height);
+            return bitmap;
         }
         catch
         {
@@ -644,8 +680,6 @@ internal sealed class LogoAsset : IDisposable
             throw;
         }
     }
-
-    public void Dispose() => Bitmap.Dispose();
 
     private static void DrawLogo(Graphics graphics, float centerX, float centerY, float tokenSize)
     {

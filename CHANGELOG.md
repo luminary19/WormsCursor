@@ -10,20 +10,23 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - **A new control panel.** **Preferences…** now opens one window in the style of Windows 11
   Settings: Mica, rounded cards, switches, and it follows your light or dark theme as it changes. A
   sidebar holds four pages: **Token** (the on/off switch, a live animated preview of both looks over
-  dark and light, size and position), **Agents** (Register / Update / Unregister for each tool with a
-  clear status, how long a finished notice stays, and **Preview on screen**), **Apps** (the programs
-  that hide the token) and **About** (version, updates, *What's new*, *Start with Windows*, links).
-  The top of the sidebar shows what the token is doing right now, for example "On · 2 agents need you".
+  dark and light, size and position), **Agents** (Connect / Update / Disconnect for each tool with a
+  clear status, how long the token stays after an agent is done, and **Preview on screen**), **Apps**
+  (the apps that hide the token, with their icons and names when they're open) and **About** (version,
+  updates, *What's new*, *Start with Windows*, links). The top of the sidebar shows what the token is
+  doing right now, for example "On · 2 agents need you", with a yellow dot only when one is blocked on
+  you.
   Every change applies the moment you make it, so there is no OK, Apply or Cancel, and an edit in one
   place can never undo one made elsewhere (the tray's **Enabled**, say). It replaces the separate
   Preferences, *Agent settings*, *Add a program* and *What's new* windows, works fully from the
-  keyboard, and stays sharp at any display scale. On a narrow window the sidebar folds to icons.
+  keyboard, and stays sharp at any display scale. On a narrow window the sidebar folds to icons, with
+  a menu button to unfold it.
 - **Check for updates works.** **About → Check for updates** looks for a newer release, downloads it
   and restarts into it. A copy built from source says that updates come with the released app.
 - **The token stays out of your games.** While a program on the new **Hide the token while using**
-  list (**Preferences… → Apps**) is in front, the token stays hidden. This works whether the program
-  runs fullscreen, borderless or windowed. Dota 2 is on the list by default. **Add a program** offers
-  the programs that are open now, or takes a typed exe name, and **Remove** takes one off. Your agents are
+  list (**Preferences… → Apps**) is in front, the token stays hidden. This works whether the app
+  runs fullscreen, borderless or windowed. Dota 2 is on the list by default. **Add an app** offers
+  the apps that are open now, or takes a typed exe name, and **Remove** takes one off. Your agents are
   still tracked meanwhile, and the token comes back when you switch away while one is still waiting.
   While hidden it uses no CPU: WormsCursor learns about focus changes from Windows instead of checking
   repeatedly. The OpenCode helper follows the same list. Restart OpenCode to pick it up there.
@@ -61,6 +64,17 @@ GitHub releases. The release workflow pulls the matching section into each relea
   and restart your agent session to pick up the new events.
 
 ### Fixed
+- **A failed update no longer closes WormsCursor.** If a download fails its checksum or another update
+  is already running, **About** now says so and offers **Try again**, instead of the tray icon and the
+  token disappearing.
+- **Claude Code hooks work on Windows without Git Bash.** Claude Code runs a hook command through
+  PowerShell there, which rejected the command WormsCursor registered, and a failing hook blocked
+  every tool call. The hooks now start WormsCursor directly, with no shell. The **Agents** page shows
+  Claude Code as *Needs update*: **Update** it and restart your Claude Code sessions.
+- **An approval stays on screen until you answer it.** When Claude ran several tools at once and one
+  needed your approval, another one finishing first cleared the token while Claude was still waiting
+  on you. Each approval now clears only when its own tool runs, or when Claude moves on after you
+  deny it.
 - **Codex hooks work on Windows again.** Codex runs Windows hook commands in PowerShell, which
   rejected the command WormsCursor registered (a quoted exe path followed by arguments), so every
   Codex hook failed and the token never showed for Codex. The command now uses PowerShell's call

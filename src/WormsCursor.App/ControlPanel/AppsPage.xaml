@@ -2,30 +2,76 @@
     x:Class="WormsCursor.App.ControlPanel.AppsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:core="clr-namespace:WormsCursor.Core;assembly=WormsCursor.Core"
     xmlns:local="clr-namespace:WormsCursor.App.ControlPanel"
-    xmlns:sys="clr-namespace:System;assembly=System.Runtime"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     Title="Apps">
 
     <Page.Resources>
-        <ResourceDictionary Source="/WormsCursor;component/ControlPanel/PanelStyles.xaml" />
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/WormsCursor;component/ControlPanel/PanelStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!--  An app's icon, or a generic glyph while its exe isn't known.  -->
+            <DataTemplate x:Key="AppIcon" DataType="{x:Type local:AppRow}">
+                <Grid
+                    Width="24"
+                    Height="24"
+                    Margin="0,0,16,0"
+                    VerticalAlignment="Center">
+                    <ui:SymbolIcon
+                        x:Name="Glyph"
+                        FontSize="20"
+                        Symbol="WindowApps24"
+                        Visibility="Collapsed" />
+                    <Image
+                        x:Name="Picture"
+                        RenderOptions.BitmapScalingMode="HighQuality"
+                        Source="{Binding Icon}" />
+                </Grid>
+                <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding Icon}" Value="{x:Null}">
+                        <Setter TargetName="Picture" Property="Visibility" Value="Collapsed" />
+                        <Setter TargetName="Glyph" Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                </DataTemplate.Triggers>
+            </DataTemplate>
+
+            <!--  The app's name over its second line (hidden when there is none).  -->
+            <DataTemplate x:Key="AppText" DataType="{x:Type local:AppRow}">
+                <StackPanel VerticalAlignment="Center">
+                    <ui:TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                    <ui:TextBlock
+                        x:Name="Detail"
+                        FontTypography="Caption"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                        Text="{Binding Detail}"
+                        TextTrimming="CharacterEllipsis"
+                        ToolTip="{Binding Detail}" />
+                </StackPanel>
+                <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding Detail}" Value="{x:Null}">
+                        <Setter TargetName="Detail" Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                </DataTemplate.Triggers>
+            </DataTemplate>
+        </ResourceDictionary>
     </Page.Resources>
 
     <StackPanel Margin="40,28,40,40">
         <ui:TextBlock Style="{StaticResource PageTitle}" Text="Apps" />
-        <ui:TextBlock Style="{StaticResource PageLead}" Text="Keep the token out of your games. While one of these programs is in front, fullscreen or windowed, the token stays hidden. Agents are still tracked, and it comes back when you switch away." />
+        <ui:TextBlock Style="{StaticResource PageLead}" Text="Keep the token out of your games. While one of these apps is in front, fullscreen or windowed, the token stays hidden. Agents are still tracked, and it comes back when you switch away." />
 
         <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Hide the token while using" />
 
         <!--  The list, or a friendly empty state.  -->
         <Border x:Name="ListSurface" Style="{StaticResource Surface}">
             <ItemsControl
-                x:Name="ProgramList"
-                AutomationProperties.Name="Programs that hide the token"
+                x:Name="AppList"
+                AutomationProperties.Name="Apps that hide the token"
                 Focusable="False">
                 <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="{x:Type sys:String}">
+                    <DataTemplate DataType="{x:Type local:AppRow}">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -35,28 +81,32 @@
                                 x:Name="Divider"
                                 Margin="16,0,16,0"
                                 Style="{StaticResource RowDivider}" />
-                            <Grid Grid.Row="1" Margin="16,10,16,10">
+                            <Grid
+                                Grid.Row="1"
+                                MinHeight="48"
+                                Margin="16,4,10,4">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <ui:SymbolIcon
-                                    Margin="0,0,16,0"
-                                    VerticalAlignment="Center"
-                                    FontSize="20"
-                                    Symbol="WindowApps24" />
-                                <ui:TextBlock
+                                <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource AppIcon}" />
+                                <ContentPresenter
                                     Grid.Column="1"
-                                    VerticalAlignment="Center"
-                                    Text="{Binding}"
-                                    TextTrimming="CharacterEllipsis" />
+                                    Content="{Binding}"
+                                    ContentTemplate="{StaticResource AppText}" />
                                 <ui:Button
                                     Grid.Column="2"
-                                    AutomationProperties.Name="{Binding StringFormat='Remove {0}'}"
+                                    Width="36"
+                                    Height="36"
+                                    Margin="12,0,0,0"
+                                    Padding="0"
+                                    Appearance="Transparent"
+                                    AutomationProperties.Name="{Binding Program, StringFormat='Remove {0}'}"
+                                    BorderThickness="0"
                                     Click="OnRemove"
-                                    Content="Remove"
-                                    Icon="{ui:SymbolIcon Delete24}" />
+                                    Icon="{ui:SymbolIcon Delete24}"
+                                    ToolTip="Remove" />
                             </Grid>
                         </Grid>
                         <DataTemplate.Triggers>
@@ -76,17 +126,17 @@
                 <ui:SymbolIcon
                     HorizontalAlignment="Center"
                     FontSize="28"
-                    Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                     Symbol="Games24" />
                 <ui:TextBlock
                     Margin="0,8,0,2"
                     HorizontalAlignment="Center"
                     FontTypography="BodyStrong"
-                    Text="No programs yet" />
+                    Text="No apps yet" />
                 <ui:TextBlock
                     HorizontalAlignment="Center"
                     Style="{StaticResource Secondary}"
-                    Text="The token shows over every program. Add a game below to keep it out of the way."
+                    Text="The token shows over every app. Add a game below to keep it out of the way."
                     TextAlignment="Center" />
             </StackPanel>
         </Border>
@@ -98,7 +148,7 @@
             ContentPadding="0"
             Icon="{ui:SymbolIcon Add24}">
             <ui:CardExpander.Header>
-                <local:SettingHeader Title="Add a program" Description="Pick one that's open now, or type its name." />
+                <local:SettingHeader Title="Add an app" Description="Pick one that's open now, or type its file name." />
             </ui:CardExpander.Header>
             <StackPanel>
                 <Grid Margin="16,14,16,14">
@@ -108,8 +158,8 @@
                     </Grid.ColumnDefinitions>
                     <ui:TextBox
                         x:Name="NameBox"
-                        AutomationProperties.Name="Program name"
-                        PlaceholderText="Program name, for example dota2.exe" />
+                        AutomationProperties.Name="App file name"
+                        PlaceholderText="File name, for example dota2.exe" />
                     <ui:Button
                         x:Name="AddNameButton"
                         Grid.Column="1"
@@ -139,26 +189,23 @@
                 <ItemsControl
                     x:Name="OpenList"
                     Margin="0,0,0,8"
-                    AutomationProperties.Name="Programs open now"
+                    AutomationProperties.Name="Apps open now"
                     Focusable="False">
                     <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type core:WindowProgram}">
+                        <DataTemplate DataType="{x:Type local:AppRow}">
                             <Grid Margin="16,6,16,6">
                                 <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center">
-                                    <ui:TextBlock Text="{Binding Program}" TextTrimming="CharacterEllipsis" />
-                                    <ui:TextBlock
-                                        FontTypography="Caption"
-                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                        Text="{Binding Title}"
-                                        TextTrimming="CharacterEllipsis"
-                                        ToolTip="{Binding Title}" />
-                                </StackPanel>
-                                <ui:Button
+                                <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource AppIcon}" />
+                                <ContentPresenter
                                     Grid.Column="1"
+                                    Content="{Binding}"
+                                    ContentTemplate="{StaticResource AppText}" />
+                                <ui:Button
+                                    Grid.Column="2"
                                     MinWidth="88"
                                     Margin="16,0,0,0"
                                     AutomationProperties.Name="{Binding Program, StringFormat='Add {0}'}"
@@ -172,7 +219,7 @@
                     x:Name="NothingOpen"
                     Margin="16,4,16,16"
                     Style="{StaticResource Secondary}"
-                    Text="No other programs have a window open."
+                    Text="No other apps have a window open."
                     Visibility="Collapsed" />
             </StackPanel>
         </ui:CardExpander>

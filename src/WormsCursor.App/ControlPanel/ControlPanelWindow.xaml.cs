@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Wpf.Ui.Abstractions;
@@ -26,7 +27,7 @@ public partial class ControlPanelWindow : FluentWindow
     readonly AgentsPage _agents;
     readonly AboutPage _about;
     bool _shuttingDown;
-    const double WidePaneMinWidth = 960; // DIPs; narrower and the sidebar shows icons only
+    const double WidePaneMinWidth = 860; // DIPs; narrower and the sidebar shows icons only
     PanelSection _firstSection = PanelSection.Token; // shown when the window first loads
 
     public ControlPanelWindow(IControlPanelHost host)
@@ -39,7 +40,6 @@ public partial class ControlPanelWindow : FluentWindow
         if (icon is not null)
         {
             Icon = icon;
-            AppIcon.Source = icon;
             TitleIcon.Source = icon;
         }
 
@@ -55,6 +55,8 @@ public partial class ControlPanelWindow : FluentWindow
 
         Loaded += (_, _) => Navigate(_firstSection);
         SizeChanged += (_, e) => FitPane(e.NewSize.Width);
+        Navigation.PaneOpened += (_, _) => ShowPaneLabels(true);
+        Navigation.PaneClosed += (_, _) => ShowPaneLabels(false);
         Navigation.Navigated += (_, e) => Dispatcher.BeginInvoke(() => ScrollToTop(e.Page), System.Windows.Threading.DispatcherPriority.Loaded);
         host.StatusChanged += ShowStatus;
         ShowStatus();
@@ -97,12 +99,22 @@ public partial class ControlPanelWindow : FluentWindow
         if (section == PanelSection.WhatsNew) _about.ShowWhatsNew();
     }
 
-    // Like Windows Settings: on a narrow window the sidebar folds to icons so the page keeps its room.
+    // Like Windows Settings: on a narrow window the sidebar folds to icons so the page keeps its room,
+    // and the menu button there unfolds it again.
     void FitPane(double width)
     {
-        bool open = width >= WidePaneMinWidth;
-        if (Navigation.IsPaneOpen != open) Navigation.SetCurrentValue(NavigationView.IsPaneOpenProperty, open);
-        PaneHeaderPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        bool wide = width >= WidePaneMinWidth;
+        Navigation.IsPaneToggleVisible = !wide;
+        if (Navigation.IsPaneOpen != wide) Navigation.SetCurrentValue(NavigationView.IsPaneOpenProperty, wide);
+        ShowPaneLabels(Navigation.IsPaneOpen);
+    }
+
+    // Folded to icons, the status keeps its dot and each section names itself in a tooltip.
+    void ShowPaneLabels(bool open)
+    {
+        StatusText.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var item in Navigation.MenuItems.Cast<object>().Concat(Navigation.FooterMenuItems.Cast<object>()).OfType<NavigationViewItem>())
+            item.ToolTip = open ? null : item.Content;
     }
 
     // Pages share the NavigationView's scroller; each one opens at its top.
@@ -126,9 +138,12 @@ public partial class ControlPanelWindow : FluentWindow
     {
         var status = _host.Status;
         StatusText.Text = status.Text;
+        StatusPanel.ToolTip = status.Text; // the whole line when it's trimmed, or folded to the dot
+        AutomationProperties.SetName(StatusPanel, "Status: " + status.Text);
         StatusDot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, status.Tone switch
         {
             StatusTone.Attention => "SystemFillColorCautionBrush",
+            StatusTone.Done => "StatusDoneBrush",
             StatusTone.Idle => "SystemFillColorSuccessBrush",
             StatusTone.Paused => "SystemFillColorNeutralBrush",
             _ => "TextFillColorTertiaryBrush",

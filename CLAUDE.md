@@ -45,7 +45,12 @@ does not mean the user answered.
 
 Every "blocked on you" state must come from a hook event that names its owner and has a matching
 "resolved" event: Claude `PermissionRequest` and `PreToolUse(AskUserQuestion)` carry the asking
-agent's `agent_id` (that agent's next tool event resolves it); `Elicitation` carries no `agent_id`, so
+agent's `agent_id` and name the call they block (`tool_use_id`, or tool name + input hash since
+`PermissionRequest` has no `tool_use_id`): that call's `PostToolUse`/`PostToolUseFailure`, or the
+agent's `PostToolBatch` (a denied call has no Post event), resolves it, never a parallel call finishing
+first. Codex's `PermissionRequest` input doesn't match its call, so it names no call and the agent's
+next tool event resolves it. Claude hooks are registered in exec form (`command` = exe, `args`), never
+a shell string. `Elicitation` carries no `agent_id`, so
 it is keyed by its own id (`mcp_server_name` + `elicitation_id`) and resolved by `ElicitationResult`.
 Never derive a blocked state from Claude's `Notification` — it has no `agent_id` (verified in the
 2.1.x binary); only its `idle_prompt` reminder is used, as a finished nudge. The OpenCode 2 integration has an independent shared helper, based on the

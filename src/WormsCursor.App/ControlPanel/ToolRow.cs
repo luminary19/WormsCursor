@@ -4,9 +4,13 @@ using WormsCursor.App.Services;
 
 namespace WormsCursor.App.ControlPanel;
 
+/// <summary>What a tool card's main button does.</summary>
+public enum ToolAction { Connect, Disconnect, ShowFile }
+
 /// <summary>
-/// One agent tool on the Agents page: its logo, where its config lives, and what WormsCursor's hook
-/// registration there looks like right now, with the actions that make sense for that state.
+/// One agent tool on the Agents page: its logo, where its config lives, and whether WormsCursor is
+/// connected to it (its hooks are in that config) right now, with the actions that make sense for that
+/// state.
 /// </summary>
 public sealed class ToolRow : INotifyPropertyChanged
 {
@@ -26,10 +30,10 @@ public sealed class ToolRow : INotifyPropertyChanged
 
     public string StatusText => State switch
     {
-        HookState.Registered => "Registered",
-        HookState.Outdated => "Update available",
-        HookState.ConfigConflict => "Config needs fixing",
-        _ => "Not registered",
+        HookState.Registered => "Connected",
+        HookState.Outdated => "Needs update",
+        HookState.ConfigConflict => "Can't read its config",
+        _ => "Not connected",
     };
 
     /// <summary>The status dot: "good", "warn", "error" or "off" (the page maps these to theme brushes).</summary>
@@ -43,27 +47,34 @@ public sealed class ToolRow : INotifyPropertyChanged
 
     public string Explanation => State switch
     {
-        HookState.Outdated => "An older WormsCursor registered these hooks. Update them so every event arrives.",
-        HookState.ConfigConflict => "The config file couldn't be read. Fix it by hand, then register again.",
+        HookState.Registered => Tool.SetupNote ?? "",
+        HookState.Outdated => "An older WormsCursor connected these hooks. Update them so every event arrives.",
+        HookState.ConfigConflict => "This file isn't valid, so WormsCursor won't change it. Fix or remove it, then come back here.",
         _ => "",
     };
 
-    /// <summary>The main button: register, update, or unregister.</summary>
-    public string PrimaryText => State switch
+    /// <summary>The main button: connect (or update), disconnect, or, when the config can't be read,
+    /// show the file so it can be fixed by hand — connecting can't succeed until it parses.</summary>
+    public ToolAction PrimaryAction => State switch
     {
-        HookState.Registered => "Unregister",
-        HookState.Outdated => "Update",
-        _ => "Register",
+        HookState.Registered => ToolAction.Disconnect,
+        HookState.ConfigConflict => ToolAction.ShowFile,
+        _ => ToolAction.Connect,
     };
 
-    /// <summary>Whether the main button is the accent (call-to-action) one.</summary>
-    public bool PrimaryIsAccent => State != HookState.Registered;
+    public string PrimaryText => State switch
+    {
+        HookState.Registered => "Disconnect",
+        HookState.Outdated => "Update",
+        HookState.ConfigConflict => "Show file",
+        _ => "Connect",
+    };
 
-    /// <summary>Whether the main button writes our hooks (register / update) rather than removing them.</summary>
-    public bool PrimaryRegisters => State != HookState.Registered;
+    /// <summary>Whether the main button is the accent (call-to-action) one: only when it connects.</summary>
+    public bool PrimaryIsAccent => PrimaryAction == ToolAction.Connect;
 
-    /// <summary>"Unregister" next to "Update" for an outdated registration.</summary>
-    public bool ShowUnregister => State == HookState.Outdated;
+    /// <summary>"Disconnect" next to "Update" for an outdated connection.</summary>
+    public bool ShowDisconnect => State == HookState.Outdated;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

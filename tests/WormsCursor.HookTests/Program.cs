@@ -15,6 +15,7 @@ var tests = new (string Name, Action Run)[]
     ("Async questions and approvals clear independently", OverlappingAttention),
     ("Claude events map from their payloads alone", Claude),
     ("Blocked-on-you prompts clear only on their own answer", BlockedAttribution),
+    ("A parallel call finishing keeps another call's approval", ParallelCalls),
     ("Waiting sessions report finished vs blocked", FinishedVersusBlocked),
     ("The token shows a blocked session first, badged, with the rest counted", TokenFaceSelection),
     ("The token draws the \"?\" badge only when blocked, clear of the count", BadgeDrawing),
@@ -63,7 +64,7 @@ static string States(AgentActivity activity)
 static void Apply(AgentActivity activity, AgentEventMessage message, DateTime now)
 {
     Equal(true, message.TryGetKind(out var kind));
-    activity.Report(message.Tool, message.SessionId, message.Project, kind, now, message.InputIds, message.AgentId);
+    activity.Report(message.Tool, message.SessionId, message.Project, kind, now, message.InputIds, message.AgentId, message.CallIds);
 }
 
 static void Lifecycle()
@@ -220,7 +221,9 @@ static void Claude()
     Equal<AgentEventMessage?>(null, AgentHookBridge.Parse("claude-code", "not json"));
 }
 
-// Claude payloads, end to end through the bridge into AgentActivity, for one session "s".
+// Claude payloads, end to end through the bridge into AgentActivity, for one session "s". Each
+// (agent, tool) pair stands for one call: the same tool_input everywhere, and a tool_use_id on every
+// event but PermissionRequest, which has none.
 static void BlockedAttribution()
 {
     var now = DateTime.UtcNow;
@@ -228,19 +231,24 @@ static void BlockedAttribution()
         => Parse(new
         {
             hook_event_name = name, session_id = "s", tool_name = tool, agent_id = agent,
+            tool_input = new { command = "run " + tool },
+            tool_use_id = name == "PermissionRequest" ? null : $"{agent}:{tool}",
             mcp_server_name = server, elicitation_id = id,
         }, "claude-code");
     void Run(AgentActivity a, params AgentEventMessage[] events) { foreach (var e in events) Apply(a, e, now); }
 
     // A subagent asks, a sibling and the main agent keep working: still blocked, never swept.
-    foreach (var ask in new Func<AgentEventMessage>[]
-             { () => Ev("PermissionRequest", "a"), () => Ev("PreToolUse", "a", "AskUserQuestion") })
+    foreach (var (ask, answer) in new (Func<AgentEventMessage>, Func<AgentEventMessage>)[]
+             {
+                 (() => Ev("PermissionRequest", "a"), () => Ev("PostToolUse", "a")),
+                 (() => Ev("PreToolUse", "a", "AskUserQuestion"), () => Ev("PostToolUse", "a", "AskUserQuestion")),
+             })
     {
         var activity = new AgentActivity(TimeSpan.FromSeconds(10));
         Run(activity, ask(), Ev("PreToolUse", "b"), Ev("PostToolUse", "b"), Ev("PostToolUse"));
         activity.Sweep(now.AddHours(1));
         Equal("claude-code:Blocked", States(activity));
-        Run(activity, Ev("PostToolUse", "a", "AskUserQuestion")); // a answered
+        Run(activity, answer()); // a answered: its call ran
         Equal("", States(activity));
     }
 
@@ -278,6 +286,64 @@ static void BlockedAttribution()
     Equal("claude-code:Finished", States(elicit));
     Run(elicit, Ev("PermissionRequest", "a"), Ev("UserPromptSubmit"));
     Equal("", States(elicit));
+}
+
+// The same agent runs calls in parallel (Claude batches read-only calls): PostToolUse fires per call,
+// in any order, so one call finishing says nothing about another's pending approval.
+static void ParallelCalls()
+{
+    var now = DateTime.UtcNow;
+    AgentEventMessage Ev(string name, string tool, object input, string? id = null, string? agent = null)
+        => Parse(new { hook_event_name = name, session_id = "s", tool_name = tool, tool_input = input, tool_use_id = id, agent_id = agent }, "claude-code");
+    var outside = new { file_path = @"C:\elsewhere\notes.txt" };
+    var grep = new { pattern = "TODO" };
+    void Run(AgentActivity a, params AgentEventMessage[] events) { foreach (var e in events) Apply(a, e, now); }
+
+    // The bridge names the call each prompt blocks, and every identity of a call that finished.
+    var asked = Ev("PermissionRequest", "Read", outside);
+    Equal(true, asked.CallIds!.Single().StartsWith("input:Read:"));
+    var ran = Ev("PostToolUse", "Read", new { file_path = @"C:\elsewhere\notes.txt" }, "toolu_read");
+    Equal("call:toolu_read," + asked.CallIds!.Single(), string.Join(',', ran.CallIds!));
+    Equal("call:toolu_q", Ev("PreToolUse", "AskUserQuestion", new { questions = Array.Empty<object>() }, "toolu_q").CallIds!.Single());
+    Equal<string[]?>(null, Ev("PreToolUse", "Read", outside, "toolu_read").CallIds);
+    var batch = TryParse(new { hook_event_name = "PostToolBatch", session_id = "s", tool_calls = Array.Empty<object>() })!;
+    Equal("tools_resolved", batch.Event);
+
+    // Approved: the Grep finishing first keeps the token up; the Read itself running clears it.
+    var approved = new AgentActivity(TimeSpan.FromSeconds(10));
+    Run(approved, Ev("PreToolUse", "Read", outside, "toolu_read"), Ev("PreToolUse", "Grep", grep, "toolu_grep"),
+        asked, Ev("PostToolUse", "Grep", grep, "toolu_grep"));
+    approved.Sweep(now.AddHours(1));
+    Equal("claude-code:Blocked", States(approved));
+    Run(approved, ran);
+    Equal("", States(approved));
+
+    // Denied: the Read never runs, so it has no PostToolUse; the batch resolving answers it. So does
+    // an approval that rewrote the input, whose PostToolUse no longer matches the request.
+    foreach (var settle in new[] { Array.Empty<AgentEventMessage>(), new[] { Ev("PostToolUse", "Read", new { file_path = @"C:\other.txt" }, "toolu_read") } })
+    {
+        var denied = new AgentActivity(TimeSpan.FromSeconds(10));
+        Run(denied, Ev("PreToolUse", "Read", outside, "toolu_read"), Ev("PreToolUse", "Grep", grep, "toolu_grep"),
+            asked, Ev("PostToolUse", "Grep", grep, "toolu_grep"));
+        Run(denied, settle);
+        Equal("claude-code:Blocked", States(denied));
+        // Another agent's batch is not this agent's.
+        Run(denied, TryParse(new { hook_event_name = "PostToolBatch", session_id = "s", agent_id = "sub" })!);
+        Equal("claude-code:Blocked", States(denied));
+        Run(denied, batch);
+        Equal("", States(denied));
+    }
+
+    // Codex: a question is keyed by its tool_use_id, so another call finishing keeps it up.
+    var codex = new AgentActivity(TimeSpan.FromSeconds(10));
+    AgentEventMessage Cx(string name, string tool, string id) => Parse(new
+    {
+        hook_event_name = name, session_id = "c", tool_name = tool, tool_use_id = id, tool_input = new { q = tool },
+    });
+    Run(codex, Cx("PreToolUse", "request_user_input", "call-q"), Cx("PostToolUse", "shell", "call-sh"));
+    Equal("codex:Blocked", States(codex));
+    Run(codex, Cx("PostToolUse", "request_user_input", "call-q"));
+    Equal("", States(codex));
 }
 
 static void FinishedVersusBlocked()
@@ -554,10 +620,13 @@ static void SubagentApprovals()
     var now = DateTime.UtcNow;
     foreach (string tool in new[] { "claude-code", "codex" })
     {
+        // Each agent's one call: Claude matches a PermissionRequest to the call's Post event by tool name
+        // and input; Codex's PermissionRequest names no call, so the agent's next tool event answers it.
         var activity = new AgentActivity(TimeSpan.FromSeconds(10));
         AgentEventMessage Event(string name, string? agent) => Parse(new
         {
             hook_event_name = name, session_id = "parent", tool_name = "Bash", agent_id = agent,
+            tool_input = new { command = "build " + agent },
         }, tool);
         var asked = Event("PermissionRequest", "agent-a");
         Equal("awaiting_user", asked.Event);
@@ -575,9 +644,9 @@ static void SubagentApprovals()
         // Two agents blocked at once: the token stays until both are answered.
         Apply(activity, Event("PermissionRequest", null), now);
         Apply(activity, Event("PermissionRequest", "agent-b"), now);
-        Apply(activity, Event("PreToolUse", null), now);
+        Apply(activity, Event("PostToolUse", null), now);
         Equal(1, activity.WaitingCount);
-        Apply(activity, Event("PreToolUse", "agent-b"), now);
+        Apply(activity, Event("PostToolUse", "agent-b"), now);
         Equal(0, activity.WaitingCount);
 
         // A finished turn means nothing is still blocked: the notice replaces the approvals and expires.
@@ -602,6 +671,12 @@ static void ClaudeRegistration() => WithHome(home =>
     Equal(once, File.ReadAllText(path));
     var root = JsonNode.Parse(File.ReadAllText(path))!;
     Equal(true, root["hooks"]!["PermissionRequest"] is JsonArray);
+    // Exec form: the exe and its arguments, with no shell to parse a quoted path (without Git Bash,
+    // Claude Code runs a shell-form hook in PowerShell, which rejects one). PostToolBatch takes no matcher.
+    var handler = root["hooks"]!["PreToolUse"]![0]!["hooks"]![0]!;
+    Equal(Environment.ProcessPath!, handler["command"]!.GetValue<string>());
+    Equal("hook,--tool,claude-code", string.Join(',', handler["args"]!.AsArray().Select(a => a!.GetValue<string>())));
+    Equal(false, root["hooks"]!["PostToolBatch"]![0]!.AsObject().ContainsKey("matcher"));
     // The approval prompt comes from PermissionRequest (it carries agent_id), not Notification.
     Equal(false, File.ReadAllText(path).Contains("permission_prompt"));
 
@@ -650,6 +725,8 @@ static void ClaudeRegistration() => WithHome(home =>
     Equal(HookState.Registered, AgentHookRegistrar.GetState("claude-code"));
     string current = File.ReadAllText(path);
     Equal(false, current.Contains("--event"));
+    Equal(false, current.Contains("hook --tool claude-code")); // the shell-form commands are replaced
+    Equal(13, JsonNode.Parse(current)!["hooks"]!.AsObject().Count);
     Equal(false, current.Contains("elicitation_dialog"));
     var hooks = JsonNode.Parse(current)!["hooks"]!;
     foreach (string ev in new[] { "PostToolUseFailure", "Elicitation", "ElicitationResult" })
@@ -748,10 +825,13 @@ static void PanelStatusText()
     Equal(StatusTone.Idle, new PanelStatus(true, 0, 0, null).Tone);
     Equal("On · 1 agent is done", new PanelStatus(true, 1, 0, null).Text);
     Equal("On · 3 agents are done", new PanelStatus(true, 3, 0, null).Text);
+    // Caution yellow is the "?" badge's colour: it means blocked on you, never merely done.
+    Equal(StatusTone.Done, new PanelStatus(true, 3, 0, null).Tone);
+    Equal(StatusTone.Attention, new PanelStatus(true, 3, 1, null).Tone);
     Equal("On · 1 agent needs you", new PanelStatus(true, 3, 1, null).Text);
     Equal("On · 2 agents need you", new PanelStatus(true, 2, 2, null).Text);
     Equal(StatusTone.Attention, new PanelStatus(true, 2, 2, null).Tone);
-    Equal("Hidden while dota2.exe is in front", new PanelStatus(true, 2, 1, "dota2.exe").Text);
+    Equal("Hidden · dota2.exe is in front", new PanelStatus(true, 2, 1, "dota2.exe").Text);
     Equal(StatusTone.Paused, new PanelStatus(true, 0, 0, "dota2.exe").Tone);
 }
 

@@ -15,7 +15,7 @@ public sealed class AgentEventMessage
     public string Tool { get; set; } = "";
 
     /// <summary>Normalised event: <c>thinking_started | awaiting_user | turn_complete | tool_use |
-    /// error | session_end | input_requested | input_answered</c>.</summary>
+    /// tools_resolved | error | session_end | input_requested | input_answered</c>.</summary>
     public string Event { get; set; } = "";
 
     /// <summary>The tool's original event name, for logging/debugging (e.g. Claude's <c>Stop</c>).</summary>
@@ -31,6 +31,10 @@ public sealed class AgentEventMessage
     /// <summary>Stable ids of the items this event opens or answers: Codex asynchronous questions and
     /// their individual replies, or Claude MCP elicitations and their results.</summary>
     public string[]? InputIds { get; set; }
+    /// <summary>The tool call an agent's prompt blocks (on <c>awaiting_user</c>), or the call that just
+    /// finished (on <c>tool_use</c>): its tool-call id and/or a fingerprint of its tool name and input,
+    /// whichever the tool's payload carries. See <see cref="AgentActivity"/>.</summary>
+    public string[]? CallIds { get; set; }
 
     static readonly JsonSerializerOptions Json = new()
     {
@@ -59,6 +63,7 @@ public sealed class AgentEventMessage
             case "awaiting_user": kind = AgentEventKind.AwaitingUser; return true;
             case "turn_complete": kind = AgentEventKind.TurnComplete; return true;
             case "tool_use": kind = AgentEventKind.ToolUse; return true;
+            case "tools_resolved": kind = AgentEventKind.ToolsResolved; return true;
             case "error": kind = AgentEventKind.Error; return true;
             case "session_end": kind = AgentEventKind.SessionEnded; return true;
             case "input_requested": kind = AgentEventKind.InputRequested; return true;

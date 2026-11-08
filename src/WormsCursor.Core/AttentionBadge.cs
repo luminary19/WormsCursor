@@ -44,15 +44,21 @@ public static class AttentionBadge
     }
 
     /// <summary>Draws the badge centred at (<paramref name="cx"/>, <paramref name="cy"/>) with radius
-    /// <paramref name="radius"/>, in the current transform of <paramref name="g"/> (so it rotates with
-    /// the token). Its soft shadow spills about 20% past the radius. Leaves no state behind.</summary>
+    /// <paramref name="radius"/>, both in the current transform of <paramref name="g"/>, but always
+    /// upright: on a swinging token the badge rides the logo's corner while the "?" stays level, so it
+    /// reads at a glance. Its soft shadow spills about 20% past the radius and falls downward on
+    /// screen. Leaves no state behind.</summary>
     public static void Draw(Graphics g, float cx, float cy, float radius)
     {
         if (radius <= 0f) return;
         var saved = g.Save();
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        float tilt;
+        using (var current = g.Transform)
+            tilt = MathF.Atan2(current.Elements[1], current.Elements[0]) * 180f / MathF.PI;
         g.TranslateTransform(cx, cy);
+        g.RotateTransform(-tilt);           // undo the token's swing about the badge's own centre
         g.ScaleTransform(radius, radius);   // from here on, the badge is a unit disc
 
         DrawShadow(g);

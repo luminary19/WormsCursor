@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -7,10 +9,11 @@ using WormsCursor.Core;
 namespace WormsCursor.App.ControlPanel;
 
 /// <summary>
-/// The agent tools WormsCursor listens to: one card per tool with its hook registration status and
-/// Register / Update / Unregister, how long a finished notice lingers, and an on-screen preview that
-/// shows pretend waiting agents on the real token. Registration edits the tool's own config (backed
-/// up first); the status is re-read whenever the page is shown and after every action.
+/// The agent tools WormsCursor listens to: one card per tool with its connection status and Connect /
+/// Update / Disconnect (or, for a config it can't read, Show file), how long the token stays after an
+/// agent is done, and an on-screen preview that shows pretend waiting agents on the real token.
+/// Connecting edits the tool's own config (backed up first); the status is re-read whenever the page is
+/// shown and after every action.
 /// </summary>
 public partial class AgentsPage : Page
 {
@@ -46,6 +49,7 @@ public partial class AgentsPage : Page
             if (_previewing) StartPreview(); // show the new count straight away
         };
         PreviewButton.Click += (_, _) => { if (_previewing) EndPreview(); else StartPreview(); };
+        TurnOnButton.Click += (_, _) => _host.Settings.Change(s => s.AgentNotifierEnabled = true);
 
         Loaded += (_, _) => ShowTools();
         _host.Settings.Changed += Refresh;
@@ -87,15 +91,16 @@ public partial class AgentsPage : Page
 
     void RefreshPreview()
     {
+        // With the token off there is nothing to preview: the card offers to turn it on instead.
         bool enabled = _host.Settings.Live.AgentNotifierEnabled;
-        PreviewButton.IsEnabled = enabled;
-        PreviewCountBox.IsEnabled = enabled;
+        PreviewControls.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        TurnOnButton.Visibility = enabled ? Visibility.Collapsed : Visibility.Visible;
         PreviewButton.Content = _previewing ? "Stop" : "Show";
         PreviewButton.Icon = new Wpf.Ui.Controls.SymbolIcon(_previewing
             ? Wpf.Ui.Controls.SymbolRegular.Stop24 : Wpf.Ui.Controls.SymbolRegular.Play24);
         PreviewHeader.Description = enabled
             ? "Show pretend waiting agents on the real token, to check how it looks and where it sits."
-            : "Turn on Show the token, on the Token page, to preview it.";
+            : "The token is off. Turn it on to preview it.";
     }
 
     // (Re)builds the tool cards at this screen's DPI, and re-reads every tool's registration.
@@ -115,26 +120,51 @@ public partial class AgentsPage : Page
 
     void OnPrimary(object sender, RoutedEventArgs e)
     {
-        if (((FrameworkElement)sender).DataContext is ToolRow row)
-            Act(row, row.PrimaryRegisters ? AgentHookRegistrar.Register : AgentHookRegistrar.Unregister);
+        if (((FrameworkElement)sender).DataContext is not ToolRow row) return;
+        switch (row.PrimaryAction)
+        {
+            case ToolAction.Connect: Act(row, AgentHookRegistrar.Register); break;
+            case ToolAction.Disconnect: Act(row, AgentHookRegistrar.Unregister); break;
+            case ToolAction.ShowFile: ShowFile(row); break;
+        }
     }
 
-    void OnUnregister(object sender, RoutedEventArgs e)
+    void OnDisconnect(object sender, RoutedEventArgs e)
     {
         if (((FrameworkElement)sender).DataContext is ToolRow row) Act(row, AgentHookRegistrar.Unregister);
     }
 
-    // Runs a registration action; a failure (a malformed or locked config) shows in the error bar.
+    // Runs a connect/disconnect; a failure (a malformed or locked config) shows in the error bar.
     void Act(ToolRow row, Action<string> action)
     {
         ErrorBar.IsOpen = false;
         try { action(row.Tool.Id); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            ErrorBar.Title = $"Couldn't change {row.Name}";
-            ErrorBar.Message = ex.Message;
-            ErrorBar.IsOpen = true;
+            ShowError($"Couldn't change {row.Name}", ex.Message);
         }
         row.Refresh();
+    }
+
+    // Opens the config's folder in File Explorer with the file selected, so it can be fixed by hand.
+    void ShowFile(ToolRow row)
+    {
+        ErrorBar.IsOpen = false;
+        try
+        {
+            // A Windows path can't contain a quote, so quoting it is enough.
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{row.ConfigPath}\""))?.Dispose();
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            ShowError($"Couldn't show {row.Name}'s config", ex.Message);
+        }
+    }
+
+    void ShowError(string title, string message)
+    {
+        ErrorBar.Title = title;
+        ErrorBar.Message = message;
+        ErrorBar.IsOpen = true;
     }
 }
