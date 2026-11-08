@@ -36,11 +36,11 @@ public partial class IconsPage : Page
     {
         _settings = settings;
         InitializeComponent();
-        // The hint under the tiles gives way to the status bar while it is open, however it closes.
+        // The limit note under the tiles gives way to the status bar while it is open, however it closes.
         DependencyPropertyDescriptor.FromProperty(InfoBar.IsOpenProperty, typeof(InfoBar))
             .AddValueChanged(StatusBar, (_, _) =>
             {
-                AddHint.Visibility = StatusBar.IsOpen ? Visibility.Collapsed : Visibility.Visible;
+                ShowHint();
                 if (!StatusBar.IsOpen) UndoButton.Visibility = Visibility.Collapsed;
             });
         Loaded += (_, _) => Rebuild();
@@ -222,7 +222,7 @@ public partial class IconsPage : Page
     }
 
     // The "Add SVG…" tile: busy while a file is being checked (for any agent), off at the limit, and
-    // the hint under the tiles saying why.
+    // at the limit a note under the tiles saying why (nothing there otherwise).
     void ShowAddState()
     {
         bool full = _icons.Count(i => i.IsCustom) >= CustomIconStore.MaxPerTool;
@@ -231,9 +231,11 @@ public partial class IconsPage : Page
         AddBusy.Visibility = _uploading ? Visibility.Visible : Visibility.Collapsed;
         string limit = $"{NameOf(_tool)} has {CustomIconStore.MaxPerTool} of your icons, the most it keeps. Remove one to add another.";
         AddButton.ToolTip = full ? limit : null;
-        AddHint.Text = full ? limit
-            : $"SVG files up to 256 KB. Square images work best. Flat shapes, gradients, groups and transforms draw well. Scripts and links to other files are removed, and each agent keeps up to {CustomIconStore.MaxPerTool} of your icons.";
+        AddHint.Text = full ? limit : "";
+        ShowHint();
     }
+
+    void ShowHint() => AddHint.Visibility = StatusBar.IsOpen || AddHint.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
 
     // The bar under the tiles, in place of the hint: an error, or a removal with its Undo.
     void ShowStatus(InfoBarSeverity severity, string title, string message, bool undo = false)

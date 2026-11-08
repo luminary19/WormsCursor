@@ -32,7 +32,6 @@ public partial class AboutPage : Page
 
         AppIcon.Source = PanelAssets.AppIcon;
         VersionText.Text = "Version " + Updates.CurrentVersionText;
-        RepoHeader.Description = Updates.RepoPageUrl.Replace("https://", "");
         RepoLink.Click += (_, _) => Updates.OpenRepoPage();
         ReleasesLink.Click += (_, _) => Updates.OpenReleasesPage();
         ReleasesButton.Click += (_, _) => Updates.OpenReleasesPage();
@@ -77,7 +76,12 @@ public partial class AboutPage : Page
     {
         if (!Updates.IsVelopackInstalled)
         {
-            SetUpdateState("Updates install only in the released app. This copy was built from source.", null, busy: false);
+            // A copy built from source can't update itself: the button stays, off, and says why on hover.
+            SetUpdateState("", null, busy: false);
+            UpdateButton.Visibility = Visibility.Visible;
+            UpdateButton.Content = "Check now";
+            UpdateButton.ToolTip = "Updates install only in the released app. This copy was built from source.";
+            ToolTipService.SetShowOnDisabled(UpdateButton, true);
             return;
         }
         if (Updates.PendingRestart is { } pending)
@@ -85,7 +89,7 @@ public partial class AboutPage : Page
             ShowReadyToRestart(pending);
             return;
         }
-        SetUpdateState("See if a newer version is out.", ("Check now", CheckAsync), busy: false);
+        SetUpdateState("", ("Check now", CheckAsync), busy: false);
     }
 
     async Task CheckAsync()

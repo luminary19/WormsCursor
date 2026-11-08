@@ -13,7 +13,6 @@
 
     <StackPanel Margin="40,28,40,40">
         <ui:TextBlock Style="{StaticResource PageTitle}" Text="Token" />
-        <ui:TextBlock Style="{StaticResource PageLead}" Text="The token bounces on screen when an AI agent needs you, and goes away once you're back." />
 
         <!--  The live preview first, as in Windows' own personalisation pages, so every change below
               shows at once. Half dark, half light, with the pointer gliding across the seam: one
@@ -22,37 +21,30 @@
               keeps inside it the way it keeps on screen.  -->
         <Border
             Margin="0,16,0,4"
-            Padding="16,16,16,12"
+            Padding="16"
             Style="{StaticResource Surface}">
-            <StackPanel>
-                <Grid Height="260" AutomationProperties.Name="Preview: the token following a pointer">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Border Background="#202020" CornerRadius="6,0,0,6" />
-                    <Border
-                        Grid.Column="1"
-                        Background="#F3F3F3"
-                        CornerRadius="0,6,6,0" />
-                    <Border
-                        Grid.ColumnSpan="2"
-                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="6" />
-                    <local:TokenPreview
-                        x:Name="Preview"
-                        Grid.ColumnSpan="2"
-                        Blocked="True"
-                        ClipToBounds="True"
-                        Roam="True" />
-                </Grid>
-                <ui:TextBlock
-                    Margin="2,12,0,0"
-                    FontTypography="Caption"
-                    Style="{StaticResource Secondary}"
-                    Text="Shown as it looks when an agent needs your answer. Change each agent's look on the Icons page." />
-            </StackPanel>
+            <Grid Height="260" AutomationProperties.Name="Preview: the token following a pointer">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Background="#202020" CornerRadius="6,0,0,6" />
+                <Border
+                    Grid.Column="1"
+                    Background="#F3F3F3"
+                    CornerRadius="0,6,6,0" />
+                <Border
+                    Grid.ColumnSpan="2"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6" />
+                <local:TokenPreview
+                    x:Name="Preview"
+                    Grid.ColumnSpan="2"
+                    Blocked="True"
+                    ClipToBounds="True"
+                    Roam="True" />
+            </Grid>
         </Border>
 
         <ui:CardControl Margin="0,28,0,4" Icon="{ui:SymbolIcon Power24}">
@@ -65,7 +57,7 @@
         <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Size and position" />
         <ui:CardControl Icon="{ui:SymbolIcon ResizeLarge24}">
             <ui:CardControl.Header>
-                <local:SettingHeader Title="Size" Description="How big the token is on screen." />
+                <local:SettingHeader Title="Size" />
             </ui:CardControl.Header>
             <StackPanel Orientation="Horizontal">
                 <ui:TextBlock
@@ -88,7 +80,7 @@
         </ui:CardControl>
         <ui:CardControl Icon="{ui:SymbolIcon CursorHover24}">
             <ui:CardControl.Header>
-                <local:SettingHeader Title="Position" Description="Follow the pointer, or wait in a corner of your main screen." />
+                <local:SettingHeader Title="Position" />
             </ui:CardControl.Header>
             <ComboBox
                 x:Name="PositionBox"

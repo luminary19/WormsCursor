@@ -99,9 +99,7 @@ public partial class AgentsPage : Page
         PreviewButton.Content = _previewing ? "Stop" : "Show";
         PreviewButton.Icon = new Wpf.Ui.Controls.SymbolIcon(_previewing
             ? Wpf.Ui.Controls.SymbolRegular.Stop24 : Wpf.Ui.Controls.SymbolRegular.Play24);
-        PreviewHeader.Description = enabled
-            ? "Show pretend waiting agents on the real token, to check how it looks and where it sits."
-            : "The token is off. Turn it on to preview it.";
+        PreviewHeader.Description = enabled ? "" : "The token is off. Turn it on to preview it.";
     }
 
     // (Re)builds the tool cards at this screen's DPI, and re-reads every tool's registration.

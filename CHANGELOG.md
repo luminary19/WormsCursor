@@ -68,6 +68,10 @@ GitHub releases. The release workflow pulls the matching section into each relea
   machine.
 
 ### Changed
+- **Double-click the tray icon to open the control panel.** It used to switch the token on and off;
+  that stays one right-click away as **Enabled**.
+- **A quieter control panel.** The pages drop their explanatory lines, so each setting is just its
+  name and its control. The timing setting now reads **Time until a finished agent's token clears**.
 - **WormsCursor is now AgentsCursor.** The new name says what it does: it shows when your AI agents
   need you. The app, its exe (`AgentsCursor.exe`), its tray icon tooltip and its settings folder
   (`%LocalAppData%\AgentsCursor\`) all carry the new name. What you had carries over: until

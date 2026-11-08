@@ -38,19 +38,13 @@
                         Height="38"
                         RenderOptions.BitmapScalingMode="HighQuality" />
                 </Border>
-                <StackPanel
+                <ui:TextBlock
                     Grid.Column="1"
                     Margin="16,0,0,0"
-                    VerticalAlignment="Center">
-                    <ui:TextBlock
-                        FontFamily="{StaticResource PanelDisplayFont}"
-                        FontTypography="Subtitle"
-                        Text="AgentsCursor" />
-                    <ui:TextBlock
-                        Margin="0,2,0,0"
-                        Style="{StaticResource Secondary}"
-                        Text="Shows you when an AI agent is waiting for you." />
-                </StackPanel>
+                    VerticalAlignment="Center"
+                    FontFamily="{StaticResource PanelDisplayFont}"
+                    FontTypography="Subtitle"
+                    Text="AgentsCursor" />
                 <ui:TextBlock
                     x:Name="VersionText"
                     Grid.Column="2"
@@ -83,7 +77,7 @@
             ContentPadding="20,8,20,20"
             Icon="{ui:SymbolIcon Sparkle24}">
             <ui:CardExpander.Header>
-                <local:SettingHeader Title="What's new" Description="Release notes for every version." />
+                <local:SettingHeader Title="What's new" />
             </ui:CardExpander.Header>
             <StackPanel>
                 <StackPanel
@@ -114,7 +108,7 @@
         <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Appearance" />
         <ui:CardControl Icon="{ui:SymbolIcon DarkTheme24}">
             <ui:CardControl.Header>
-                <local:SettingHeader Title="Theme" Description="Light or dark for this window. System follows your Windows setting." />
+                <local:SettingHeader Title="Theme" />
             </ui:CardControl.Header>
             <!--  In ThemePreference order.  -->
             <ComboBox
@@ -136,17 +130,17 @@
             Severity="Error" />
         <ui:CardControl Icon="{ui:SymbolIcon Rocket24}">
             <ui:CardControl.Header>
-                <local:SettingHeader Title="Start with Windows" Description="Open AgentsCursor in the tray when you sign in." />
+                <local:SettingHeader Title="Start with Windows" />
             </ui:CardControl.Header>
             <ui:ToggleSwitch x:Name="AutostartSwitch" AutomationProperties.Name="Start with Windows" />
         </ui:CardControl>
 
         <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Related links" />
         <ui:CardAction x:Name="RepoLink" Icon="{ui:SymbolIcon Code24}">
-            <local:SettingHeader x:Name="RepoHeader" Title="Source code" />
+            <local:SettingHeader Title="Source code" />
         </ui:CardAction>
         <ui:CardAction x:Name="ReleasesLink" Icon="{ui:SymbolIcon History24}">
-            <local:SettingHeader Title="Releases" Description="Every version, with downloads and notes." />
+            <local:SettingHeader Title="Releases" />
         </ui:CardAction>
     </StackPanel>
 </Page>

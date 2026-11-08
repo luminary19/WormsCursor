@@ -61,7 +61,6 @@
 
     <StackPanel Margin="40,28,40,40">
         <ui:TextBlock Style="{StaticResource PageTitle}" Text="Apps" />
-        <ui:TextBlock Style="{StaticResource PageLead}" Text="Keep the token out of your games. While one of these apps is in front, fullscreen or windowed, the token stays hidden. Agents are still tracked, and it comes back when you switch away." />
 
         <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Hide the token while using" />
 
@@ -149,7 +148,7 @@
             ContentPadding="0"
             Icon="{ui:SymbolIcon Add24}">
             <ui:CardExpander.Header>
-                <local:SettingHeader Title="Add an app" Description="Pick one that's open now, or type its file name." />
+                <local:SettingHeader Title="Add an app" />
             </ui:CardExpander.Header>
             <StackPanel>
                 <Grid Margin="16,14,16,14">

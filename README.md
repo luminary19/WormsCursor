@@ -278,8 +278,8 @@ dotnet build AgentsCursor.sln
 dotnet run --project src/AgentsCursor.App
 ```
 
-A tray icon appears. Right-click it for **Enabled / Preferences… / Exit**; double-click toggles the
-notifier on/off. Only one instance runs — launching it again just opens the control panel.
+A tray icon appears. Right-click it for **Enabled / Preferences… / Exit**; double-click it to open the
+control panel. Only one instance runs — launching it again just opens the control panel.
 
 **Preferences…** opens the control panel, a Windows 11 Settings-style window that follows your
 Windows light or dark mode, or the theme you pick under **About**. Every change applies the moment you

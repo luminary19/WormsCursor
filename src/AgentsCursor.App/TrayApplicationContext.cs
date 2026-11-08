@@ -69,7 +69,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
 
         _enabledItem = new ToolStripMenuItem("Enabled", null, OnToggleEnabled)
         {
-            CheckOnClick = false, // we manage Checked ourselves so double-click can't desync it
+            CheckOnClick = false, // Checked follows the setting, so it can't desync from the panel's switch
             Checked = _settings.Live.AgentNotifierEnabled,
         };
 
@@ -89,7 +89,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
             Visible = true,
             ContextMenuStrip = menu,
         };
-        _tray.DoubleClick += (_, _) => OnToggleEnabled(this, EventArgs.Empty);
+        _tray.DoubleClick += (_, _) => OpenPreferences();
         _tray.BalloonTipClicked += (_, _) => OpenPanel(PanelSection.Agents);
 
         // The overlay touches no global system state, so there's nothing to undo on exit — but still
@@ -238,7 +238,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
         _overlay.RefreshSettings();
     }
 
-    // Master on/off for the notifier (the tray "Enabled" item + double-click).
+    // Master on/off for the notifier (the tray "Enabled" item).
     void OnToggleEnabled(object? sender, EventArgs e)
         => _settings.Change(s => s.AgentNotifierEnabled = !s.AgentNotifierEnabled);
 

@@ -115,7 +115,6 @@
 
     <StackPanel Margin="40,28,40,40">
         <ui:TextBlock Style="{StaticResource PageTitle}" Text="Agents" />
-        <ui:TextBlock Style="{StaticResource PageLead}" Text="Connect your agents so they can tell AgentsCursor when they need you." />
 
         <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Connections" />
         <ui:InfoBar
@@ -127,22 +126,17 @@
             x:Name="ToolList"
             Focusable="False"
             ItemTemplate="{StaticResource ToolCard}" />
-        <ui:TextBlock
-            Margin="2,8,0,0"
-            FontTypography="Caption"
-            Style="{StaticResource Secondary}"
-            Text="AgentsCursor backs up each config file before its first change." />
 
         <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Timing" />
         <ui:CardControl Icon="{ui:SymbolIcon Timer24}">
             <ui:CardControl.Header>
-                <local:SettingHeader Title="Clear the token after an agent is done" Description="When an agent needs your answer, the token stays until you respond." />
+                <local:SettingHeader Title="Time until a finished agent's token clears" />
             </ui:CardControl.Header>
             <StackPanel Orientation="Horizontal">
                 <ui:NumberBox
                     x:Name="TimeoutBox"
                     Width="132"
-                    AutomationProperties.Name="Seconds before the token clears after an agent is done"
+                    AutomationProperties.Name="Seconds until a finished agent's token clears"
                     ClearButtonEnabled="False"
                     LargeChange="60"
                     MaxDecimalPlaces="0"

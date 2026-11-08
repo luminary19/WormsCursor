@@ -115,7 +115,6 @@
 
     <StackPanel Margin="40,28,40,40">
         <ui:TextBlock Style="{StaticResource PageTitle}" Text="Icons" />
-        <ui:TextBlock Style="{StaticResource PageLead}" Text="Choose how each agent looks on the token: its own logo, one of its mascots, or a picture of your own." />
 
         <!--  What the chosen icon looks like in both states, each over dark and over light, at its
               real size: side by side, or one above the other when the page is too narrow for four
@@ -149,13 +148,10 @@
                         <local:TokenPreview x:Name="DoneOnLight" />
                     </Border>
                 </Grid>
-                <StackPanel Margin="2,12,0,0">
-                    <ui:TextBlock FontTypography="BodyStrong" Text="Done" />
-                    <ui:TextBlock
-                        FontTypography="Caption"
-                        Style="{StaticResource Secondary}"
-                        Text="The agent finished its turn." />
-                </StackPanel>
+                <ui:TextBlock
+                    Margin="2,10,0,0"
+                    FontTypography="BodyStrong"
+                    Text="Done" />
               </StackPanel>
               <StackPanel Margin="0,0,16,12">
                 <Grid>
@@ -184,13 +180,10 @@
                             Others="1" />
                     </Border>
                 </Grid>
-                <StackPanel Margin="2,12,0,0">
-                    <ui:TextBlock FontTypography="BodyStrong" Text="Needs you" />
-                    <ui:TextBlock
-                        FontTypography="Caption"
-                        Style="{StaticResource Secondary}"
-                        Text="Waiting for your answer. The +1 means another agent is waiting too." />
-                </StackPanel>
+                <ui:TextBlock
+                    Margin="2,10,0,0"
+                    FontTypography="BodyStrong"
+                    Text="Needs you" />
               </StackPanel>
             </UniformGrid>
         </Border>
@@ -267,7 +260,7 @@
                 </WrapPanel>
 
                 <!--  Right under the tiles it is about: what went wrong with an added file, or the
-                      icon just removed (with Undo); otherwise the hints for adding one.  -->
+                      icon just removed (with Undo); otherwise, at the limit, why Add is off.  -->
                 <Grid Margin="0,4,8,8">
                     <ui:InfoBar x:Name="StatusBar" IsClosable="True" />
                     <ui:Button
