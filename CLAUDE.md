@@ -102,8 +102,9 @@ tests.
 - `TokenFace.cs` — `TokenFace.For(Waiting)`: the pure selection of what the token shows: the first
   blocked session's tool (else the first session's), `Blocked`, and `Others` (the "+N").
 - `StatusBadge.cs` — the status badge (`Place` + `Draw(..., WaitingState)`): one fluffy cloud shape
-  (overlapping puffs filled as a single winding path), yellow with a "?" for blocked and green with a
-  check for finished. All vector, stateless, so it is thread-safe, drawn on every agent's icon. Its
+  (overlapping puffs filled as a single winding path, wider than tall, scalloped all round), flat yellow
+  with a "?" for blocked and flat green with a check for finished, inside the same two-tone edge the
+  icons get (dark outline, light halo) so it matches the flat mascots. All vector, stateless, so it is thread-safe, drawn on every agent's icon. Its
   `Overhang` is what the corner placement allows for at the top edge.
 - `IconCatalog.cs` / `IconSource.cs` / `TokenSprites.cs` + `Icons/<tool>/<variant>.svg` — the token
   icons. Per agent: its `original` logo (Claude critter, OpenAI knot, OpenCode's compact mark,
