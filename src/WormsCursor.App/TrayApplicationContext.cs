@@ -118,7 +118,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     void OnWaitingChanged(int count)
     {
-        _overlay.SetWaitingAgents(_agents.WaitingTools);
+        _overlay.SetWaitingAgents(_agents.Waiting);
         _tray.Text = count > 0
             ? $"WormsCursor — {count} agent{(count == 1 ? "" : "s")} waiting"
             : "WormsCursor";
@@ -173,13 +173,11 @@ public sealed class TrayApplicationContext : ApplicationContext
     // Drives the live token for the "Preview" test in a dialog: a non-null value fakes that many
     // waiting agents (one logo + "+N"); null ends the preview and restores the real set (so a real
     // agent event arriving mid-preview, or just closing the dialog, leaves the genuine token on screen).
-    static readonly string[] PreviewTools = { "claude-code" };
+    static readonly WaitingAgent PreviewAgent = new("claude-code", WaitingState.Blocked);
     void PreviewWaitingCount(int? testCount)
     {
-        if (testCount is not int n) { _overlay.SetWaitingAgents(_agents.WaitingTools); return; }
-        var tools = new string[Math.Max(0, n)];
-        for (int i = 0; i < tools.Length; i++) tools[i] = PreviewTools[i % PreviewTools.Length];
-        _overlay.SetWaitingAgents(tools);
+        if (testCount is not int n) { _overlay.SetWaitingAgents(_agents.Waiting); return; }
+        _overlay.SetWaitingAgents(Enumerable.Repeat(PreviewAgent, Math.Max(0, n)).ToArray());
     }
 
     // The overlay reads AgentNotifierEnabled live each frame and AgentActivity holds the linger

@@ -37,11 +37,15 @@ It builds the helper from this checkout, backs up an existing config, and insert
 the plugin while preserving JSONC comments, existing plugins, and options. Repeated
 registration is harmless. Invalid configuration is reported without replacing it.
 
-If OpenCode is managed by Orca, the running server may read Orca's generated copy
-of the user config. Orca refreshes that copy when it launches a managed agent.
-After installation, open a new OpenCode agent in Orca and then run `opencode reload`
-to update the existing server. Existing sessions can remain open. A reload before
-that launch only rereads the stale copy; do not edit the generated file directly.
+If OpenCode is managed by Orca, the running server reads Orca's generated copy of
+the user config under `%APPDATA%\orca\opencode2-config-overlays\<hash>`, not your own
+config. Orca does not reliably refresh that copy: in practice it kept a two-week-old
+config that never picked up the plugin. After installation, delete that overlay folder
+so Orca regenerates it from your current config, then open a new OpenCode agent in Orca
+(or run `opencode reload` in an existing one). Do not edit the generated files directly.
+
+Codex launched from Orca also has its own hook trust, separate from your normal Codex.
+See "Codex under Orca" in the main [README](../../README.md#how-the-notifier-works).
 
 The registered `plugins` entry points directly to this directory, for example:
 

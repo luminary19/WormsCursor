@@ -58,13 +58,22 @@ tracks whether the ball is in *your* court:
 
 | The agent… | Claude hook | Token |
 |---|---|---|
-| is blocked on you (permission / elicitation prompt) | `Notification` | **appears — stays until you reply** |
-| sends an idle reminder | `Notification` (`idle_prompt`) | **appears — clears after the timeout** |
+| asks for permission (main agent or a subagent) | `PermissionRequest` | **appears — stays until that agent moves on** |
+| asks you a question (main agent or a subagent) | `PreToolUse` of `AskUserQuestion` | **appears — stays until that agent moves on** |
+| relays an MCP server's request for input | `Elicitation` | **appears — stays until that request is answered** (`ElicitationResult`) |
+| sends the "still waiting for your input" reminder | `Notification` (`idle_prompt`) | **appears — clears after the timeout** |
 | finished its turn | `Stop` | **appears — clears after the timeout** |
 | ended on an error | `StopFailure` | **appears — clears after the timeout** |
 | started on your prompt, or you reopened the session | `UserPromptSubmit` / `SessionStart` | **clears** |
-| resumes tool work after approval | `PreToolUse` / `PostToolUse` | **clears** |
+| resumes tool work after you answered | `PreToolUse` / `PostToolUse` / `PostToolUseFailure` | **clears that agent's prompt** |
 | exited cleanly (`/exit`, `Ctrl+C`, `/clear`, logout) | `SessionEnd` | **clears at once** |
+
+Every "blocked on you" row comes from a hook that says who is waiting and has a matching "answered"
+event. Permission requests and questions carry the asking agent's id, so only *that* agent's next
+tool call clears its prompt: a subagent still waiting keeps the token up while its siblings or the
+main agent work, and background subagents can't clear the main agent's question. An MCP request for
+input belongs to no agent, so only its own `ElicitationResult` clears it. Claude's `Notification`
+hook says nothing about which agent it is for, so it is never used for a blocked state.
 
 Codex desktop and CLI use the same shared lifecycle hooks: `Stop` shows completion,
 `PermissionRequest` shows approval waits, and user-input tools show question waits.
@@ -74,6 +83,17 @@ an individual question clears that question, and a fresh ordinary prompt clears 
 Subagent completion hooks are not registered. Codex's hook trust approval applies when enabling
 new or changed hook commands. Restart existing Codex desktop and CLI sessions after registering
 or changing hook trust so they load the updated configuration.
+
+Codex runs a Windows hook through PowerShell (`powershell.exe -NoProfile -Command …`, or `pwsh`
+when installed), so WormsCursor registers its Codex hook as `& '<path>\WormsCursor.exe' hook --tool
+codex` in `commandWindows`. A registration from before this fix used a bare quoted path, which
+PowerShell rejects, so every Codex hook failed; *Agent settings…* shows it as *Update available*.
+
+**Codex under Orca.** Orca runs Codex with
+`CODEX_HOME=%APPDATA%\orca\codex-runtime-home\home`. Orca copies your hooks there but trusts only
+its own, so WormsCursor's hooks don't run in Orca-launched Codex until you trust them: open Codex
+from Orca, run `/hooks`, and trust the WormsCursor entries. Do this once, and again whenever the
+hook command changes (after **Re-register**, or when the WormsCursor exe moves).
 
 Codex currently has no failure lifecycle hook for model/API errors, and those errors can skip
 `Stop`. Consequently, these failures cannot reliably produce a completion token. Normal completion,
@@ -85,9 +105,10 @@ session id), so the count is simply "how many agents need you right now".
 
 **Two kinds of waiting.** A token isn't all-or-nothing on the timeout:
 
-- **Blocked on your approval** (a permission / idle prompt) — the agent is *actively* waiting on your
-  decision, so the token **stays indefinitely**. It's never swept by the timeout; it clears only when
-  you actually respond (the session reports work again) or the session ends.
+- **Blocked on you** (a permission request, a question, an MCP request for input, or an unanswered
+  Codex question) — the agent is *actively* waiting on your decision, so the token **stays
+  indefinitely**. It's never swept by the timeout; it clears only when you actually respond (that
+  agent reports work again, or the request is answered), or the turn or session ends.
 - **Finished its turn / errored** — the agent is done and just needs a fresh prompt, so the token
   **lingers, then auto-clears** after the **linger timeout** (default 20 s, configurable 10–1800 s).
 
@@ -175,7 +196,7 @@ To try the token without a real agent, use **Agent settings… → Preview**, or
 (the tray must be running):
 
 ```powershell
-'{"hook_event_name":"Notification","notification_type":"permission_prompt"}' | WormsCursor.exe hook --tool claude-code
+'{"hook_event_name":"PermissionRequest","session_id":"test","tool_name":"Bash"}' | WormsCursor.exe hook --tool claude-code
 ```
 
 ### Standalone build (no .NET install on the target)

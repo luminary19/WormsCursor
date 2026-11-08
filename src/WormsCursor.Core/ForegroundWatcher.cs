@@ -22,7 +22,8 @@ public sealed class ForegroundWatcher : IDisposable
     bool _disposed;
 
     /// <summary>Raised on the watcher's own thread when the foreground program changes. Handlers must
-    /// be thread-safe and quick (they run inside the hook callback).</summary>
+    /// be thread-safe and quick (they run inside the hook callback), and must not dispose this
+    /// watcher (<see cref="Dispose"/> waits for this thread).</summary>
     public event Action? Changed;
 
     /// <summary>Exe file name of the program that owns the foreground window (e.g. "dota2.exe"), or
@@ -80,12 +81,16 @@ public sealed class ForegroundWatcher : IDisposable
         if (notify) Changed?.Invoke();
     }
 
+    /// <summary>Stops watching. Returns only once the watcher thread has unhooked and exited, so no
+    /// <see cref="Changed"/> handler is running or can run afterwards: a consumer may dispose whatever
+    /// its handler touches right after this returns. The wait is short: WM_QUIT ends the message loop
+    /// as soon as any in-flight callback (a process-name lookup plus the handlers) returns.</summary>
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
         PostThreadMessage(_threadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
-        _thread.Join(500);
+        _thread.Join();
         _ready.Dispose();
     }
 

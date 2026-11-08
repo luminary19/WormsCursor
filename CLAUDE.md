@@ -37,8 +37,17 @@ waits, the token comes back with its entrance. The OpenCode helper does the same
 source (see below).
 
 Codex desktop and CLI use `%CODEX_HOME%/hooks.json` through the same shared engine hooks.
-Keep asynchronous question state separate from ordinary tool activity: a tool returning does not
-mean the user answered. The OpenCode 2 integration has an independent shared helper, based on the
+Codex runs Windows hooks through PowerShell (`<shell> -NoProfile -Command <commandWindows>`), so the
+registered `commandWindows` is `& '<exe>' hook --tool codex` — a bare quoted path is a PowerShell
+parse error. Keep asynchronous question state separate from ordinary tool activity: a tool returning
+does not mean the user answered.
+
+Every "blocked on you" state must come from a hook event that names its owner and has a matching
+"resolved" event: Claude `PermissionRequest` and `PreToolUse(AskUserQuestion)` carry the asking
+agent's `agent_id` (that agent's next tool event resolves it); `Elicitation` carries no `agent_id`, so
+it is keyed by its own id (`mcp_server_name` + `elicitation_id`) and resolved by `ElicitationResult`.
+Never derive a blocked state from Claude's `Notification` — it has no `agent_id` (verified in the
+2.1.x binary); only its `idle_prompt` reminder is used, as a finished nudge. The OpenCode 2 integration has an independent shared helper, based on the
 existing Pi cursor extension; do not route it through throwaway WormsCursor hook processes.
 
 ## Projects (`src/`)
@@ -51,7 +60,9 @@ tests.
 - `AgentLogos.cs` / `SvgPath.cs` — the baked vector tool logos (Claude critter, OpenAI knot) parsed
   from SVG path data and rasterised to cached sprites; `SvgPath` is the tiny path-data parser.
 - `AgentActivity.cs` — tracks which agent sessions currently **need the user** (thread-safe), exposes
-  `WaitingTools`/`WaitingCount`, raises `WaitingChanged`, and sweeps stale sessions after a TTL.
+  `Waiting` (one `WaitingAgent(Tool, State)` per session, `State` = `WaitingState.Blocked` when an
+  approval/question/elicitation is pending, `Finished` when the turn just ended) and `WaitingCount`,
+  raises `WaitingChanged`, and sweeps finished sessions after a TTL (blocked ones are never swept).
 - `AgentEventMessage.cs` — the normalised wire format (one JSON line per event) + the
   raw-event → `AgentEventKind` mapping.
 - `CursorSettings.cs` — the persisted, tunable settings: token `Size`, `Placement`
@@ -122,7 +133,7 @@ dotnet run --project src/WormsCursor.App     # run the tray app (dev)
 .NET 8 SDK, pinned by `global.json`. The app is `net8.0-windows`, PerMonitorV2 DPI.
 
 To exercise the notifier without a real agent: **Preferences → Agent settings… → Preview**, or fire a
-hook by hand — `echo '{"hook_event_name":"Notification","notification_type":"permission_prompt"}' |
+hook by hand — `echo '{"hook_event_name":"PermissionRequest","session_id":"t","tool_name":"Bash"}' |
 WormsCursor.exe hook --tool claude-code` (the tray must be running).
 
 ## Releasing

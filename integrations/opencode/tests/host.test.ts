@@ -5,7 +5,7 @@ import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { materializeNativeHelper, NativeCursorRuntime } from "../host.ts";
+import { BUILD_RETRY_COOLDOWN_MS, materializeNativeHelper, NativeCursorRuntime } from "../host.ts";
 import { DEFAULT_SETTINGS } from "../state.ts";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -67,7 +67,7 @@ test("stopping during helper materialization cannot launch a late helper", { ski
   assert.equal(runtime.getStatus(), "Disconnected");
 });
 
-test("a failed helper build is not re-run until the helper sources change", async () => {
+test("a failed helper build is not re-run until its sources change or the cooldown ends", async () => {
   const root = await mkdtemp(join(tmpdir(), "wormscursor-materialize-"));
   const native = join(root, "src", "WormsCursor.OpenCodeOverlay");
   await mkdir(native, { recursive: true });
@@ -75,18 +75,25 @@ test("a failed helper build is not re-run until the helper sources change", asyn
   await writeFile(join(native, "WormsCursor.OpenCodeOverlay.csproj"), "<Project />");
   await writeFile(join(native, "Program.cs"), "// v1");
   let builds = 0;
+  let clock = 1_000_000;
+  const now = () => clock;
   const build = async () => { builds++; throw new Error("compile error"); };
   const errors: unknown[] = [];
   const consoleError = console.error;
   console.error = (...args: unknown[]) => { errors.push(args); };
   try {
-    await assert.rejects(materializeNativeHelper({ root, build }), /compile error/);
-    await assert.rejects(materializeNativeHelper({ root, build }), /compile error/);
+    await assert.rejects(materializeNativeHelper({ root, build, now }), /compile error/);
+    clock += BUILD_RETRY_COOLDOWN_MS - 1;
+    await assert.rejects(materializeNativeHelper({ root, build, now }), /compile error/);
     assert.equal(builds, 1);
     assert.equal(errors.length, 1);
-    await writeFile(join(native, "Program.cs"), "// v2");
-    await assert.rejects(materializeNativeHelper({ root, build }), /compile error/);
+    // A transient failure (a timeout, a locked file) must not stick for the life of the host.
+    clock += 1;
+    await assert.rejects(materializeNativeHelper({ root, build, now }), /compile error/);
     assert.equal(builds, 2);
+    await writeFile(join(native, "Program.cs"), "// v2");
+    await assert.rejects(materializeNativeHelper({ root, build, now }), /compile error/);
+    assert.equal(builds, 3);
   } finally {
     console.error = consoleError;
     await rm(root, { recursive: true, force: true });

@@ -22,12 +22,17 @@ export interface MaterializeOptions {
   root?: string;
   /** Builds the helper project into a directory (default: `dotnet build`). */
   build?: (project: string, directory: string) => Promise<void>;
+  /** Current time in milliseconds (default: `Date.now`). */
+  now?: () => number;
 }
 
-// A build that failed for one source hash will fail the same way until those sources change, so the
-// failure is remembered for this process: connect retries then re-attempt only the connect/spawn and
-// never re-run `dotnet build` every few seconds. Keyed by the content-addressed output directory.
-const failedBuilds = new Map<string, Error>();
+// A failed build is remembered per source hash for a cooldown, so connect retries (every few seconds)
+// re-attempt only the connect/spawn and never re-run `dotnet build` each time. A compile error fails
+// the same way until the sources change, which is a new hash and builds at once; a transient failure
+// (a timeout on a busy machine, a locked file, an offline restore) is retried once the cooldown ends.
+// Keyed by the content-addressed output directory.
+export const BUILD_RETRY_COOLDOWN_MS = 5 * 60_000;
+const failedBuilds = new Map<string, { error: Error; at: number }>();
 
 async function exists(path: string): Promise<boolean> {
   try { await access(path); return true; } catch { return false; }
@@ -92,10 +97,11 @@ function dotnetBuild(project: string, directory: string): Promise<void> {
   });
 }
 
-function rememberFailure(directory: string, hash: string, error: unknown): Error {
+function rememberFailure(directory: string, hash: string, error: unknown, at: number): Error {
   const failure = error instanceof Error ? error : new Error(String(error));
-  failedBuilds.set(directory, failure);
-  console.error(`WormsCursor: OpenCode cursor helper build ${hash} failed; not rebuilding until its sources change: ${failure.message}`);
+  failedBuilds.set(directory, { error: failure, at });
+  console.error(`WormsCursor: OpenCode cursor helper build ${hash} failed; not rebuilding for `
+    + `${BUILD_RETRY_COOLDOWN_MS / 60_000} minutes or until its sources change: ${failure.message}`);
   return failure;
 }
 
@@ -103,6 +109,7 @@ function rememberFailure(directory: string, hash: string, error: unknown): Error
 export async function materializeNativeHelper(options: MaterializeOptions = {}): Promise<NativeMaterialization> {
   const root = options.root ?? repository;
   const build = options.build ?? dotnetBuild;
+  const now = options.now ?? Date.now;
   const native = join(root, "src", "WormsCursor.OpenCodeOverlay");
   const project = join(native, "WormsCursor.OpenCodeOverlay.csproj");
   const digest = createHash("sha256");
@@ -119,7 +126,7 @@ export async function materializeNativeHelper(options: MaterializeOptions = {}):
   const executable = join(directory, "OpenCodeCursorOverlay.exe");
   if (await exists(executable)) return { hash, directory, executable };
   const failed = failedBuilds.get(directory);
-  if (failed) throw failed;
+  if (failed && now() - failed.at < BUILD_RETRY_COOLDOWN_MS) throw failed.error;
   await mkdir(cache, { recursive: true });
   const staging = await mkdtemp(join(cache, `.${hash}-`));
   try {
@@ -127,7 +134,7 @@ export async function materializeNativeHelper(options: MaterializeOptions = {}):
       await build(project, staging);
       if (!await exists(join(staging, "OpenCodeCursorOverlay.exe"))) throw new Error("OpenCode cursor build produced no executable");
     } catch (error) {
-      throw rememberFailure(directory, hash, error);
+      throw rememberFailure(directory, hash, error, now());
     }
     await rm(join(staging, "obj"), { recursive: true, force: true });
     try { await rename(staging, directory); }

@@ -5,7 +5,7 @@ using WormsCursor.Core;
 namespace WormsCursor.App;
 
 /// <summary>
-/// The <c>WormsCursor.exe hook --tool &lt;t&gt; [--event &lt;e&gt;]</c> entry path: a throwaway process
+/// The <c>WormsCursor.exe hook --tool &lt;t&gt;</c> entry path: a throwaway process
 /// an AI agent's hook fires. It normalises the tool's native payload to an
 /// <see cref="AgentEventMessage"/>, writes one JSON line to the running tray app's pipe, and exits 0.
 ///
@@ -34,52 +34,38 @@ static class AgentHookBridge
     static AgentEventMessage? Build(string[] args)
     {
         string tool = ArgValue(args, "--tool") ?? "unknown";
-        string? evOverride = ArgValue(args, "--event"); // Cursor/Kiro register an explicit normalised event
-
         string raw = Console.IsInputRedirected ? Console.In.ReadToEnd() : "";
-        return Parse(tool, raw, evOverride);
+        return Parse(tool, raw);
     }
 
-    internal static AgentEventMessage? Parse(string tool, string raw, string? evOverride = null)
-        => tool == "codex" ? FromCodex(raw) : FromStdin(tool, raw, evOverride);
+    internal static AgentEventMessage? Parse(string tool, string raw)
+        => tool == "codex" ? FromCodex(raw) : FromClaude(tool, raw);
 
-    // Claude Code / Cursor: payload arrives on stdin as JSON. We map Claude's hook_event_name
-    // (+ notification_type) ourselves; Cursor passes the normalised event via --event.
-    static AgentEventMessage? FromStdin(string tool, string raw, string? evOverride)
+    // Claude Code: the hook payload arrives on stdin as JSON and everything is derived from it.
+    static AgentEventMessage? FromClaude(string tool, string raw)
     {
-        string? rawEvent = null, notifType = null, sessionId = null, agentId = null, project = null, message = null;
-        bool subagentsRunning = false;
-        if (!string.IsNullOrWhiteSpace(raw))
+        try
         {
-            try
+            using var doc = JsonDocument.Parse(raw);
+            var root = doc.RootElement;
+            string? rawEvent = Str(root, "hook_event_name");
+            var (norm, itemIds) = NormalizeClaude(root, rawEvent);
+            if (norm is null) return null; // not an event we surface
+
+            return new AgentEventMessage
             {
-                using var doc = JsonDocument.Parse(raw);
-                var root = doc.RootElement;
-                rawEvent = Str(root, "hook_event_name");
-                notifType = Str(root, "notification_type");
-                sessionId = Str(root, "session_id");
-                agentId = Str(root, "agent_id"); // set only inside a subagent
-                project = Str(root, "cwd");
-                message = Str(root, "message");
-                subagentsRunning = HasRunningSubagent(root);
-            }
-            catch (JsonException) { /* leave fields null; an --event override may still carry us */ }
+                Tool = tool,
+                Event = norm,
+                RawEvent = rawEvent,
+                SessionId = Str(root, "session_id"),
+                AgentId = Str(root, "agent_id"), // set only inside a subagent
+                Project = Str(root, "cwd"),
+                Message = Str(root, "message"),
+                InputIds = itemIds,
+                Ts = DateTime.UtcNow.ToString("o"),
+            };
         }
-
-        string? norm = evOverride ?? NormalizeClaude(rawEvent, notifType, subagentsRunning);
-        if (norm is null) return null; // not an event we surface
-
-        return new AgentEventMessage
-        {
-            Tool = tool,
-            Event = norm,
-            RawEvent = rawEvent ?? evOverride,
-            SessionId = sessionId,
-            AgentId = agentId,
-            Project = project,
-            Message = message,
-            Ts = DateTime.UtcNow.ToString("o"),
-        };
+        catch (JsonException) { return null; }
     }
 
     // Codex desktop and CLI share hooks.json and the same stdin lifecycle payloads.
@@ -195,33 +181,40 @@ static class AgentHookBridge
         catch (JsonException) { return null; }
     }
 
-    static string? NormalizeClaude(string? hookEvent, string? notificationType, bool subagentsRunning) => hookEvent switch
+    // Every "blocked on you" state comes from an event that names its owner and has a matching
+    // "resolved" event, so it can only ever be cleared by its own answer:
+    //   - PermissionRequest and AskUserQuestion's PreToolUse run in the asking agent's context, so their
+    //     payload carries that subagent's agent_id; the same agent's next tool event resolves the prompt.
+    //   - Elicitation (an MCP server asking for input) runs outside any agent's context, so it carries
+    //     no agent_id. It is keyed by its own identity instead, which ElicitationResult repeats.
+    // Notification is deliberately NOT a blocked signal: it carries no agent_id, so a subagent's prompt
+    // would be filed under the main agent and never cleared by that subagent. Its only use is the
+    // idle_prompt reminder (Claude never sends it while a dialog is open), a "finished" nudge.
+    static (string? Event, string[]? ItemIds) NormalizeClaude(JsonElement root, string? hookEvent) => hookEvent switch
     {
         // You submitted a prompt, or (re)opened the session → you're back, the agent isn't waiting.
-        "UserPromptSubmit" or "SessionStart" => "thinking_started",
+        "UserPromptSubmit" or "SessionStart" => ("thinking_started", null),
         // The session ended (/exit, Ctrl+C, /clear, logout) → drop it so its logo doesn't linger.
-        "SessionEnd" => "session_end",
-        // A permission dialog is being shown. Unlike Notification, PermissionRequest runs inside the
-        // requesting agent's context, so its payload carries that subagent's agent_id — which is what
-        // lets a sibling subagent's tool use leave this approval pending.
-        "PermissionRequest" => "awaiting_user",
-        // The agent is blocked on you → awaiting_user (sticky, never swept). Claude's Notification
-        // payload carries NO `notification_type` field — that string is only what the hook *matcher*
-        // filters on, and we register the matcher as `permission_prompt|idle_prompt`. So any
-        // Notification that reaches this bridge is already a blocking prompt: a null type is the
-        // normal case and must map to awaiting_user (else the persistent token never fires). We still
-        // honour an explicit type if a future payload ever includes one, dropping non-blocking kinds.
-        "Notification" => notificationType is null or "permission_prompt" or "idle_prompt" or "elicitation_dialog"
-            ? "awaiting_user" : null,
+        "SessionEnd" => ("session_end", null),
+        "PermissionRequest" => ("awaiting_user", null),
+        "PreToolUse" when Str(root, "tool_name") == "AskUserQuestion" => ("awaiting_user", null),
+        "PreToolUse" or "PostToolUse" or "PostToolUseFailure" => ("tool_use", null),
+        "Elicitation" => ("awaiting_user", new[] { ElicitationId(root) }),
+        "ElicitationResult" => ("input_answered", new[] { ElicitationId(root) }),
+        "Notification" when Str(root, "notification_type") == "idle_prompt" => ("turn_complete", null),
         // Spawning background subagents ends the turn at once (Stop fires right after SubagentStart),
         // but Claude resumes on its own when they report back — so it isn't your move yet. Stop's
         // payload lists in-flight work in `background_tasks`; only a Stop with no subagent there is a
         // real finish.
-        "Stop" => subagentsRunning ? null : "turn_complete",
-        "StopFailure" => "error",
-        "PreToolUse" or "PostToolUse" => "tool_use",
-        _ => null,
+        "Stop" => (HasRunningSubagent(root) ? null : "turn_complete", null),
+        "StopFailure" => ("error", null),
+        _ => (null, null),
     };
+
+    // Elicitation and ElicitationResult both carry the MCP server name; elicitation_id is present only
+    // for URL-mode requests. The pair names one prompt on both sides.
+    static string ElicitationId(JsonElement root)
+        => JsonSerializer.Serialize(new[] { "elicitation", Str(root, "mcp_server_name") ?? "", Str(root, "elicitation_id") ?? "" });
 
     // True when Claude's Stop payload lists a background subagent or workflow, e.g.
     // "background_tasks": [{ "type": "subagent", "status": "running", ... }]. Claude only lists in-flight

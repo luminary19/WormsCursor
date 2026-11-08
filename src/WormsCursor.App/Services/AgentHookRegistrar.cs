@@ -11,9 +11,10 @@ public enum HookState
     NotRegistered,
     /// <summary>Our hook is registered for the full current event set.</summary>
     Registered,
-    /// <summary>Our hook is present, but only for some of the events we now register — an older
-    /// version registered a smaller set (e.g. before <c>SessionEnd</c> was added, so /clear and /exit
-    /// no longer clear the indicator). Re-registering refreshes it to the full set.</summary>
+    /// <summary>Our hook is present but not in today's shape: an older version registered a smaller
+    /// event set (e.g. before <c>SessionEnd</c> was added, so /clear and /exit no longer clear the
+    /// indicator), a different command (an old exe path, or a command form the tool's shell rejects),
+    /// or an entry we no longer use. Re-registering refreshes it in place.</summary>
     Outdated,
     /// <summary>The config is malformed and cannot be merged without discarding user data.</summary>
     ConfigConflict,
@@ -33,15 +34,21 @@ public sealed record HookTool(string Id, string DisplayName, string ConfigHint);
 /// </summary>
 public static class AgentHookRegistrar
 {
-    // The events we register with Claude Code. Pre/PostToolUse ARE registered so the token clears the
-    // instant the agent resumes work after you respond — approving a permission prompt fires no
-    // UserPromptSubmit, so without a tool-use signal the token would otherwise linger until the TTL.
+    // The events we register with Claude Code, each with its matcher. Pre/PostToolUse(+Failure) are
+    // registered so the token clears the instant an agent resumes work after you respond — approving a
+    // permission prompt fires no UserPromptSubmit — and PreToolUse of AskUserQuestion is a question.
     // The cost is one hook process per tool call during an active turn (fail-silent, sub-½ s). The
     // other events: UserPromptSubmit + SessionStart clear when you come back with a prompt; Stop /
-    // StopFailure / Notification raise it; PermissionRequest raises an approval prompt scoped to the
-    // asking (sub)agent; SessionEnd drops the session on exit so it doesn't linger.
-    static readonly string[] ClaudeEvents =
-        { "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionStart", "SessionEnd" };
+    // StopFailure end the turn; PermissionRequest is an approval scoped to the asking (sub)agent;
+    // Elicitation / ElicitationResult open and answer an MCP server's request for input; SessionEnd
+    // drops the session on exit. Notification is registered only for the idle_prompt reminder: it
+    // carries no agent_id, so it is never used for a "blocked on you" state.
+    static readonly (string Event, string Matcher)[] ClaudeEvents =
+    {
+        ("UserPromptSubmit", "*"), ("PreToolUse", "*"), ("PostToolUse", "*"), ("PostToolUseFailure", "*"),
+        ("PermissionRequest", "*"), ("Elicitation", "*"), ("ElicitationResult", "*"),
+        ("Notification", "idle_prompt"), ("Stop", "*"), ("StopFailure", "*"), ("SessionStart", "*"), ("SessionEnd", "*"),
+    };
 
     // These lifecycle hooks are shared by Codex desktop and CLI. Keep them synchronous so a late
     // notification cannot arrive after the tool-resumed event that clears it.
@@ -128,32 +135,10 @@ public static class AgentHookRegistrar
     // ---------- Claude Code (JSON merge) ----------
 
     const string ClaudeFile = "Claude settings.json";
-    static string ClaudeMarker => "hook --tool claude-code";
-    static string ClaudeCommand(string? evt = null)
-        => evt is null ? $"\"{Exe}\" hook --tool claude-code"
-                       : $"\"{Exe}\" hook --tool claude-code --event {evt}";
+    const string ClaudeMarker = "hook --tool claude-code";
+    static string ClaudeCommand => $"\"{Exe}\" {ClaudeMarker}";
 
-    // Most events register one "*"-matcher hook the bridge normalises by name. Notification is special:
-    // its sub-type says whether the agent is *blocked on your decision* (a persistent token) or just
-    // *idle after a finished turn* (a timed nudge, like Stop). Claude filters Notification hooks by
-    // notification_type via the matcher, so we register one entry per type carrying an explicit --event
-    // the bridge uses verbatim — no dependence on whatever the stdin payload happens to include.
-    //   elicitation_dialog → awaiting_user (sticky: needs your input to continue)
-    //   idle_prompt        → turn_complete (timed: "still waiting", auto-clears)
-    // Permission prompts are NOT taken from Notification: its payload carries no agent_id, so a
-    // subagent's prompt would be indistinguishable from the main agent's. They come from the
-    // PermissionRequest event instead, which runs in the asking agent's context.
-    static readonly (string Matcher, string Event)[] ClaudeNotifications =
-    {
-        ("elicitation_dialog", "awaiting_user"),
-        ("idle_prompt",        "turn_complete"),
-    };
-
-    static JsonObject MakeEntry(string matcher, string command) => new()
-    {
-        ["matcher"] = matcher,
-        ["hooks"] = new JsonArray(new JsonObject { ["type"] = "command", ["command"] = command }),
-    };
+    static JsonObject ClaudeHandler() => new() { ["type"] = "command", ["command"] = ClaudeCommand };
 
     static HookState ClaudeState()
     {
@@ -161,23 +146,13 @@ public static class AgentHookRegistrar
         {
             var root = ReadJsonObject(ClaudePath);
             var hooks = root is null ? null : ValidatedHooks(root, ClaudeFile);
-            if (hooks is null) return HookState.NotRegistered;
-            // None of our hooks → not us; every event present *and* matching today's shape → registered;
-            // anything in between (an older or partial registration) → needs a refresh. Notification also
-            // has to carry the per-type --event routing, so a pre-routing single-matcher entry reads as outdated.
-            bool anyOurs = false, allCurrent = true;
-            foreach (var ev in ClaudeEvents)
-            {
-                var arr = hooks[ev] as JsonArray;
-                bool present = arr is not null && HasOurHook(arr);
-                anyOurs |= present;
-                bool current = ev == "Notification"
-                    ? arr is not null && ClaudeNotifications.All(n => HasCommandContaining(arr, "--event " + n.Event))
-                    : present;
-                allCurrent &= current;
-            }
-            if (!anyOurs) return HookState.NotRegistered;
-            return allCurrent ? HookState.Registered : HookState.Outdated;
+            if (hooks is null || !HasAnyHandler(hooks, IsClaudeHandler)) return HookState.NotRegistered;
+            // Today's shape exactly: every event carries one handler of ours, in a group with the
+            // expected matcher, with the current command. Anything else (a missing event, an old exe
+            // path, the retired per-type Notification entries) needs a refresh.
+            bool current = ClaudeEvents.All(ev => hooks[ev.Event] is JsonArray groups
+                && HasExactlyHandler(groups, IsClaudeHandler, g => StringValue(g["matcher"]) == ev.Matcher, ClaudeHandler()));
+            return current ? HookState.Registered : HookState.Outdated;
         }
         catch (InvalidOperationException) { return HookState.ConfigConflict; }
     }
@@ -188,15 +163,18 @@ public static class AgentHookRegistrar
         var hooks = ValidatedHooks(root, ClaudeFile);
         if (hooks is null) { hooks = new JsonObject(); root["hooks"] = hooks; }
 
-        foreach (var ev in ClaudeEvents)
+        var wanted = ClaudeEvents.Select(e => e.Event).ToHashSet(StringComparer.Ordinal);
+        foreach (string ev in hooks.Select(ev => ev.Key).ToArray())
         {
-            if (hooks[ev] is not JsonArray arr) { arr = new JsonArray(); hooks[ev] = arr; }
-            RemoveHandlers(arr, IsClaudeHandler); // de-dupe / refresh the exe path
-            if (ev == "Notification")
-                foreach (var (matcher, evt) in ClaudeNotifications)
-                    arr.Add(MakeEntry(matcher, ClaudeCommand(evt)));
-            else
-                arr.Add(MakeEntry("*", ClaudeCommand()));
+            var groups = (JsonArray)hooks[ev]!;
+            int before = groups.Count;
+            RemoveHandlers(groups, IsClaudeHandler); // de-dupe / refresh the exe path and matchers
+            if (before > 0 && groups.Count == 0 && !wanted.Contains(ev)) hooks.Remove(ev); // an event we no longer use
+        }
+        foreach (var (ev, matcher) in ClaudeEvents)
+        {
+            if (hooks[ev] is not JsonArray groups) { groups = new JsonArray(); hooks[ev] = groups; }
+            groups.Add(new JsonObject { ["matcher"] = matcher, ["hooks"] = new JsonArray(ClaudeHandler()) });
         }
         BackupAndWrite(ClaudePath, root.ToJsonString(Indented));
     }
@@ -204,25 +182,27 @@ public static class AgentHookRegistrar
     static bool IsClaudeHandler(JsonNode? node)
         => node is JsonObject hook && StringValue(hook["command"])?.Contains(ClaudeMarker, StringComparison.Ordinal) == true;
 
-    // True when a hook-entry's inner command list carries a command containing <needle>.
-    static bool EntryCommandContains(JsonNode? entry, string needle)
-        => entry is JsonObject eo && eo["hooks"] is JsonArray inner
-           && inner.Any(h => h is JsonObject ho && StringValue(ho["command"])?.Contains(needle, StringComparison.Ordinal) == true);
-
-    static bool HasOurHook(JsonArray entries) => entries.Any(e => EntryCommandContains(e, ClaudeMarker));
-    static bool HasCommandContaining(JsonArray entries, string needle) => entries.Any(e => EntryCommandContains(e, needle));
-
     // ---------- Codex (hooks.json merge) ----------
 
     const string CodexFile = "Codex hooks.json";
     const string CodexMarker = "hook --tool codex";
-    static string CodexCommand => $"\"{Exe}\" {CodexMarker}";
+
+    // Codex runs a hook's command through the session's own shell, the one it runs its tool commands
+    // in (codex-rs core/src/session/mod.rs builds the hook shell from the turn environment's shell):
+    //   - on Windows it uses `commandWindows` when present, and the shell is PowerShell
+    //     (`pwsh.exe`, else `powershell.exe`, as `<shell> -NoProfile -Command <commandWindows>`);
+    //   - elsewhere it runs `command` with `sh -c` (or the user's POSIX shell).
+    // PowerShell parses a leading quoted path as a string expression, so `"C:\...\WormsCursor.exe" hook`
+    // is a parse error; the exe must go through the call operator. A single-quoted literal keeps any
+    // `$` or backtick in the path from expanding; a `'` inside it is escaped by doubling.
+    internal static string CodexWindowsCommand(string exe) => $"& '{exe.Replace("'", "''")}' {CodexMarker}";
+    static string CodexPosixCommand(string exe) => $"\"{exe}\" {CodexMarker}";
 
     static JsonObject CodexHandler() => new()
     {
         ["type"] = "command",
-        ["command"] = CodexCommand,
-        ["commandWindows"] = CodexCommand,
+        ["command"] = CodexPosixCommand(Exe),
+        ["commandWindows"] = CodexWindowsCommand(Exe),
         ["timeout"] = 2,
     };
 
@@ -243,14 +223,11 @@ public static class AgentHookRegistrar
         {
             var root = ReadJsonObject(CodexPath);
             var hooks = root is null ? null : ValidatedHooks(root, CodexFile);
-            if (hooks is null) return HookState.NotRegistered;
-            bool anyOurs = hooks.Any(ev => ((JsonArray)ev.Value!).Any(g => ((JsonArray)g!["hooks"]!).Any(IsCodexHandler)));
-            if (!anyOurs) return HookState.NotRegistered;
+            if (hooks is null || !HasAnyHandler(hooks, IsCodexHandler)) return HookState.NotRegistered;
+            // A handler that differs in any field (e.g. the old quoted-path commandWindows PowerShell
+            // rejects) reads as outdated, so Register rewrites it in place.
             bool current = CodexEvents.All(ev => hooks[ev] is JsonArray groups
-                && groups.Sum(g => ((JsonArray)g!["hooks"]!).Count(IsCodexHandler)) == 1
-                && groups.Any(g => g is JsonObject group
-                    && MatchesAll(group)
-                    && ((JsonArray)group["hooks"]!).Any(h => JsonNode.DeepEquals(h, CodexHandler()))));
+                && HasExactlyHandler(groups, IsCodexHandler, MatchesAll, CodexHandler()));
             return current ? HookState.Registered : HookState.Outdated;
         }
         catch (InvalidOperationException) { return HookState.ConfigConflict; }
@@ -299,6 +276,15 @@ public static class AgentHookRegistrar
         }
         return hooks;
     }
+
+    static bool HasAnyHandler(JsonObject hooks, Func<JsonNode?, bool> isOurs)
+        => hooks.Any(ev => ((JsonArray)ev.Value!).Any(g => ((JsonArray)g!["hooks"]!).Any(isOurs)));
+
+    // True when the event's groups hold exactly one handler of ours, equal to <expected>, in a group
+    // that passes <groupOk>.
+    static bool HasExactlyHandler(JsonArray groups, Func<JsonNode?, bool> isOurs, Func<JsonObject, bool> groupOk, JsonObject expected)
+        => groups.Sum(g => ((JsonArray)g!["hooks"]!).Count(isOurs)) == 1
+           && groups.OfType<JsonObject>().Any(g => groupOk(g) && ((JsonArray)g["hooks"]!).Any(h => JsonNode.DeepEquals(h, expected)));
 
     // Removes only our handlers from each (validated) group, dropping a group only when that leaves
     // it empty — a user's own command sharing a group with ours survives. <keep> is spared.

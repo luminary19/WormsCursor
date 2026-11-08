@@ -6,10 +6,11 @@ namespace WormsCursor.Core;
 /// <summary>
 /// Loads/saves <see cref="CursorSettings"/> as JSON in %LocalAppData%\WormsCursor\.
 /// Mirrors PowerLink's store: indented JSON, atomic write (tmp + replace), tolerant
-/// load (corrupt/missing → defaults). A file that exists but won't parse is moved aside to
-/// <c>settings.json.corrupt-&lt;timestamp&gt;</c> first, so the next save can't destroy a
-/// hand edit that merely has a typo. Living in LocalAppData (not next to the exe)
-/// means an installer/update that replaces the app folder leaves settings untouched.
+/// load (corrupt/missing → defaults). A file that exists but won't parse is never replaced
+/// unless a copy of it was saved first: <see cref="Save"/> copies it to
+/// <c>settings.json.corrupt-&lt;timestamp&gt;</c> before writing, and refuses to write if that copy
+/// fails, so a hand edit that merely has a typo is never destroyed. Living in LocalAppData (not next
+/// to the exe) means an installer/update that replaces the app folder leaves settings untouched.
 /// </summary>
 public static class SettingsStore
 {
@@ -29,16 +30,12 @@ public static class SettingsStore
         "WormsCursor",
         "settings.json");
 
-    /// <summary>Loads settings, or returns normalized defaults if missing/corrupt/unreadable. A corrupt
-    /// file is preserved (moved aside) before falling back, never silently left to be overwritten.
-    /// For the owning app; another process that only reads the file uses <see cref="TryRead"/>.</summary>
+    /// <summary>Loads settings, or returns normalized defaults if missing/corrupt/unreadable. Never
+    /// touches the file: a corrupt one stays where it is, and <see cref="Save"/> keeps a copy of it
+    /// before replacing it. For the owning app; another process that only reads the file uses
+    /// <see cref="TryRead"/>, which tells a failed read apart from the defaults.</summary>
     public static CursorSettings Load(string? path = null)
-    {
-        var source = path ?? DefaultPath;
-        var loaded = TryParse(source, out bool corrupt);
-        if (corrupt) Quarantine(source);
-        return loaded ?? new CursorSettings();
-    }
+        => TryParse(path ?? DefaultPath, out _) ?? new CursorSettings();
 
     /// <summary>For a read-only consumer in another process (the OpenCode helper), which must not move
     /// the tray app's settings out from under it: never touches the file. Returns the defaults when no
@@ -76,17 +73,11 @@ public static class SettingsStore
         }
     }
 
-    // Moves a corrupt settings file aside so the defaults we fall back to can't overwrite it on the
-    // next save. Best-effort: if even the move fails there's nothing better to do than use defaults.
-    static void Quarantine(string source)
-    {
-        try { File.Move(source, $"{source}.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}"); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-    }
-
-    /// <summary>Saves settings atomically (write tmp, then replace). Throws
+    /// <summary>Saves settings atomically (write tmp, then replace). An existing file that doesn't
+    /// parse is first copied to <c>&lt;path&gt;.corrupt-&lt;timestamp&gt;</c>. Throws
     /// <see cref="IOException"/>/<see cref="UnauthorizedAccessException"/> if the file can't be
-    /// written (read-only, locked); the caller decides whether that's fatal.</summary>
+    /// written (read-only, locked) or that copy can't be made — the target is then left untouched;
+    /// the caller decides whether that's fatal.</summary>
     public static void Save(CursorSettings settings, string? path = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -94,6 +85,11 @@ public static class SettingsStore
         var dir = Path.GetDirectoryName(target);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
+
+        // The one place a file gets replaced, so the one place that keeps an unparseable one. A
+        // failed copy throws before anything is written.
+        TryParse(target, out bool corrupt);
+        if (corrupt) File.Copy(target, $"{target}.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}");
 
         var json = JsonSerializer.Serialize(settings, JsonOptions);
         var tmp = target + ".tmp";

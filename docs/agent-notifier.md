@@ -87,17 +87,26 @@ One JSON object per line:
   "sessionId": "abc123", "project": "/abs/path", "message": "Permission needed", "ts": "ISO-8601" }
 ```
 
-`event` ∈ `thinking_started | awaiting_user | turn_complete | tool_use | error | session_end`.
-Per-tool mapping (verified against live docs):
+`event` ∈ `thinking_started | awaiting_user | turn_complete | tool_use | error | session_end |
+input_requested | input_answered`; `agentId` names the subagent (absent = main agent) and `inputIds`
+names the items an event opens or answers. Current mapping (Claude Code 2.1.x, Codex 0.162.x; the
+Cursor column of the original design was never shipped):
 
-| normalised        | Claude Code                                   | Codex                 | Cursor                |
-|-------------------|-----------------------------------------------|-----------------------|-----------------------|
-| `thinking_started`| `UserPromptSubmit` / `SessionStart`           | — (none)              | `sessionStart`/`preToolUse` |
-| `awaiting_user`   | `PermissionRequest` (scoped to the asking agent by `agent_id`) / `Notification` `elicitation_dialog` | — (none) | `beforeShellExecution` |
-| `turn_complete`   | `Stop`                                        | `agent-turn-complete` | `stop`                |
-| `tool_use`        | `PreToolUse`/`PostToolUse`                     | —                     | `preToolUse`/`postToolUse` |
-| `error`           | `StopFailure`/`PostToolUseFailure`            | —                     | `postToolUseFailure`  |
-| `session_end`     | `SessionEnd` (/exit, Ctrl+C, /clear, logout)  | —                     | —                     |
+| normalised        | Claude Code                                   | Codex                 |
+|-------------------|-----------------------------------------------|-----------------------|
+| `thinking_started`| `UserPromptSubmit` / `SessionStart`           | `UserPromptSubmit`    |
+| `awaiting_user`   | `PermissionRequest`, `PreToolUse` of `AskUserQuestion` (both keyed by `agent_id`); `Elicitation` (keyed by its id in `inputIds`) | `PermissionRequest`, `PreToolUse` of `request_user_input` / `request_permissions` |
+| `turn_complete`   | `Stop` (unless background subagents are running), `Notification` `idle_prompt` | `Stop` |
+| `tool_use`        | `PreToolUse` / `PostToolUse` / `PostToolUseFailure` | `PreToolUse` / `PostToolUse`, `SessionStart` |
+| `error`           | `StopFailure`                                 | —                     |
+| `session_end`     | `SessionEnd` (/exit, Ctrl+C, /clear, logout)  | `SessionEnd`, `Interrupt` |
+| `input_requested` | —                                             | `PostToolUse` of `request_user_input_async` |
+| `input_answered`  | `ElicitationResult` (same id as its `Elicitation`) | `UserPromptSubmit` carrying question replies |
+
+Claude's `Notification` payload has no `agent_id` (its hook input is built without the agent's tool
+context), so it is never used for a blocked state. Neither do `Elicitation`/`ElicitationResult`
+carry one; they are matched by `mcp_server_name` + `elicitation_id` instead. Codex runs Windows hooks
+in PowerShell, so its `commandWindows` is registered as `& '<exe>' hook --tool codex`.
 
 Claude has **no** hook for "user started typing" or window focus, so `SessionEnd` (on exit) and
 `UserPromptSubmit`/`SessionStart` (on return) are the signals that clear a waiting indicator.
@@ -107,6 +116,13 @@ Codex argv JSON gives `type`, `thread-id`, `cwd`, `last-assistant-message`. Code
 `agent-turn-complete` — no native "awaiting"; we don't fake it.
 
 ### 3. State model — `AgentActivity` (Core, UI-free)
+
+> **Current model** (supersedes the bullets below): each session holds a timed *finished* notice
+> (turn complete / idle reminder / error) plus three sticky sets — prompts keyed by blocked agent id,
+> prompts keyed by their own item id (elicitations), and pending asynchronous questions. An agent's
+> tool activity clears only its own prompt; an item prompt clears only on its answer. `Waiting`
+> reports one `WaitingAgent(Tool, State)` per session, `State` = `Blocked` while any sticky set is
+> non-empty, else `Finished`. Only finished sessions are swept by the TTL.
 
 A thread-safe tracker of which agent sessions currently **need the user**.
 

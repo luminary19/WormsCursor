@@ -12,8 +12,11 @@ var tests = new (string Name, Action Run)[]
     ("Sweeping during a hook refreshes the waiting logos", SweepDuringHook),
     ("Async questions persist until their individual replies", AsyncQuestions),
     ("Async questions and approvals clear independently", OverlappingAttention),
-    ("Claude behavior remains unchanged", Claude),
+    ("Claude events map from their payloads alone", Claude),
+    ("Blocked-on-you prompts clear only on their own answer", BlockedAttribution),
+    ("Waiting sessions report finished vs blocked", FinishedVersusBlocked),
     ("Codex registration merges, refreshes, and unregisters", Registration),
+    ("Codex's Windows hook command parses in PowerShell", CodexWindowsCommandShell),
     ("Malformed configs are preserved", MalformedConfigs),
     ("CODEX_HOME is respected", CodexHome),
     ("A sibling subagent's tool use keeps another agent's approval", SubagentApprovals),
@@ -42,9 +45,15 @@ static void Equal<T>(T expected, T actual)
         throw new InvalidOperationException($"Expected {expected}, got {actual}.");
 }
 
-static AgentEventMessage Parse(object payload, string tool = "codex", string? ev = null)
-    => AgentHookBridge.Parse(tool, JsonSerializer.Serialize(payload), ev)
+static AgentEventMessage Parse(object payload, string tool = "codex")
+    => AgentHookBridge.Parse(tool, JsonSerializer.Serialize(payload))
         ?? throw new InvalidOperationException("Expected a normalized event.");
+
+static AgentEventMessage? TryParse(object payload, string tool = "claude-code")
+    => AgentHookBridge.Parse(tool, JsonSerializer.Serialize(payload));
+
+static string States(AgentActivity activity)
+    => string.Join(',', activity.Waiting.Select(w => $"{w.Tool}:{w.State}"));
 
 static void Apply(AgentActivity activity, AgentEventMessage message, DateTime now)
 {
@@ -61,8 +70,7 @@ static void Lifecycle()
         hook_event_name = name, session_id = "root", cwd = "C:\\project", tool_name = tool,
     });
     Apply(activity, Event("Stop"), now);
-    Equal(1, activity.WaitingCount);
-    Equal("codex", activity.WaitingTools[0]);
+    Equal("codex:Finished", States(activity));
     activity.Sweep(now.AddSeconds(11));
     Equal(0, activity.WaitingCount);
     Apply(activity, Event("PermissionRequest"), now);
@@ -103,7 +111,7 @@ static void SweepDuringHook()
     activity.Report("claude-code", "claude", null, AgentEventKind.TurnComplete, now.AddSeconds(12));
     activity.Report("codex", "root", null, AgentEventKind.TurnComplete, now.AddSeconds(23));
     Equal("1,0,1,1", string.Join(',', updates));
-    Equal("codex", activity.WaitingTools.Single());
+    Equal("codex:Finished", States(activity));
 }
 
 static void AsyncQuestions()
@@ -175,11 +183,121 @@ static void AsyncQuestions()
 
 static void Claude()
 {
-    Equal("turn_complete", Parse(new { hook_event_name = "Stop" }, "claude-code").Event);
-    Equal("awaiting_user", Parse(new { hook_event_name = "Notification" }, "claude-code", "awaiting_user").Event);
-    Equal("turn_complete", Parse(new { hook_event_name = "Notification" }, "claude-code", "turn_complete").Event);
-    Equal("tool_use", Parse(new { hook_event_name = "PostToolUse" }, "claude-code").Event);
+    Equal("turn_complete", TryParse(new { hook_event_name = "Stop" })?.Event);
     Equal<AgentEventMessage?>(null, AgentHookBridge.Parse("claude-code", "{\"hook_event_name\":\"Stop\",\"background_tasks\":[{\"type\":\"subagent\"}]}"));
+    Equal("error", TryParse(new { hook_event_name = "StopFailure" })?.Event);
+
+    // Notification carries no agent_id, so it is never a blocked state; only the idle reminder counts,
+    // as a finished nudge. A legacy "--event awaiting_user" argument can no longer turn it into one.
+    Equal("turn_complete", TryParse(new { hook_event_name = "Notification", notification_type = "idle_prompt" })?.Event);
+    foreach (string? type in new[] { "permission_prompt", "elicitation_dialog", null })
+        Equal<AgentEventMessage?>(null, TryParse(new { hook_event_name = "Notification", notification_type = type }));
+
+    // AskUserQuestion is a tool: its PreToolUse is the question, owned by the asking agent.
+    var asked = TryParse(new { hook_event_name = "PreToolUse", tool_name = "AskUserQuestion", agent_id = "agent-a" })!;
+    Equal("awaiting_user", asked.Event);
+    Equal("agent-a", asked.AgentId);
+    Equal("awaiting_user", TryParse(new { hook_event_name = "PermissionRequest", tool_name = "Bash" })?.Event);
+    foreach (string name in new[] { "PreToolUse", "PostToolUse", "PostToolUseFailure" })
+        Equal("tool_use", TryParse(new { hook_event_name = name, tool_name = "Bash" })?.Event);
+    Equal("tool_use", TryParse(new { hook_event_name = "PostToolUse", tool_name = "AskUserQuestion" })?.Event);
+
+    // An MCP elicitation names itself (server + optional id) on both sides.
+    var elicit = TryParse(new { hook_event_name = "Elicitation", mcp_server_name = "github", message = "Token?", mode = "form" })!;
+    var result = TryParse(new { hook_event_name = "ElicitationResult", mcp_server_name = "github", action = "accept", mode = "form" })!;
+    Equal("awaiting_user", elicit.Event);
+    Equal("input_answered", result.Event);
+    Equal(elicit.InputIds!.Single(), result.InputIds!.Single());
+    var other = TryParse(new { hook_event_name = "ElicitationResult", mcp_server_name = "github", elicitation_id = "e-2", action = "cancel" })!;
+    Equal(false, other.InputIds!.Single() == elicit.InputIds!.Single());
+
+    Equal<AgentEventMessage?>(null, AgentHookBridge.Parse("claude-code", ""));
+    Equal<AgentEventMessage?>(null, AgentHookBridge.Parse("claude-code", "not json"));
+}
+
+// Claude payloads, end to end through the bridge into AgentActivity, for one session "s".
+static void BlockedAttribution()
+{
+    var now = DateTime.UtcNow;
+    AgentEventMessage Ev(string name, string? agent = null, string tool = "Bash", string? server = null, string? id = null)
+        => Parse(new
+        {
+            hook_event_name = name, session_id = "s", tool_name = tool, agent_id = agent,
+            mcp_server_name = server, elicitation_id = id,
+        }, "claude-code");
+    void Run(AgentActivity a, params AgentEventMessage[] events) { foreach (var e in events) Apply(a, e, now); }
+
+    // A subagent asks, a sibling and the main agent keep working: still blocked, never swept.
+    foreach (var ask in new Func<AgentEventMessage>[]
+             { () => Ev("PermissionRequest", "a"), () => Ev("PreToolUse", "a", "AskUserQuestion") })
+    {
+        var activity = new AgentActivity(TimeSpan.FromSeconds(10));
+        Run(activity, ask(), Ev("PreToolUse", "b"), Ev("PostToolUse", "b"), Ev("PostToolUse"));
+        activity.Sweep(now.AddHours(1));
+        Equal("claude-code:Blocked", States(activity));
+        Run(activity, Ev("PostToolUse", "a", "AskUserQuestion")); // a answered
+        Equal("", States(activity));
+    }
+
+    // Two subagents ask; each answer clears only its own prompt. A declined question
+    // (PostToolUseFailure) is an answer too.
+    var two = new AgentActivity(TimeSpan.FromSeconds(10));
+    Run(two, Ev("PreToolUse", "a", "AskUserQuestion"), Ev("PermissionRequest", "b"));
+    Run(two, Ev("PostToolUseFailure", "a", "AskUserQuestion"));
+    Equal("claude-code:Blocked", States(two));
+    Run(two, Ev("PostToolUse", "b"));
+    Equal("", States(two));
+
+    // The main agent asks while background subagents run tools: stays until the main agent answers.
+    var main = new AgentActivity(TimeSpan.FromSeconds(10));
+    Run(main, Ev("PreToolUse", null, "AskUserQuestion"));
+    for (int i = 0; i < 3; i++) Run(main, Ev("PreToolUse", "bg-1"), Ev("PostToolUse", "bg-2"), Ev("PostToolUseFailure", "bg-1"));
+    main.Sweep(now.AddHours(1));
+    Equal("claude-code:Blocked", States(main));
+    Run(main, Ev("PostToolUse", null, "AskUserQuestion"));
+    Equal("", States(main));
+
+    // An MCP elicitation has no agent: no agent's tool use clears it, only its own result does.
+    var elicit = new AgentActivity(TimeSpan.FromSeconds(10));
+    Run(elicit, Ev("Elicitation", server: "github"), Ev("Elicitation", server: "auth", id: "e-1"));
+    Run(elicit, Ev("PostToolUse"), Ev("PostToolUse", "a"), Ev("ElicitationResult", server: "auth", id: "e-2"));
+    elicit.Sweep(now.AddHours(1));
+    Equal("claude-code:Blocked", States(elicit));
+    Run(elicit, Ev("ElicitationResult", server: "github"));
+    Equal("claude-code:Blocked", States(elicit)); // "auth"/"e-1" is still open
+    Run(elicit, Ev("ElicitationResult", server: "auth", id: "e-1"));
+    Equal("", States(elicit));
+
+    // A finished turn ends every mid-turn prompt; a new prompt clears everything.
+    Run(elicit, Ev("Elicitation", server: "github"), Ev("PermissionRequest", "a"), Ev("Stop"));
+    Equal("claude-code:Finished", States(elicit));
+    Run(elicit, Ev("PermissionRequest", "a"), Ev("UserPromptSubmit"));
+    Equal("", States(elicit));
+}
+
+static void FinishedVersusBlocked()
+{
+    var now = DateTime.UtcNow;
+    var activity = new AgentActivity(TimeSpan.FromSeconds(10));
+    var updates = new List<int>();
+    activity.WaitingChanged += updates.Add;
+    Apply(activity, Parse(new { hook_event_name = "Stop", session_id = "one" }, "claude-code"), now);
+    Apply(activity, Parse(new { hook_event_name = "PermissionRequest", session_id = "two", tool_name = "Bash" }, "claude-code"), now);
+    Apply(activity, Parse(new { hook_event_name = "Notification", session_id = "three", notification_type = "idle_prompt" }, "claude-code"), now);
+    Equal("claude-code:Finished,claude-code:Blocked,claude-code:Finished", States(activity));
+    Equal(3, activity.WaitingCount);
+
+    // Moving between finished and blocked at the same count still refreshes the display.
+    activity.Report("codex", "four", null, AgentEventKind.TurnComplete, now);
+    activity.Report("codex", "four", null, AgentEventKind.InputRequested, now, new[] { "q-1" });
+    Equal("1,2,3,4,4", string.Join(',', updates));
+    Equal("codex:Blocked", activity.Waiting[3].Tool + ":" + activity.Waiting[3].State);
+
+    // The idle timeout sweeps only the finished ones.
+    activity.Sweep(now.AddSeconds(11));
+    Equal("claude-code:Blocked,codex:Blocked", States(activity));
+    activity.Report("codex", "four", null, AgentEventKind.InputAnswered, now.AddSeconds(12), new[] { "q-1" });
+    Equal("claude-code:Blocked", States(activity));
 }
 
 static void OverlappingAttention()
@@ -261,10 +379,75 @@ static void Registration() => WithHome(home =>
     var refreshed = JsonNode.Parse(File.ReadAllText(path))!;
     Equal(1, refreshed["hooks"]!["Stop"]!.AsArray().Count);
     Equal(2, refreshed["hooks"]!["Stop"]![0]!["hooks"]!.AsArray().Count);
+
+    // The pre-PowerShell shape ("<exe>" hook --tool codex in commandWindows, which PowerShell rejects)
+    // reads as outdated, and Register rewrites it in place rather than adding a second handler.
+    var broken = JsonNode.Parse(File.ReadAllText(path))!;
+    foreach (var ev in broken["hooks"]!.AsObject())
+        foreach (var group in ev.Value!.AsArray())
+            foreach (var hook in group!["hooks"]!.AsArray())
+                if (hook!["commandWindows"] is JsonNode windows && windows.GetValue<string>().Contains("hook --tool codex"))
+                    hook["commandWindows"] = hook["command"]!.GetValue<string>();
+    File.WriteAllText(path, broken.ToJsonString());
+    Equal(HookState.Outdated, AgentHookRegistrar.GetState("codex"));
+    AgentHookRegistrar.Register("codex");
+    Equal(HookState.Registered, AgentHookRegistrar.GetState("codex"));
+    var fixedUp = JsonNode.Parse(File.ReadAllText(path))!;
+    var ours = fixedUp["hooks"]!["Stop"]![0]!["hooks"]![1]!;
+    Equal(AgentHookRegistrar.CodexWindowsCommand(Environment.ProcessPath!), ours["commandWindows"]!.GetValue<string>());
+    Equal(2, fixedUp["hooks"]!["Stop"]![0]!["hooks"]!.AsArray().Count);
+
     AgentHookRegistrar.Unregister("codex");
     Equal(HookState.NotRegistered, AgentHookRegistrar.GetState("codex"));
     Equal(true, JsonNode.DeepEquals(JsonNode.Parse(original), JsonNode.Parse(File.ReadAllText(path))));
 });
+
+// Codex runs commandWindows as `powershell.exe -NoProfile -Command <commandWindows>` (pwsh when
+// installed). Parse the emitted command with PowerShell's own parser: it must be a call-operator
+// invocation of exactly the exe and our arguments, even for paths with spaces, `$`, backticks and `'`.
+static void CodexWindowsCommandShell()
+{
+    const string script = """
+        $e = $null; $t = $null
+        $a = [System.Management.Automation.Language.Parser]::ParseInput($env:WC_HOOK_CMD, [ref]$t, [ref]$e)
+        $c = $a.Find({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)
+        $parts = @($e | ForEach-Object { 'error:' + $_.ErrorId })
+        if ($c) {
+            $parts += 'op:' + $c.InvocationOperator
+            $parts += @($c.CommandElements | ForEach-Object {
+                if ($_ -is [System.Management.Automation.Language.StringConstantExpressionAst]) { $_.Value } else { '<expr>' } })
+        }
+        [Console]::Out.Write(($parts -join "`n"))
+        """;
+    string Shape(string command)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("powershell.exe")
+        {
+            RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+        };
+        foreach (var arg in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand",
+                     Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(
+                         "[Console]::OutputEncoding = [Text.Encoding]::UTF8\n" + script)) })
+            psi.ArgumentList.Add(arg);
+        psi.Environment["WC_HOOK_CMD"] = command;
+        using var ps = System.Diagnostics.Process.Start(psi)!;
+        string output = ps.StandardOutput.ReadToEnd();
+        ps.WaitForExit();
+        return output.Replace("\r", "");
+    }
+
+    foreach (string exe in new[]
+             {
+                 @"C:\Users\me\AppData\Local\WormsCursor\current\WormsCursor.exe",
+                 @"C:\Program Files\Worms Cursor\WormsCursor.exe",
+                 @"C:\Users\O'Brien\$HOME `n\WormsCursor.exe",
+             })
+        Equal($"op:Ampersand\n{exe}\nhook\n--tool\ncodex", Shape(AgentHookRegistrar.CodexWindowsCommand(exe)));
+
+    // The old form is what Codex's PowerShell rejected: a quoted path followed by bare arguments.
+    Equal(true, Shape("\"C:\\Program Files\\Worms Cursor\\WormsCursor.exe\" hook --tool codex").StartsWith("error:UnexpectedToken"));
+}
 
 static void MalformedConfigs() => WithHome(home =>
 {
@@ -350,6 +533,9 @@ static void ClaudeRegistration() => WithHome(home =>
     string original = File.ReadAllText(path);
     AgentHookRegistrar.Register("claude-code");
     Equal(HookState.Registered, AgentHookRegistrar.GetState("claude-code"));
+    string once = File.ReadAllText(path);
+    AgentHookRegistrar.Register("claude-code"); // a refresh rewrites nothing
+    Equal(once, File.ReadAllText(path));
     var root = JsonNode.Parse(File.ReadAllText(path))!;
     Equal(true, root["hooks"]!["PermissionRequest"] is JsonArray);
     // The approval prompt comes from PermissionRequest (it carries agent_id), not Notification.
@@ -377,6 +563,38 @@ static void ClaudeRegistration() => WithHome(home =>
     var old = JsonNode.Parse(File.ReadAllText(path))!;
     old["hooks"]!.AsObject().Remove("PermissionRequest");
     File.WriteAllText(path, old.ToJsonString());
+    Equal(HookState.Outdated, AgentHookRegistrar.GetState("claude-code"));
+
+    // So does the previous version's shape: Notification routed per type with --event (its
+    // elicitation_dialog entry filed subagent prompts under the main agent), no PostToolUseFailure,
+    // no Elicitation / ElicitationResult. Register replaces it with today's events.
+    string exe = Environment.ProcessPath!;
+    JsonObject Group(string matcher, string command) => new()
+    {
+        ["matcher"] = matcher,
+        ["hooks"] = new JsonArray(new JsonObject { ["type"] = "command", ["command"] = command }),
+    };
+    var previous = new JsonObject();
+    foreach (string ev in new[] { "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "StopFailure", "SessionStart", "SessionEnd" })
+        previous[ev] = new JsonArray(Group("*", $"\"{exe}\" hook --tool claude-code"));
+    previous["Notification"] = new JsonArray(
+        Group("elicitation_dialog", $"\"{exe}\" hook --tool claude-code --event awaiting_user"),
+        Group("idle_prompt", $"\"{exe}\" hook --tool claude-code --event turn_complete"));
+    File.WriteAllText(path, new JsonObject { ["hooks"] = previous }.ToJsonString());
+    Equal(HookState.Outdated, AgentHookRegistrar.GetState("claude-code"));
+    AgentHookRegistrar.Register("claude-code");
+    Equal(HookState.Registered, AgentHookRegistrar.GetState("claude-code"));
+    string current = File.ReadAllText(path);
+    Equal(false, current.Contains("--event"));
+    Equal(false, current.Contains("elicitation_dialog"));
+    var hooks = JsonNode.Parse(current)!["hooks"]!;
+    foreach (string ev in new[] { "PostToolUseFailure", "Elicitation", "ElicitationResult" })
+        Equal("*", hooks[ev]![0]!["matcher"]!.GetValue<string>());
+    Equal(1, hooks["Notification"]!.AsArray().Count);
+    Equal("idle_prompt", hooks["Notification"]![0]!["matcher"]!.GetValue<string>());
+
+    // A hook pointing at another exe (an old install or dev build) also needs a refresh.
+    File.WriteAllText(path, current.Replace(JsonSerializer.Serialize(exe)[1..^1], @"C:\\old\\WormsCursor.exe"));
     Equal(HookState.Outdated, AgentHookRegistrar.GetState("claude-code"));
 });
 
@@ -442,16 +660,41 @@ static void SettingsPersistence() => WithHome(home =>
     File.WriteAllText(path, "{\n  // bigger token\n  \"Size\": 120,\n}");
     Equal(120, SettingsStore.Load(path).Size);
 
-    // An unparseable file is moved aside, so saving the defaults can't destroy it.
+    // An unparseable file loads as the defaults and is left alone; the save that replaces it keeps a
+    // copy first, and later saves (of a now-valid file) make no more copies.
     string corrupt = "{\"Size\": 120, \"Corner\": \"Bottom\"}";
     File.WriteAllText(path, corrupt);
     var loaded = SettingsStore.Load(path);
     Equal(96, loaded.Size);
+    Equal(corrupt, File.ReadAllText(path));
+    Equal(0, Directory.GetFiles(home, "settings.json.corrupt-*").Length);
+    SettingsStore.Save(loaded, path);
     string[] kept = Directory.GetFiles(home, "settings.json.corrupt-*");
     Equal(1, kept.Length);
     Equal(corrupt, File.ReadAllText(kept[0]));
+    Equal(96, SettingsStore.Load(path).Size);
     SettingsStore.Save(loaded, path);
-    Equal(corrupt, File.ReadAllText(kept[0]));
+    Equal(1, Directory.GetFiles(home, "settings.json.corrupt-*").Length);
+
+    // If that copy can't be made, nothing is written: the corrupt file survives and Save throws.
+    File.Delete(kept[0]);
+    File.WriteAllText(path, corrupt);
+    var blocked = new List<string>();
+    var stamp = DateTime.Now;
+    for (int s = -1; s <= 5; s++) // occupy every name the copy could take in the next few seconds
+    {
+        string name = $"{path}.corrupt-{stamp.AddSeconds(s):yyyyMMdd-HHmmss}";
+        Directory.CreateDirectory(name);
+        blocked.Add(name);
+    }
+    bool refused = false;
+    try { SettingsStore.Save(loaded, path); }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { refused = true; }
+    Equal(true, refused);
+    Equal(corrupt, File.ReadAllText(path));
+    Equal(false, File.Exists(path + ".tmp"));
+    foreach (string name in blocked) Directory.Delete(name);
+    SettingsStore.Save(loaded, path);
 
     // A read-only target throws (the app decides how to handle it) and leaves no orphaned tmp.
     File.SetAttributes(path, FileAttributes.ReadOnly);

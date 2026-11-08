@@ -28,7 +28,8 @@ public sealed class AgentEventMessage
     public string? Project { get; set; }
     public string? Message { get; set; }
     public string? Ts { get; set; }
-    /// <summary>Stable question IDs for asynchronous requests and their individual replies.</summary>
+    /// <summary>Stable ids of the items this event opens or answers: Codex asynchronous questions and
+    /// their individual replies, or Claude MCP elicitations and their results.</summary>
     public string[]? InputIds { get; set; }
 
     static readonly JsonSerializerOptions Json = new()

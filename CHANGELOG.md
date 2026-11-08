@@ -37,6 +37,20 @@ GitHub releases. The release workflow pulls the matching section into each relea
   and restart your agent session to pick up the new events.
 
 ### Fixed
+- **Codex hooks work on Windows again.** Codex runs Windows hook commands in PowerShell, which
+  rejected the command WormsCursor registered (a quoted exe path followed by arguments), so every
+  Codex hook failed and the token never showed for Codex. The command now uses PowerShell's call
+  operator. *Agent settings…* shows Codex as *Update available*: **Re-register** it, approve the
+  changed hooks in Codex (`/hooks`), and restart open Codex sessions.
+- **The token knows when an agent is blocked on you, and who asked.** Every "waiting for your
+  answer" state now comes from a Claude Code hook that says which agent asked and has a matching
+  "answered" event: permission requests (`PermissionRequest`), questions (`AskUserQuestion`), and MCP
+  server requests for input (`Elicitation` / `ElicitationResult`). A question from a subagent no
+  longer gets filed under the main agent, and a question from the main agent is no longer cleared by
+  background subagents that keep working. Claude's `Notification` hook is now used only for its
+  "still waiting for your input" reminder. *Agent settings…* shows Claude Code as *Update available*
+  (it also does when the registered hook points at a different `WormsCursor.exe`): **Re-register**
+  it to pick this up.
 - Preferences layout: the corner picker no longer runs past the window edge.
 - The token no longer pops up when Claude Code hands work to background subagents. Spawning them
   ends Claude's turn at once, but it picks back up by itself when they report in, so it isn't your
@@ -50,8 +64,9 @@ GitHub releases. The release workflow pulls the matching section into each relea
   Preferences was open (the linger timeout or the on/off toggle).
 - Closing *What's new* before the release notes finish loading no longer shows an error dialog.
 - A read-only or locked `settings.json` no longer crashes the app. A settings file that doesn't parse
-  is kept as `settings.json.corrupt-<time>` and is no longer overwritten with defaults. Trailing commas
-  and `//` comments in it are now accepted.
+  is no longer overwritten with defaults: before WormsCursor next saves, it copies the file to
+  `settings.json.corrupt-<time>`, and if that copy fails it doesn't save at all. Trailing commas and
+  `//` comments in it are now accepted.
 - Register / Unregister keeps your own hook commands even when they share a matcher group with
   WormsCursor's. The `.wormscursor.bak` backup now always holds your original file, and a malformed
   Claude Code `settings.json` shows *Manual setup needed* instead of being partly overwritten.
@@ -60,7 +75,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - `WormsCursor.exe register|unregister` now exits non-zero and says why when it fails (including an
   unknown `--tool`).
 - The OpenCode integration no longer re-runs a failing helper build every few seconds. It reports the
-  failure once and waits until the helper sources change.
+  failure once, then tries again after five minutes, or at once when the helper sources change.
 
 ### Removed
 - The **Check for updates** button in Preferences (the app still records the version for the post-update

@@ -77,14 +77,15 @@ public sealed class NotifierOverlay : IDisposable
         _foreground.Changed += Reevaluate;
     }
 
-    /// <summary>Set which agent sessions currently await the user — one tool id per waiting agent
-    /// (empty = none). Starts/stops the animation accordingly. Thread-safe (just swaps volatile state
-    /// and wakes the animation thread); call from anywhere.</summary>
-    public void SetWaitingAgents(IReadOnlyList<string>? tools)
+    /// <summary>Set which agent sessions currently await the user — one entry per waiting session
+    /// (empty = none), each with its tool and whether it is blocked on you or finished. The token draws
+    /// one logo per session whatever the state. Starts/stops the animation accordingly. Thread-safe
+    /// (just swaps volatile state and wakes the animation thread); call from anywhere.</summary>
+    public void SetWaitingAgents(IReadOnlyList<WaitingAgent>? agents)
     {
-        _tools = tools is null
+        _tools = agents is null
             ? Array.Empty<string>()
-            : tools.Where(t => !string.IsNullOrEmpty(t)).ToArray();
+            : agents.Select(a => a.Tool).Where(t => !string.IsNullOrEmpty(t)).ToArray();
         Reevaluate();
     }
 
