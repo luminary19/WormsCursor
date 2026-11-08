@@ -17,6 +17,10 @@ The native renderer retains Pi's spring, high-resolution refresh-rate clock,
 coalesced UI frames, cached logo, and reusable DIB surface. Its frame clock stops
 while hidden. It uses the bundled OpenCode logo instead of Pi's mark.
 
+Like the WormsCursor tray token, the helper stays hidden while a program on the
+**Hide the token while using** list in WormsCursor's Preferences is in front.
+Dota 2 is on that list by default.
+
 ## Install
 
 Run from the WormsCursor checkout on Windows with Node 24 and the .NET 8 SDK:

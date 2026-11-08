@@ -30,33 +30,45 @@ public static class SettingsStore
         "settings.json");
 
     /// <summary>Loads settings, or returns normalized defaults if missing/corrupt/unreadable. A corrupt
-    /// file is preserved (moved aside) before falling back, never silently left to be overwritten.</summary>
+    /// file is preserved (moved aside) before falling back, never silently left to be overwritten.
+    /// For the owning app; another process that only reads the file uses <see cref="Read"/>.</summary>
     public static CursorSettings Load(string? path = null)
     {
         var source = path ?? DefaultPath;
-        if (File.Exists(source))
+        var loaded = TryParse(source, out bool corrupt);
+        if (corrupt) Quarantine(source);
+        return loaded ?? new CursorSettings();
+    }
+
+    /// <summary>Like <see cref="Load"/>, but never touches the file: a corrupt one is left for the
+    /// owning app to deal with. For a read-only consumer in another process (the OpenCode helper),
+    /// which must not move the tray app's settings out from under it.</summary>
+    public static CursorSettings Read(string? path = null)
+        => TryParse(path ?? DefaultPath, out _) ?? new CursorSettings();
+
+    // The settings in `source`, normalized; null when it is missing, unreadable (locked, ACL-denied)
+    // or corrupt. `corrupt` tells the last case apart: the file exists but isn't valid settings JSON.
+    static CursorSettings? TryParse(string source, out bool corrupt)
+    {
+        corrupt = false;
+        if (!File.Exists(source)) return null;
+        try
         {
-            try
-            {
-                var loaded = JsonSerializer.Deserialize<CursorSettings>(File.ReadAllText(source), JsonOptions);
-                if (loaded is not null)
-                {
-                    // Migration hook: when Version changes in future, upgrade here.
-                    loaded.Normalize();
-                    return loaded;
-                }
-                Quarantine(source); // a bare `null` document
-            }
-            catch (JsonException)
-            {
-                Quarantine(source); // unparseable (bad syntax, unknown enum name, …)
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
-            {
-                // Fall through to defaults on an unreadable file (locked, ACL-denied); it's left in place.
-            }
+            var loaded = JsonSerializer.Deserialize<CursorSettings>(File.ReadAllText(source), JsonOptions);
+            if (loaded is null) { corrupt = true; return null; } // a bare `null` document
+            // Migration hook: when Version changes in future, upgrade here.
+            loaded.Normalize();
+            return loaded;
         }
-        return new CursorSettings();
+        catch (JsonException)
+        {
+            corrupt = true; // unparseable (bad syntax, unknown enum name, …)
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     // Moves a corrupt settings file aside so the defaults we fall back to can't overwrite it on the

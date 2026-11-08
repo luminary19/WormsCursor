@@ -22,6 +22,10 @@ var tests = new (string Name, Action Run)[]
     ("Applying Preferences keeps the agent-notifier settings", PreferencesKeepAgentSettings),
     ("Corrupt and unwritable settings files are never destroyed", SettingsPersistence),
     ("Autostart only counts a Run entry that launches this exe", AutostartTarget),
+    ("Suppressed program names normalize and match case-insensitively", SuppressionMatching),
+    ("The suppressed-program list round-trips through settings.json", SuppressionSettingsJson),
+    ("Settings copies never share a mutable program list", SuppressionCopies),
+    ("The foreground watcher and window listing resolve real exe names", ForegroundSmoke),
 };
 foreach (var (name, run) in tests)
 {
@@ -422,7 +426,7 @@ static void PreferencesKeepAgentSettings()
     live.AgentNotifierTimeoutSeconds = 120;
     working.Size = 150;
     working.Placement = NotifierPlacement.Corner;
-    live.CopyAppearanceFrom(working);        // OK / Apply in Preferences
+    live.CopyPreferencesFrom(working);        // OK / Apply in Preferences
     Equal(150, live.Size);
     Equal(NotifierPlacement.Corner, live.Placement);
     Equal(false, live.AgentNotifierEnabled);
@@ -468,4 +472,111 @@ static void AutostartTarget()
     Equal(false, RegistryAutostart.LaunchesExe("\"C:\\src\\WormsCursor\\bin\\Release\\WormsCursor.exe\"", exe));
     Equal(false, RegistryAutostart.LaunchesExe("\"\"", exe));
     Equal(false, RegistryAutostart.LaunchesExe("\"" + exe + "\"", null));
+}
+
+static string Joined(IEnumerable<string> names) => string.Join('|', names);
+
+static void SuppressionMatching()
+{
+    Equal("dota2.exe", ProgramSuppression.NormalizeName(
+        @"  C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta\game\bin\win64\dota2.exe "));
+    Equal("Dota2.exe", ProgramSuppression.NormalizeName("Dota2"));
+    Equal("Code.EXE", ProgramSuppression.NormalizeName("\"Code.EXE\""));
+    Equal("game.exe", ProgramSuppression.NormalizeName("D:/Games/game.exe"));
+    Equal<string?>(null, ProgramSuppression.NormalizeName(null));
+    Equal<string?>(null, ProgramSuppression.NormalizeName("   "));
+    Equal<string?>(null, ProgramSuppression.NormalizeName(@"C:\Games\"));
+    Equal<string?>(null, ProgramSuppression.NormalizeName("bad*name"));
+
+    var list = ProgramSuppression.Normalize(new[] { "dota2.exe", "DOTA2", " ", null, @"C:\x\Game.exe", "game" });
+    Equal("dota2.exe|Game.exe", Joined(list));
+    Equal(true, ProgramSuppression.Matches("DOTA2.EXE", list));
+    Equal(true, ProgramSuppression.Matches(@"C:\Steam\dota 2 beta\dota2.exe", list));
+    Equal(false, ProgramSuppression.Matches("dota.exe", list));
+    Equal(false, ProgramSuppression.Matches(null, list));
+    Equal(false, ProgramSuppression.Matches("dota2.exe", Array.Empty<string>()));
+}
+
+static void SuppressionSettingsJson() => WithHome(home =>
+{
+    string path = Path.Combine(home, "settings.json");
+    Equal("dota2.exe", Joined(new CursorSettings().SuppressedPrograms));
+
+    // A settings file from before the feature gets the default list.
+    File.WriteAllText(path, "{\"Size\": 120}");
+    Equal("dota2.exe", Joined(SettingsStore.Load(path).SuppressedPrograms));
+
+    // A user who removed Dota keeps an empty list; it must not come back as the default.
+    var settings = new CursorSettings { SuppressedPrograms = Array.Empty<string>() };
+    SettingsStore.Save(settings, path);
+    Equal(0, SettingsStore.Load(path).SuppressedPrograms.Count);
+    Equal(0, SettingsStore.Read(path).SuppressedPrograms.Count);
+
+    settings.SuppressedPrograms = new[] { "dota2.exe", "cs2.exe" };
+    SettingsStore.Save(settings, path);
+    Equal("dota2.exe|cs2.exe", Joined(SettingsStore.Load(path).SuppressedPrograms));
+
+    // Hand edits load sanely: null means none; paths, missing ".exe" and duplicates normalize.
+    File.WriteAllText(path, "{\"SuppressedPrograms\": null}");
+    Equal(0, SettingsStore.Load(path).SuppressedPrograms.Count);
+    File.WriteAllText(path, """{"SuppressedPrograms": ["C:\\Games\\Dota2", "dota2.exe", ""]}""");
+    Equal("Dota2.exe", Joined(SettingsStore.Load(path).SuppressedPrograms));
+
+    // The read-only path (the OpenCode helper) falls back to defaults but never moves a corrupt file.
+    File.WriteAllText(path, "{ not json");
+    Equal("dota2.exe", Joined(SettingsStore.Read(path).SuppressedPrograms));
+    Equal(true, File.Exists(path));
+    Equal(0, Directory.GetFiles(home, "settings.json.corrupt-*").Length);
+});
+
+static void SuppressionCopies()
+{
+    var live = new CursorSettings();
+    var working = live.Clone();
+
+    // The list itself can't be changed in place, so a clone sharing it is still independent.
+    bool threw = false;
+    try { ((IList<string>)working.SuppressedPrograms).Add("cs2.exe"); }
+    catch (NotSupportedException) { threw = true; }
+    Equal(true, threw);
+    Equal(1, live.SuppressedPrograms.Count);
+
+    working.SuppressedPrograms = working.SuppressedPrograms.Append("cs2.exe").ToArray();
+    Equal("dota2.exe", Joined(live.SuppressedPrograms));
+
+    // Applying Preferences carries the list; editing the dialog's copy afterwards doesn't leak.
+    live.CopyPreferencesFrom(working);
+    Equal("dota2.exe|cs2.exe", Joined(live.SuppressedPrograms));
+    working.SuppressedPrograms = Array.Empty<string>();
+    Equal("dota2.exe|cs2.exe", Joined(live.SuppressedPrograms));
+
+    // An array handed to the setter is copied, so changing that array later changes nothing.
+    var source = new[] { "a.exe" };
+    live.SuppressedPrograms = source;
+    source[0] = "b.exe";
+    Equal("a.exe", Joined(live.SuppressedPrograms));
+}
+
+// Integration smoke against the real desktop: the resolvers must produce exe file names, and the
+// watcher must start, report a sane foreground program, and shut down promptly.
+static void ForegroundSmoke()
+{
+    string? self = WindowPrograms.ProgramForProcess((uint)Environment.ProcessId);
+    Equal(Path.GetFileName(Environment.ProcessPath), self);
+    Equal<string?>(null, WindowPrograms.ProgramForWindow(IntPtr.Zero));
+
+    foreach (var program in WindowPrograms.ListVisible())
+    {
+        Equal(true, program.Program.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+        Equal(false, string.Equals(program.Program, self, StringComparison.OrdinalIgnoreCase));
+        Equal(false, string.IsNullOrEmpty(program.Title));
+    }
+
+    var started = DateTime.UtcNow;
+    using (var watcher = new ForegroundWatcher())
+    {
+        string? foreground = watcher.ForegroundProgram;
+        Equal(true, foreground is null || foreground.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+    }
+    Equal(true, DateTime.UtcNow - started < TimeSpan.FromSeconds(2));
 }

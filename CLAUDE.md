@@ -25,6 +25,17 @@ Which agents are "waiting" is fed in by the same hook → named-pipe plumbing as
 the running tray over a per-user named pipe; `AgentActivity` tracks which sessions need you; the tray
 pushes that set into the overlay.
 
+**Per-app focus suppression.** While a program on `CursorSettings.SuppressedPrograms` (default
+`dota2.exe`) owns the foreground window — fullscreen, borderless or windowed — the overlay treats it
+exactly like "nothing waiting": token hidden, animation thread parked. `ForegroundWatcher` (Core) learns
+about focus changes from an out-of-context `EVENT_SYSTEM_FOREGROUND` WinEvent hook on its own
+message-pumping thread (no polling) and resolves the window to an exe name with
+`PROCESS_QUERY_LIMITED_INFORMATION` (works for elevated / anti-cheat processes). It only reports *what*
+is in front; the overlay decides with the pure `ProgramSuppression.Matches`, so a settings edit
+re-evaluates at once. Agents keep being tracked meanwhile; when focus moves on and something still
+waits, the token comes back with its entrance. The OpenCode helper does the same with the same Core
+source (see below).
+
 Codex desktop and CLI use `%CODEX_HOME%/hooks.json` through the same shared engine hooks.
 Keep asynchronous question state separate from ordinary tool activity: a tool returning does not
 mean the user answered. The OpenCode 2 integration has an independent shared helper, based on the
@@ -44,10 +55,18 @@ tests.
 - `AgentEventMessage.cs` — the normalised wire format (one JSON line per event) + the
   raw-event → `AgentEventKind` mapping.
 - `CursorSettings.cs` — the persisted, tunable settings: token `Size`, `Placement`
-  (`Cursor`/`Corner`), `Corner`, the notifier enable + linger timeout, `OutlineColor`. (Name kept for
-  continuity; it's now just the notifier's settings.)
+  (`Cursor`/`Corner`), `Corner`, the notifier enable + linger timeout, `OutlineColor`, and
+  `SuppressedPrograms`. (Name kept for continuity; it's now just the notifier's settings.)
+  `SuppressedPrograms` is a read-only list normalized on every assignment and replaced (never mutated)
+  on edit, which is what keeps `Clone()` (member-wise) and `CopyPreferencesFrom` independent.
 - `SettingsStore.cs` — tolerant JSON load / atomic save in `%LocalAppData%\WormsCursor\settings.json`
-  (survives app-folder updates); enums stored as readable names.
+  (survives app-folder updates); enums stored as readable names. `Load` (the owning tray app) moves a
+  corrupt file aside; `Read` (another process, i.e. the OpenCode helper) never touches the file.
+- `ProgramSuppression.cs` — pure: normalize program names (trim, path → file name, add ".exe",
+  case-insensitive dedupe) and match a program against the list. Unit-tested.
+- `WindowPrograms.cs` — Win32: window/process → exe name, and the visible top-level windows the
+  "Add a program" picker lists.
+- `ForegroundWatcher.cs` — the event-driven foreground tracker described above.
 
 ### `WormsCursor.App` — the tray app (WinForms, `net8.0-windows`, AssemblyName `WormsCursor`)
 - `Program.cs` — entry point. The `hook` verb short-circuits **first** (throwaway bridge, no UI),
@@ -55,13 +74,16 @@ tests.
 - `NotifierOverlay.cs` — the layered overlay window + animation loop. Cursor mode: a springy pendulum
   that hangs the token off the pointer and follows it (+ a gentle idle bob). Corner mode: a fixed
   corner with a continuous "ball" bounce. DPI-aware sizing; per-pixel alpha via `UpdateLayeredWindow`.
+  Owns a `ForegroundWatcher` and stays hidden + parked while a suppressed program is in front.
 - `TrayApplicationContext.cs` — owns the tray icon, the `NotifierOverlay`, the pipe server + sweep
   timer, autostart + update menu items. The "Enabled" item is the master on/off (it flips
   `AgentNotifierEnabled`). Reloads the real cursor scheme once on startup (self-heal for anyone
   upgrading from the cursor-theming version that may have left a themed cursor behind).
 - `PreferencesForm.cs` — the live editor: a token preview (dark/light split), token-size slider,
-  placement (cursor/corner) + corner picker, autostart, an **Agent settings…** button, and
-  update/version/links.
+  placement (cursor/corner) + corner picker, the **Hide the token while using** program list
+  (Add… / Remove), autostart, an **Agent settings…** button, and update/version/links.
+- `AddProgramForm.cs` — the "Add a program" picker: programs with a visible window (exe + title), or
+  a typed exe name.
 - `AgentHooksForm.cs` — the "Agent notifications" dialog: enable + linger timeout + a live preview
   that fakes a waiting count, plus per-tool hook **Register/Unregister** status.
 - `AgentPipeServer.cs` — the named-pipe server that `hook` invocations write to (own thread).
@@ -79,6 +101,13 @@ monitor-rate waitable timer, frame coalescing, cached logo, and persistent DIB s
 hidden and uses the official compact OpenCode mark. The V2 plugin subscribes to `event.data` lifecycle
 events and form/permission events, using one persistent pipe connection per plugin host. Build
 materializations are immutable and content-addressed under `artifacts/opencode/`.
+
+The helper compiles in Core's `CursorSettings`, `SettingsStore`, `ProgramSuppression`,
+`WindowPrograms` and `ForegroundWatcher` as linked source (`<Compile Include="../WormsCursor.Core/…">`,
+no DLL reference). `FocusSuppression.cs` hides its token while a suppressed program is in front,
+reading the list from the tray's `settings.json` via `SettingsStore.Read` and re-reading it on a focus
+change only when the file's write time moved. `host.ts` hashes those linked files into the content
+address, so editing them rebuilds the helper.
 
 Use the installed OpenCode V2 SDK as the event contract: the local OpenCode source checkout can be
 older. See `integrations/opencode/README.md` for setup and tests.

@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, readdir, rename, rm } from "node:fs/promises";
 import { createConnection, type Socket } from "node:net";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CursorSettings, DisplayMode } from "./state.ts";
 
@@ -42,6 +42,16 @@ async function sourceFiles(directory: string, relative = ""): Promise<string[]> 
     else if (entry.isFile()) result.push(file);
   }
   return result.sort();
+}
+
+// Shared source the helper compiles in from outside its own directory (`<Compile Include="../...">`,
+// e.g. WormsCursor.Core's settings and foreground watcher). It is build input like the helper's own
+// files, so it must be part of the content address, or an edit to it would reuse a stale build.
+async function linkedSources(project: string): Promise<string[]> {
+  const xml = await readFile(project, "utf8");
+  return [...xml.matchAll(/<Compile\s+Include="([^"]+)"/g)]
+    .map((match) => resolve(dirname(project), match[1]))
+    .sort();
 }
 
 // The dotnet driver hands the work to MSBuild worker processes, so killing only its PID would leave
@@ -94,10 +104,14 @@ export async function materializeNativeHelper(options: MaterializeOptions = {}):
   const root = options.root ?? repository;
   const build = options.build ?? dotnetBuild;
   const native = join(root, "src", "WormsCursor.OpenCodeOverlay");
+  const project = join(native, "WormsCursor.OpenCodeOverlay.csproj");
   const digest = createHash("sha256");
   digest.update(await readFile(join(root, "global.json")));
   for (const name of await sourceFiles(native)) {
     digest.update(name.replaceAll("\\", "/")).update("\0").update(await readFile(join(native, name))).update("\0");
+  }
+  for (const file of await linkedSources(project)) {
+    digest.update(`linked:${relative(root, file).replaceAll("\\", "/")}`).update("\0").update(await readFile(file)).update("\0");
   }
   const hash = digest.digest("hex").slice(0, 24);
   const cache = join(root, "artifacts", "opencode");
@@ -110,7 +124,7 @@ export async function materializeNativeHelper(options: MaterializeOptions = {}):
   const staging = await mkdtemp(join(cache, `.${hash}-`));
   try {
     try {
-      await build(join(native, "WormsCursor.OpenCodeOverlay.csproj"), staging);
+      await build(project, staging);
       if (!await exists(join(staging, "OpenCodeCursorOverlay.exe"))) throw new Error("OpenCode cursor build produced no executable");
     } catch (error) {
       throw rememberFailure(directory, hash, error);

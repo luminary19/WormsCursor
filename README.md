@@ -32,6 +32,16 @@ Two placements (set in **Preferences…**):
 The overlay touches no system state, so there's nothing to restore on exit, and it costs nothing when
 nothing's waiting (the animation only runs while at least one agent needs you).
 
+### Stays out of your games
+
+The token stays hidden while a program on the **Hide the token while using** list in
+**Preferences…** is in front, whether it runs fullscreen, borderless or windowed. Dota 2
+(`dota2.exe`) is on the list by default. Use **Add…** to pick from the programs that are open now, or
+type an exe name; **Remove** takes one off. Your agents are still tracked meanwhile. When you switch
+away and one is still waiting, the token comes back. While hidden, the token costs no CPU: WormsCursor
+learns about focus changes from Windows instead of checking repeatedly. The OpenCode helper follows
+the same list.
+
 ## How the notifier works
 
 Set it up from **Preferences… → Agent settings…**: register **Claude Code** or **Codex** there,
@@ -110,13 +120,17 @@ WormsCursor.sln
 │  │   ├─ AgentLogos.cs       Baked tool logos (Claude critter, OpenAI knot); SvgPath.cs parses the path data
 │  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe)
 │  │   ├─ AgentEventMessage.cs The normalised wire format (one JSON line per event)
-│  │   ├─ CursorSettings.cs   Token size / placement / corner / notifier settings (persisted as JSON)
-│  │   └─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
+│  │   ├─ CursorSettings.cs   Token size / placement / corner / notifier settings / hidden-while-using programs (persisted as JSON)
+│  │   ├─ SettingsStore.cs    Load/save settings in %LocalAppData%\WormsCursor\
+│  │   ├─ ProgramSuppression.cs Normalizes program names and matches them against the hidden-while-using list
+│  │   ├─ WindowPrograms.cs   Window/process → exe name; the open programs the "Add a program" picker lists
+│  │   └─ ForegroundWatcher.cs Event-driven foreground-program tracker (WinEvent hook, no polling)
 │  └─ WormsCursor.App/       Tray shell (WinForms, no main window)
 │      ├─ Program.cs                   Entry point (Velopack + single-instance guard; `hook` verb short-circuits first)
 │      ├─ NotifierOverlay.cs          The layered overlay window + bounce animation (cursor / corner)
 │      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the overlay + pipe server
-│      ├─ PreferencesForm.cs          Live settings dialog (token preview, size, placement, autostart, updates)
+│      ├─ PreferencesForm.cs          Live settings dialog (token preview, size, placement, hidden-while-using programs, autostart, updates)
+│      ├─ AddProgramForm.cs           "Add a program" picker (open programs, or a typed exe name)
 │      ├─ AgentHooksForm.cs           Agent-notifier settings + per-tool hook registration UI
 │      ├─ AgentPipeServer.cs          Named-pipe server that receives normalised agent events
 │      ├─ AgentHookBridge.cs          The `hook` verb: normalises a tool's payload → one pipe line, fail-silent
@@ -151,8 +165,9 @@ A tray icon appears. Right-click it for **Enabled / Preferences… / Exit**; dou
 notifier on/off. Only one instance runs — launching it again just opens **Preferences**.
 
 **Preferences…** opens a live editor with a token preview, a **token size** slider, a **placement**
-choice (next to the cursor, or pinned to a screen corner of your choice), a **Start with Windows**
-toggle, an **Agent settings…** button, and a **Check for updates** button. Settings are saved to
+choice (next to the cursor, or pinned to a screen corner of your choice), the **Hide the token while
+using** program list, a **Start with Windows** toggle, an **Agent settings…** button, and a **Check
+for updates** button. Settings are saved to
 `%LocalAppData%\WormsCursor\settings.json` and persist across restarts — and across updates, since
 they live outside the app folder.
 

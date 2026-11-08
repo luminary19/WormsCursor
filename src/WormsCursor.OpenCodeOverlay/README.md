@@ -15,6 +15,12 @@ the helper combines those clients into one cursor token.
   helper after 750 ms; an unclaimed helper exits after 5 seconds.
 - `--pipe NAME` selects a separate pipe for isolated tests (ASCII letters,
   digits, hyphens, underscores, and dots; at most 128 characters).
+- The token stays hidden, with the frame clock stopped, while a program on
+  WormsCursor's "Hide the token while using" list is in front. The list comes
+  from the tray app's `%LocalAppData%\WormsCursor\settings.json`. If that file is
+  missing, the default list (`dota2.exe`) applies. `FocusSuppression.cs` uses
+  WormsCursor.Core's `ForegroundWatcher`, `SettingsStore` and
+  `ProgramSuppression`, compiled in as linked source.
 
 The animation clock stops while hidden. Visible frames use monitor-refresh
 pacing, a high-resolution waitable timer with fallback, coalesced UI callbacks,

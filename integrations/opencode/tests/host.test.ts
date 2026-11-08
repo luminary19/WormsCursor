@@ -72,6 +72,7 @@ test("a failed helper build is not re-run until the helper sources change", asyn
   const native = join(root, "src", "WormsCursor.OpenCodeOverlay");
   await mkdir(native, { recursive: true });
   await writeFile(join(root, "global.json"), "{}");
+  await writeFile(join(native, "WormsCursor.OpenCodeOverlay.csproj"), "<Project />");
   await writeFile(join(native, "Program.cs"), "// v1");
   let builds = 0;
   const build = async () => { builds++; throw new Error("compile error"); };
@@ -88,6 +89,35 @@ test("a failed helper build is not re-run until the helper sources change", asyn
     assert.equal(builds, 2);
   } finally {
     console.error = consoleError;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("editing shared Core source linked into the helper rebuilds it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wormscursor-materialize-"));
+  const native = join(root, "src", "WormsCursor.OpenCodeOverlay");
+  const core = join(root, "src", "WormsCursor.Core");
+  await mkdir(native, { recursive: true });
+  await mkdir(core, { recursive: true });
+  await writeFile(join(root, "global.json"), "{}");
+  await writeFile(join(native, "WormsCursor.OpenCodeOverlay.csproj"),
+    '<Project><ItemGroup><Compile Include="../WormsCursor.Core/Shared.cs" Link="Core/Shared.cs" /></ItemGroup></Project>');
+  await writeFile(join(native, "Program.cs"), "// helper");
+  await writeFile(join(core, "Shared.cs"), "// v1");
+  let builds = 0;
+  const build = async (_project: string, directory: string) => {
+    builds++;
+    await writeFile(join(directory, "OpenCodeCursorOverlay.exe"), "");
+  };
+  try {
+    const first = await materializeNativeHelper({ root, build });
+    assert.equal((await materializeNativeHelper({ root, build })).hash, first.hash);
+    assert.equal(builds, 1);
+    await writeFile(join(core, "Shared.cs"), "// v2");
+    const second = await materializeNativeHelper({ root, build });
+    assert.notEqual(second.hash, first.hash);
+    assert.equal(builds, 2);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });

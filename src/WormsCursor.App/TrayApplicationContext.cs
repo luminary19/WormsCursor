@@ -224,14 +224,15 @@ public sealed class TrayApplicationContext : ApplicationContext
     }
 
     /// <summary>
-    /// Apply edited settings — used by both Preferences "Apply" and "OK". Takes only the appearance
-    /// fields Preferences owns (the agent-notifier enable/timeout belong to ApplyAgentDisplay and the
-    /// tray toggle, and may have changed while the dialog was open), persists, and re-reads them into
-    /// the live overlay (size/placement/corner take effect on the next frame; no restart).
+    /// Apply edited settings — used by both Preferences "Apply" and "OK". Takes only the fields
+    /// Preferences owns (appearance + suppressed programs; the agent-notifier enable/timeout belong to
+    /// ApplyAgentDisplay and the tray toggle, and may have changed while the dialog was open), persists,
+    /// and re-reads them into the live overlay (size/placement/corner take effect on the next frame, a
+    /// changed program list re-checks the foreground app at once; no restart).
     /// </summary>
     void ApplySettings(CursorSettings source)
     {
-        _settings.CopyAppearanceFrom(source);
+        _settings.CopyPreferencesFrom(source);
         Persist();
         _overlay.RefreshSettings();
     }

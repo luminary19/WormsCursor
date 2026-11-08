@@ -6,6 +6,15 @@ GitHub releases. The release workflow pulls the matching section into each relea
 
 ## Unreleased
 
+### Added
+- **The token stays out of your games.** While a program on the new **Hide the token while using**
+  list in Preferences is in front, the token stays hidden. This works whether the program runs
+  fullscreen, borderless or windowed. Dota 2 is on the list by default. **Add…** picks from the
+  programs that are open now, or takes a typed exe name, and **Remove** takes one off. Your agents are
+  still tracked meanwhile, and the token comes back when you switch away while one is still waiting.
+  While hidden it uses no CPU: WormsCursor learns about focus changes from Windows instead of checking
+  repeatedly. The OpenCode helper follows the same list. Restart OpenCode to pick it up there.
+
 ### Changed
 - **WormsCursor is now just the agent-waiting notifier — the cursor theming is gone.** The token that
   shows when an AI agent needs you no longer rides on a themed system cursor, so you don't have to

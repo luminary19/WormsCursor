@@ -168,7 +168,7 @@ Engine integration (`CursorEngine`):
 
 - `CursorSettings` (additive, tolerant-load convention): `AgentNotifierEnabled` (default true),
   `AgentNotifierTimeoutSeconds` (logo linger timeout, default 60, clamped 30–1800), maybe
-  `AgentNotifierAccent` color. Add each to `Normalize` (not to `CopyAppearanceFrom`, which only
+  `AgentNotifierAccent` color. Add each to `Normalize` (not to `CopyPreferencesFrom`, which only
   carries the fields Preferences edits).
 - `AgentHooksForm`: the display section — "Show the agent logo" toggle + a "Clear a stuck logo
   after:" minutes picker (stored as seconds). (Same live-edit/working-copy pattern as existing toggles.)

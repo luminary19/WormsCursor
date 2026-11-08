@@ -9,6 +9,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
+using WormsCursor.Core;
 
 namespace OpenCodeCursorOverlay;
 
@@ -27,6 +28,7 @@ internal static class Program
         using var overlay = new CursorOverlay();
         using var server = new OverlayServer(options.PipeName, overlay);
         overlay.InitializeHidden();
+        using var suppression = new FocusSuppression(overlay);
         server.Start();
         Application.Run();
     }
@@ -228,7 +230,9 @@ internal sealed class CursorOverlay : Form
     private LogoAsset? logoAsset;
     private LayeredSurface? surface;
     private int size = 64;
-    private bool active;
+    private bool requested;  // some client wants the token shown
+    private bool suppressed; // a program on the WormsCursor suppression list is in front
+    private bool active;     // the token is actually animating (requested and not suppressed)
     private bool seeded;
     private float bobX, bobY, velocityX, velocityY;
     private float previousBobX, previousBobY;
@@ -277,6 +281,32 @@ internal sealed class CursorOverlay : Form
     public void ShowToken(int requestedSize)
     {
         size = Math.Clamp(requestedSize, 24, 256);
+        requested = true;
+        UpdateVisibility();
+    }
+
+    public void HideToken()
+    {
+        requested = false;
+        UpdateVisibility();
+    }
+
+    /// <summary>Hide the token while a listed program is in front, without forgetting that clients
+    /// still want it: when suppression ends it comes back with its entrance kick.</summary>
+    public void SetSuppressed(bool value)
+    {
+        suppressed = value;
+        UpdateVisibility();
+    }
+
+    private void UpdateVisibility()
+    {
+        if (requested && !suppressed) StartAnimating();
+        else Park();
+    }
+
+    private void StartAnimating()
+    {
         if (active) return;
 
         active = true;
@@ -289,7 +319,8 @@ internal sealed class CursorOverlay : Form
         frameClock.Start(ResolveCurrentDisplayRefreshRate());
     }
 
-    public void HideToken()
+    // Stops the frame clock and moves the window off-screen.
+    private void Park()
     {
         active = false;
         frameClock.Stop();
@@ -335,7 +366,7 @@ internal sealed class CursorOverlay : Form
     {
         Post(() =>
         {
-            if (active) HideToken();
+            if (active) Park();
         });
     }
     private void Tick()

@@ -54,6 +54,19 @@ public sealed class CursorSettings
     /// <see cref="NotifierPlacement.Corner"/>. Defaults to the bottom-right.</summary>
     public ScreenCorner Corner { get; set; } = ScreenCorner.BottomRight;
 
+    /// <summary>Programs (exe file names, e.g. "dota2.exe") that hide the token while one of their
+    /// windows is in the foreground, in any window mode. Agents keep being tracked meanwhile; the token
+    /// comes back when focus moves elsewhere and something is still waiting. Every assignment is
+    /// normalized by <see cref="ProgramSuppression.Normalize"/> into a fresh read-only list, so a JSON
+    /// <c>null</c>, a full path or a missing ".exe" all load sanely, and settings copies can share the
+    /// list safely. A saved empty list stays empty; a file without the field gets the default.</summary>
+    public IReadOnlyList<string> SuppressedPrograms
+    {
+        get => _suppressedPrograms;
+        set => _suppressedPrograms = ProgramSuppression.Normalize(value);
+    }
+    IReadOnlyList<string> _suppressedPrograms = ProgramSuppression.Defaults;
+
     // ---------- app state (persisted, not shown in the UI) ----------
 
     /// <summary>The app version whose "What's new" notes have already been shown, so the
@@ -68,21 +81,24 @@ public sealed class CursorSettings
         AgentNotifierTimeoutSeconds = Math.Clamp(AgentNotifierTimeoutSeconds, 10, 1800);
     }
 
-    /// <summary>A deep copy. All fields are value types or immutable strings, so a shallow
-    /// member-wise clone is already a safe, independent working copy for the dialog.</summary>
+    /// <summary>An independent copy. Every field is a value type, an immutable string, or the read-only
+    /// <see cref="SuppressedPrograms"/> list (replaced on edit, never changed in place), so a member-wise
+    /// clone is already a safe working copy for the dialog.</summary>
     public CursorSettings Clone() => (CursorSettings)MemberwiseClone();
 
-    /// <summary>Copy the token-appearance values (the ones the Preferences dialog edits) from
-    /// <paramref name="other"/> into this instance, so a reference held by the overlay sees the change
-    /// without being replaced. Everything else is deliberately left alone: the agent-notifier enable +
-    /// linger timeout have their own owner (the Agent settings dialog and the tray toggle), which may
-    /// have changed them <i>after</i> the Preferences working copy was cloned — copying them here would
-    /// revert those edits with a stale snapshot. <see cref="LastSeenVersion"/> is app state.</summary>
-    public void CopyAppearanceFrom(CursorSettings other)
+    /// <summary>Copy the values the Preferences dialog edits (token appearance and the suppressed
+    /// programs) from <paramref name="other"/> into this instance, so a reference held by the overlay
+    /// sees the change without being replaced. Everything else is deliberately left alone: the
+    /// agent-notifier enable + linger timeout have their own owner (the Agent settings dialog and the
+    /// tray toggle), which may have changed them <i>after</i> the Preferences working copy was cloned —
+    /// copying them here would revert those edits with a stale snapshot. <see cref="LastSeenVersion"/>
+    /// is app state.</summary>
+    public void CopyPreferencesFrom(CursorSettings other)
     {
         Size = other.Size;
         OutlineColor = other.OutlineColor;
         Placement = other.Placement;
         Corner = other.Corner;
+        SuppressedPrograms = other.SuppressedPrograms;
     }
 }

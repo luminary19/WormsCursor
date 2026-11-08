@@ -11,7 +11,8 @@ namespace WormsCursor.App;
 /// closing). Controls the bouncing agent token: its size and where it lives (following the cursor, or
 /// pinned to a screen corner). The live preview draws the token with the same
 /// <see cref="NotifierRenderer"/> the overlay uses, over a dark/light split so it reads either way.
-/// Autostart and the agent-notifications dialog hang off here too.
+/// It also edits the programs that hide the token while they're in front (a game, say). Autostart and
+/// the agent-notifications dialog hang off here too.
 /// </summary>
 public sealed class PreferencesForm : Form
 {
@@ -32,6 +33,9 @@ public sealed class PreferencesForm : Form
     readonly RadioButton _followCursorRadio, _cornerRadio;
     readonly Label _cornerCap;
     readonly ComboBox _cornerCombo;
+    readonly Label _hideCap;
+    readonly ListBox _hideList;
+    readonly Button _hideAddBtn, _hideRemoveBtn;
     readonly Button _defaultsBtn, _applyBtn, _okBtn, _cancelBtn;
     readonly Label _version;
     readonly LinkLabel _link, _whatsNew;
@@ -101,6 +105,18 @@ public sealed class PreferencesForm : Form
         _cornerCombo.SelectedIndex = Math.Clamp((int)_working.Corner, 0, CornerNames.Length - 1);
         _cornerCombo.SelectedIndexChanged += (_, _) => _working.Corner = (ScreenCorner)_cornerCombo.SelectedIndex;
 
+        // --- programs that hide the token while they're in front ---
+        _hideCap = MakeCaption("Hide the token while using");
+        _hideList = new ListBox { SelectionMode = SelectionMode.MultiExtended, IntegralHeight = false };
+        _hideList.SelectedIndexChanged += (_, _) => SyncHideButtons();
+        _hideList.KeyDown += (_, e) => { if (e.KeyCode == Keys.Delete) RemoveSelectedPrograms(); };
+        _tip.SetToolTip(_hideList, "While one of these programs is in front (fullscreen, borderless or windowed), " +
+            "the token stays hidden. Agents are still tracked, and the token comes back when you switch away.");
+        _hideAddBtn = MakeButton("Add…");
+        _hideAddBtn.Click += (_, _) => AddPrograms();
+        _hideRemoveBtn = MakeButton("Remove");
+        _hideRemoveBtn.Click += (_, _) => RemoveSelectedPrograms();
+
         // --- app-level row ---
         _autostartChk = new CheckBox { Text = "Start with Windows", AutoSize = true, Checked = ReadAutostart() };
         _autostartChk.CheckedChanged += (_, _) => ToggleAutostart();
@@ -131,6 +147,7 @@ public sealed class PreferencesForm : Form
             _previewCap, _preview,
             _sizeCap, _sizeBar, _sizeVal,
             _placeCap, _followCursorRadio, _cornerRadio, _cornerCap, _cornerCombo,
+            _hideCap, _hideList, _hideAddBtn, _hideRemoveBtn,
             _autostartChk, _agentBtn,
             _defaultsBtn, _applyBtn, _okBtn, _cancelBtn,
             _version, _link, _whatsNew,
@@ -138,6 +155,7 @@ public sealed class PreferencesForm : Form
 
         UpdateLabels();
         SyncCornerEnabled();
+        FillProgramList();
         LayoutControls();
     }
 
@@ -172,6 +190,16 @@ public sealed class PreferencesForm : Form
         _cornerCombo.Location = new Point(comboX, y + Math.Max(0, (_cornerRadio.Height - _cornerCombo.Height) / 2));
         _cornerCap.Location = new Point(comboX - 6 - _cornerCap.Width, y + Math.Max(0, (_cornerRadio.Height - _cornerCap.Height) / 2));
         y = Math.Max(_cornerRadio.Bottom, _cornerCombo.Bottom) + 18;
+
+        // hidden-while-using: caption, then the list with Add / Remove stacked on its right
+        _hideCap.Location = new Point(M, y);
+        y = _hideCap.Bottom + 4;
+        int hideBtnW = Math.Max(_hideAddBtn.Width, _hideRemoveBtn.Width);
+        int hideBtnX = W - M - hideBtnW;
+        _hideAddBtn.Location = new Point(hideBtnX, y);
+        _hideRemoveBtn.Location = new Point(hideBtnX, _hideAddBtn.Bottom + 6);
+        _hideList.SetBounds(M, y, hideBtnX - 8 - M, Math.Max(76, _hideRemoveBtn.Bottom - y));
+        y = Math.Max(_hideList.Bottom, _hideRemoveBtn.Bottom) + 18;
 
         // app row: autostart (left) + agent settings (right)
         _agentBtn.SetBounds(W - M - _agentBtn.Width, y, _agentBtn.Width, _agentBtn.Height);
@@ -216,6 +244,39 @@ public sealed class PreferencesForm : Form
         _cornerCombo.Enabled = corner;
     }
 
+    // Shows the working copy's programs, keeping whichever of them were selected.
+    void FillProgramList(IEnumerable<string>? select = null)
+    {
+        var keep = new HashSet<string>(select ?? _hideList.SelectedItems.Cast<string>(), StringComparer.OrdinalIgnoreCase);
+        _hideList.BeginUpdate();
+        _hideList.Items.Clear();
+        foreach (string program in _working.SuppressedPrograms)
+        {
+            int index = _hideList.Items.Add(program);
+            if (keep.Contains(program)) _hideList.SetSelected(index, true);
+        }
+        _hideList.EndUpdate();
+        SyncHideButtons();
+    }
+
+    void SyncHideButtons() => _hideRemoveBtn.Enabled = _hideList.SelectedItems.Count > 0;
+
+    void AddPrograms()
+    {
+        using var dlg = new AddProgramForm(_working.SuppressedPrograms);
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        _working.SuppressedPrograms = _working.SuppressedPrograms.Concat(dlg.Programs).ToArray();
+        FillProgramList(select: dlg.Programs);
+    }
+
+    void RemoveSelectedPrograms()
+    {
+        var remove = new HashSet<string>(_hideList.SelectedItems.Cast<string>(), StringComparer.OrdinalIgnoreCase);
+        if (remove.Count == 0) return;
+        _working.SuppressedPrograms = _working.SuppressedPrograms.Where(p => !remove.Contains(p)).ToArray();
+        FillProgramList(select: Array.Empty<string>());
+    }
+
     void PreviewPaint(object? sender, PaintEventArgs e)
     {
         var g = e.Graphics;
@@ -238,6 +299,7 @@ public sealed class PreferencesForm : Form
         _working.Placement = d.Placement;
         _working.Corner = d.Corner;
         _working.OutlineColor = d.OutlineColor;
+        _working.SuppressedPrograms = d.SuppressedPrograms;
 
         _sizeBar.Value = Math.Clamp(d.Size, _sizeBar.Minimum, _sizeBar.Maximum);
         _followCursorRadio.Checked = d.Placement == NotifierPlacement.Cursor;
@@ -245,6 +307,7 @@ public sealed class PreferencesForm : Form
         _cornerCombo.SelectedIndex = Math.Clamp((int)d.Corner, 0, CornerNames.Length - 1);
         UpdateLabels();
         SyncCornerEnabled();
+        FillProgramList(select: Array.Empty<string>());
         _preview.Invalidate();
     }
 

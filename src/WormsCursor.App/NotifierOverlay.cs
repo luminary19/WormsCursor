@@ -26,6 +26,10 @@ namespace WormsCursor.App;
 /// buttery-smooth and time-correct even if the UI thread is busy (e.g. a dialog is open) — exactly how
 /// the old cursor engine stayed smooth. The thread only spins while at least one agent is waiting; idle,
 /// it parks on an event and the token is painted away, so a quiet tray burns no CPU.
+///
+/// While a program on <see cref="CursorSettings.SuppressedPrograms"/> owns the foreground window (a
+/// game, say), the token is treated exactly like "nothing waiting": hidden, with the thread parked. A
+/// <see cref="ForegroundWatcher"/> wakes it when focus moves on, and it reappears with its entrance.
 /// </summary>
 public sealed class NotifierOverlay : IDisposable
 {
@@ -39,6 +43,8 @@ public sealed class NotifierOverlay : IDisposable
 
     readonly Thread _thread;
     readonly ManualResetEventSlim _wake = new(false);
+    readonly ForegroundWatcher _foreground = new();
+    readonly object _gate = new(); // Reevaluate runs on the UI thread and the foreground watcher's
     volatile bool _running = true;
     volatile bool _active;
     volatile string[] _tools = Array.Empty<string>();
@@ -68,6 +74,7 @@ public sealed class NotifierOverlay : IDisposable
 
         _thread = new Thread(Loop) { IsBackground = true, Name = "WormsCursorNotifier" };
         _thread.Start();
+        _foreground.Changed += Reevaluate;
     }
 
     /// <summary>Set which agent sessions currently await the user — one tool id per waiting agent
@@ -82,16 +89,21 @@ public sealed class NotifierOverlay : IDisposable
     }
 
     /// <summary>Re-check whether the token should be showing after a settings change (the enable
-    /// toggle, size, or placement). Size/placement are read live each frame; this flips the animation
-    /// on/off when the enable toggle changed.</summary>
+    /// toggle, the suppressed programs, size, or placement). Size/placement are read live each frame;
+    /// this flips the animation on/off when the enable toggle or the suppression outcome changed.</summary>
     public void RefreshSettings() => Reevaluate();
 
+    // Called from the UI thread (agents, settings) and the foreground watcher's thread (focus changes).
     void Reevaluate()
     {
-        bool active = _tools.Length > 0 && _settings.AgentNotifierEnabled;
-        if (active && !_active) { _entrancePending = true; _resetPhysics = true; } // pop-in fresh
-        _active = active;
-        _wake.Set();
+        lock (_gate)
+        {
+            bool suppressed = ProgramSuppression.Matches(_foreground.ForegroundProgram, _settings.SuppressedPrograms);
+            bool active = _tools.Length > 0 && _settings.AgentNotifierEnabled && !suppressed;
+            if (active && !_active) { _entrancePending = true; _resetPhysics = true; } // pop-in fresh
+            _active = active;
+            _wake.Set();
+        }
     }
 
     // The animation thread: a high-resolution loop that advances the physics by the real elapsed time
@@ -289,6 +301,7 @@ public sealed class NotifierOverlay : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _foreground.Dispose(); // first: its thread calls Reevaluate, which uses _wake
         _running = false;
         _wake.Set();
         if (_thread.IsAlive) _thread.Join(500); // stop touching the window before we dispose it
