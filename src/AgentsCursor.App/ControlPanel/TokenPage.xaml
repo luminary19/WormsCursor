@@ -14,15 +14,53 @@
         <ui:TextBlock Style="{StaticResource PageTitle}" Text="Token" />
         <ui:TextBlock Style="{StaticResource PageLead}" Text="The token bounces on screen when an AI agent needs you, and goes away once you're back." />
 
-        <ui:CardControl Margin="0,16,0,4" Icon="{ui:SymbolIcon Power24}">
+        <!--  The live preview first, as in Windows' own personalisation pages, so every change below
+              shows at once. Half dark, half light, with the pointer gliding across the seam: one
+              glance shows where the token goes and how it reads on both. Its height is fixed, so a
+              size change never moves the controls under the pointer; at the biggest sizes the token
+              keeps inside it the way it keeps on screen.  -->
+        <Border
+            Margin="0,16,0,4"
+            Padding="16,16,16,12"
+            Style="{StaticResource Surface}">
+            <StackPanel>
+                <Grid Height="260" AutomationProperties.Name="Preview: the token following a pointer">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Background="#202020" CornerRadius="6,0,0,6" />
+                    <Border
+                        Grid.Column="1"
+                        Background="#F3F3F3"
+                        CornerRadius="0,6,6,0" />
+                    <Border
+                        Grid.ColumnSpan="2"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6" />
+                    <local:TokenPreview
+                        x:Name="Preview"
+                        Grid.ColumnSpan="2"
+                        Blocked="True"
+                        ClipToBounds="True"
+                        Roam="True" />
+                </Grid>
+                <ui:TextBlock
+                    Margin="2,12,0,0"
+                    FontTypography="Caption"
+                    Style="{StaticResource Secondary}"
+                    Text="Shown as it looks when an agent needs your answer. Change each agent's look on the Icons page." />
+            </StackPanel>
+        </Border>
+
+        <ui:CardControl Margin="0,28,0,4" Icon="{ui:SymbolIcon Power24}">
             <ui:CardControl.Header>
                 <local:SettingHeader Title="Show the token" Description="When it's off, agents are still tracked but nothing appears." />
             </ui:CardControl.Header>
             <ui:ToggleSwitch x:Name="EnabledSwitch" AutomationProperties.Name="Show the token" />
         </ui:CardControl>
 
-        <!--  The controls sit above the preview: the preview grows with the size, and below the
-              slider that growth can never move the slider out from under the pointer.  -->
         <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Size and position" />
         <ui:CardControl Icon="{ui:SymbolIcon ResizeLarge24}">
             <ui:CardControl.Header>
@@ -74,42 +112,7 @@
         <ui:Button
             x:Name="ResetButton"
             Margin="0,12,0,0"
-            Content="Reset size, position and icons"
+            Content="Reset size and position"
             Icon="{ui:SymbolIcon ArrowReset24}" />
-
-        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Preview" />
-        <Border Padding="16,16,16,12" Style="{StaticResource Surface}">
-            <StackPanel>
-                <!--  Half dark, half light, with the pointer gliding across the seam, so one glance
-                      shows where the token goes and how it reads on both.  -->
-                <Grid AutomationProperties.Name="Preview: the token following a pointer">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Border Background="#202020" CornerRadius="6,0,0,6" />
-                    <Border
-                        Grid.Column="1"
-                        Background="#F3F3F3"
-                        CornerRadius="0,6,6,0" />
-                    <Border
-                        Grid.ColumnSpan="2"
-                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="6" />
-                    <local:TokenPreview
-                        x:Name="Preview"
-                        Grid.ColumnSpan="2"
-                        Blocked="True"
-                        ClipToBounds="True"
-                        Roam="True" />
-                </Grid>
-                <ui:TextBlock
-                    Margin="2,12,0,0"
-                    FontTypography="Caption"
-                    Style="{StaticResource Secondary}"
-                    Text="Shown as it looks when an agent needs your answer. Change each agent's look on the Icons page." />
-            </StackPanel>
-        </Border>
     </StackPanel>
 </Page>

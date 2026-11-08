@@ -224,8 +224,10 @@ tests.
   the absolute `<exe dir>\integrations\pi`), `OpenCodePlugins.cs` + `JsoncEdit.cs` (OpenCode
   `opencode.jsonc` `plugins`: the bare `file:` URL of `<exe dir>\integrations\opencode`, edited by
   splicing text so comments and formatting stay byte-identical). Ours is found by a marker that
-  survives a moved exe (`hook --tool <id>`, a path ending in `integrations\<id>`), so another copy's
-  entry reads as Outdated. **Configs are written in place** (`File.WriteAllText`, never a renamed temp
+  survives a moved exe (`hook --tool <id>`, or a plugin folder whose `package.json` is named
+  `agentscursor-<id>`; a folder merely named `integrations\<id>` is the user's), so another copy's entry
+  reads as Outdated. The exe path is taken as spelled on disk (`OnDisk`), so a launch with other casing
+  doesn't make every connection Outdated. **Configs are written in place** (`File.WriteAllText`, never a renamed temp
   file): Orca's OpenCode overlay `%APPDATA%\orca\opencode-config-overlays\<hash>\opencode.jsonc` is a
   hard link to the user's config, and a rename would break it.
 - `Services/UpdateService.cs` — Velopack `UpdateManager`: check, download, apply-and-restart, release

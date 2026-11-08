@@ -10,17 +10,22 @@ namespace AgentsCursor.Core;
 public sealed class InvalidIconException(string reason) : Exception(reason);
 
 /// <summary>
-/// Turns an untrusted SVG file into one that is safe to keep and draw: nothing in it can run, and
-/// nothing in it can make the renderer reach outside the file. The output (not the original) is what
-/// <see cref="CustomIconStore"/> keeps, and <see cref="IconSource"/> runs it again on every load.
+/// Turns an untrusted SVG file into one that is safe to keep and draw: nothing in it can run, nothing
+/// in it can make the renderer reach outside the file, and drawing it always ends (see
+/// <see cref="SvgReferences"/>). The output (not the original) is what <see cref="CustomIconStore"/>
+/// keeps, and <see cref="IconSource"/> runs it again on every load.
 ///
 /// Rejected outright (throws <see cref="InvalidIconException"/>): a file over 256 KB, anything that
-/// isn't well-formed XML, a DTD (so no entities), a root that isn't an SVG <c>&lt;svg&gt;</c>, more than
-/// 5,000 elements or nesting deeper than 64, a stylesheet <c>@import</c>, and a CSS <c>url(…)</c> that
-/// points anywhere but inside the file. Removed: scripts and the elements that embed other content
-/// (<c>script</c>, <c>foreignObject</c>, <c>iframe</c>, <c>audio</c>, <c>video</c>), every <c>on…</c>
-/// event attribute, and every link except an in-file <c>#fragment</c> or, on an <c>&lt;image&gt;</c>, an
-/// inline PNG / JPEG / GIF / WebP <c>data:</c> image.
+/// isn't well-formed XML, a root that isn't <c>&lt;svg&gt;</c>, more than 5,000 elements or nesting
+/// deeper than 64, a stylesheet <c>@import</c>, a CSS <c>url(…)</c> that points anywhere but inside the
+/// file, and references that loop, nest too deep or draw too much. Removed: scripts and the elements
+/// that embed other content (<c>script</c>, <c>foreignObject</c>, <c>iframe</c>, <c>audio</c>,
+/// <c>video</c>), every <c>on…</c> event attribute, and every link except an in-file <c>#fragment</c>
+/// or, on an <c>&lt;image&gt;</c>, an inline PNG / JPEG / GIF / WebP <c>data:</c> image.
+///
+/// A DOCTYPE (Illustrator and older Inkscape write the SVG 1.1 one) is skipped unread: nothing in it
+/// is fetched or expanded, so an entity it declares stays undefined and its use is invalid XML. A
+/// root <c>&lt;svg&gt;</c> without the SVG namespace (common in hand-written files) is read as SVG.
 /// </summary>
 public static class SvgSanitizer
 {
@@ -52,8 +57,8 @@ public static class SvgSanitizer
             throw new InvalidIconException("it's larger than 256 KB");
 
         var root = Parse(text).Root ?? throw new InvalidIconException("it has no content");
-        if (root.Name != Svg + "svg")
-            throw new InvalidIconException("it isn't an SVG image (its root element must be <svg> in the SVG namespace)");
+        if (root.Name == "svg") AdoptSvgNamespace(root);
+        if (root.Name != Svg + "svg") throw new InvalidIconException(NotSvg);
         CheckSize(root);
 
         foreach (var element in root.DescendantsAndSelf().ToArray())
@@ -68,14 +73,20 @@ public static class SvgSanitizer
             if (element.Name.LocalName.Equals("style", StringComparison.OrdinalIgnoreCase))
                 CheckCss(element.Value);
         }
-        return root.ToString(SaveOptions.DisableFormatting);
+        string clean = root.ToString(SaveOptions.DisableFormatting);
+        SvgReferences.Check(clean);
+        return clean;
     }
+
+    const string NotSvg = "it isn't an SVG image";
 
     static XDocument Parse(string text)
     {
+        // Not markup at all (a PNG renamed to .svg, a text file): say so, not what the XML parser saw.
+        if (!text.AsSpan().TrimStart().TrimStart('\uFEFF').StartsWith("<")) throw new InvalidIconException(NotSvg);
         var settings = new XmlReaderSettings
         {
-            DtdProcessing = DtdProcessing.Prohibit,
+            DtdProcessing = DtdProcessing.Ignore,
             XmlResolver = null,
             MaxCharactersFromEntities = 0,
             IgnoreComments = true,
@@ -86,14 +97,18 @@ public static class SvgSanitizer
             using var reader = XmlReader.Create(new StringReader(text), settings);
             return XDocument.Load(reader, LoadOptions.None);
         }
-        catch (XmlException ex) when (ex.Message.Contains("DTD", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidIconException("it declares a DTD, which isn't allowed");
-        }
         catch (XmlException ex)
         {
-            throw new InvalidIconException($"it isn't valid XML ({ex.Message.TrimEnd('.')})");
+            throw new InvalidIconException(ex.LineNumber > 0 ? $"its SVG couldn't be read (line {ex.LineNumber})" : "its SVG couldn't be read");
         }
+    }
+
+    // An <svg> root with no namespace: its unprefixed elements, which are in no namespace, are the
+    // SVG elements the author meant, as if the file declared xmlns="http://www.w3.org/2000/svg".
+    static void AdoptSvgNamespace(XElement root)
+    {
+        foreach (var element in root.DescendantsAndSelf())
+            if (element.Name.Namespace == XNamespace.None) element.Name = Svg + element.Name.LocalName;
     }
 
     static void CheckSize(XElement root)

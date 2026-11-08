@@ -13,13 +13,13 @@
             </ResourceDictionary.MergedDictionaries>
             <BooleanToVisibilityConverter x:Key="VisibleWhen" />
 
-            <!--  One agent to edit: its current icon and its name.  -->
+            <!--  One agent to edit: its current icon and its name, stretched to its grid cell.  -->
             <DataTemplate x:Key="AgentTileTemplate" DataType="{x:Type local:AgentTile}">
                 <RadioButton
-                    Width="152"
                     Height="64"
                     Margin="0,0,8,8"
                     Padding="12,0,8,0"
+                    HorizontalAlignment="Stretch"
                     Tag="NoCheck"
                     AutomationProperties.Name="{Binding Name}"
                     Checked="OnAgentChecked"
@@ -42,9 +42,10 @@
                 </RadioButton>
             </DataTemplate>
 
-            <!--  One icon to choose: the picture at token size, its name; an added one can be removed.  -->
+            <!--  One icon to choose: the picture at token size, its name. An added one can be removed
+                  with the "x" that shows while the pointer or the keyboard focus is on its tile.  -->
             <DataTemplate x:Key="IconTileTemplate" DataType="{x:Type local:IconTile}">
-                <Grid Margin="0,0,8,8">
+                <Grid x:Name="Tile" Margin="0,0,8,8">
                     <RadioButton
                         Width="96"
                         Height="104"
@@ -68,25 +69,46 @@
                                 TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </RadioButton>
-                    <ui:Button
-                        Width="24"
-                        Height="24"
-                        Margin="4,4,0,0"
-                        Padding="0"
+                    <Grid
                         HorizontalAlignment="Left"
                         VerticalAlignment="Top"
-                        Appearance="Transparent"
-                        AutomationProperties.Name="{Binding RemoveName}"
-                        Click="OnRemoveIcon"
-                        Icon="{ui:SymbolIcon Dismiss12}"
-                        ToolTip="Remove icon"
-                        Visibility="{Binding IsCustom, Converter={StaticResource VisibleWhen}}" />
+                        Visibility="{Binding IsCustom, Converter={StaticResource VisibleWhen}}">
+                        <ui:Button
+                            x:Name="RemoveButton"
+                            Width="24"
+                            Height="24"
+                            Margin="4,4,0,0"
+                            Padding="0"
+                            Appearance="Secondary"
+                            AutomationProperties.Name="{Binding RemoveName}"
+                            Click="OnRemoveIcon"
+                            Icon="{ui:SymbolIcon Dismiss12}"
+                            ToolTip="Remove icon"
+                            Visibility="Hidden" />
+                    </Grid>
                 </Grid>
+                <DataTemplate.Triggers>
+                    <Trigger SourceName="Tile" Property="IsMouseOver" Value="True">
+                        <Setter TargetName="RemoveButton" Property="Visibility" Value="Visible" />
+                    </Trigger>
+                    <Trigger SourceName="Tile" Property="IsKeyboardFocusWithin" Value="True">
+                        <Setter TargetName="RemoveButton" Property="Visibility" Value="Visible" />
+                    </Trigger>
+                </DataTemplate.Triggers>
             </DataTemplate>
 
             <ItemsPanelTemplate x:Key="Wrap">
                 <WrapPanel />
             </ItemsPanelTemplate>
+            <ItemsPanelTemplate x:Key="AgentGrid">
+                <UniformGrid Columns="4" />
+            </ItemsPanelTemplate>
+
+            <!--  A swatch half: one whole token on one backdrop.  -->
+            <Style x:Key="SwatchHalf" TargetType="Border">
+                <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+            </Style>
         </ResourceDictionary>
     </Page.Resources>
 
@@ -94,100 +116,101 @@
         <ui:TextBlock Style="{StaticResource PageTitle}" Text="Icons" />
         <ui:TextBlock Style="{StaticResource PageLead}" Text="Choose how each agent looks on the token: its own logo, one of its mascots, or a picture of your own." />
 
-        <!--  What the chosen icon looks like in both states, over dark and light.  -->
+        <!--  What the chosen icon looks like in both states, each over dark and over light, at its
+              real size: side by side, or one above the other when the page is too narrow for four
+              whole tokens in a row.  -->
         <Border
             Margin="0,16,0,4"
-            Padding="16,16,16,12"
+            Padding="16,16,0,0"
             Style="{StaticResource Surface}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="16" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-
-                <Grid x:Name="DoneSwatch" Grid.Column="0">
+            <UniformGrid
+                x:Name="Swatches"
+                Columns="2"
+                SizeChanged="OnSwatchesSize">
+              <StackPanel Margin="0,0,16,12">
+                <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Border Background="#202020" CornerRadius="6,0,0,6" />
+                    <Border
+                        Background="#202020"
+                        CornerRadius="6,0,0,6"
+                        Style="{StaticResource SwatchHalf}">
+                        <local:TokenPreview x:Name="DoneOnDark" />
+                    </Border>
                     <Border
                         Grid.Column="1"
                         Background="#F3F3F3"
-                        CornerRadius="0,6,6,0" />
-                    <Border
-                        Grid.ColumnSpan="2"
-                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="6" />
-                    <local:TokenPreview x:Name="DonePreview" Grid.ColumnSpan="2" />
+                        BorderThickness="0,1,1,1"
+                        CornerRadius="0,6,6,0"
+                        Style="{StaticResource SwatchHalf}">
+                        <local:TokenPreview x:Name="DoneOnLight" />
+                    </Border>
                 </Grid>
-                <Grid x:Name="BlockedSwatch" Grid.Column="2">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Border Background="#202020" CornerRadius="6,0,0,6" />
-                    <Border
-                        Grid.Column="1"
-                        Background="#F3F3F3"
-                        CornerRadius="0,6,6,0" />
-                    <Border
-                        Grid.ColumnSpan="2"
-                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="6" />
-                    <local:TokenPreview
-                        x:Name="BlockedPreview"
-                        Grid.ColumnSpan="2"
-                        Blocked="True"
-                        Others="1" />
-                </Grid>
-
-                <StackPanel Grid.Row="1" Margin="2,12,0,0">
+                <StackPanel Margin="2,12,0,0">
                     <ui:TextBlock FontTypography="BodyStrong" Text="Done" />
                     <ui:TextBlock
                         FontTypography="Caption"
                         Style="{StaticResource Secondary}"
                         Text="The agent finished its turn." />
                 </StackPanel>
-                <StackPanel
-                    Grid.Row="1"
-                    Grid.Column="2"
-                    Margin="2,12,0,0">
+              </StackPanel>
+              <StackPanel Margin="0,0,16,12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border
+                        Background="#202020"
+                        CornerRadius="6,0,0,6"
+                        Style="{StaticResource SwatchHalf}">
+                        <local:TokenPreview
+                            x:Name="BlockedOnDark"
+                            Blocked="True"
+                            Others="1" />
+                    </Border>
+                    <Border
+                        Grid.Column="1"
+                        Background="#F3F3F3"
+                        BorderThickness="0,1,1,1"
+                        CornerRadius="0,6,6,0"
+                        Style="{StaticResource SwatchHalf}">
+                        <local:TokenPreview
+                            x:Name="BlockedOnLight"
+                            Blocked="True"
+                            Others="1" />
+                    </Border>
+                </Grid>
+                <StackPanel Margin="2,12,0,0">
                     <ui:TextBlock FontTypography="BodyStrong" Text="Needs you" />
                     <ui:TextBlock
                         FontTypography="Caption"
                         Style="{StaticResource Secondary}"
-                        Text="The agent is waiting for your answer. +1: another agent is waiting too." />
+                        Text="Waiting for your answer. The +1 means another agent is waiting too." />
                 </StackPanel>
-            </Grid>
+              </StackPanel>
+            </UniformGrid>
         </Border>
 
-        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Agent" />
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Agents" />
+        <!--  The cells carry an 8 px gap on their right; the list gives it back so the row ends
+              flush with the surfaces below.  -->
         <ItemsControl
             x:Name="AgentList"
-            AutomationProperties.Name="Agent"
+            Margin="0,0,-8,0"
+            AutomationProperties.Name="Agents"
             Focusable="False"
             ItemTemplate="{StaticResource AgentTileTemplate}"
-            ItemsPanel="{StaticResource Wrap}"
-            PreviewKeyDown="OnTileKey" />
+            ItemsPanel="{StaticResource AgentGrid}"
+            PreviewKeyDown="OnTileKey"
+            SizeChanged="OnAgentListSize" />
 
         <ui:TextBlock
             x:Name="GalleryHeader"
             Style="{StaticResource SectionHeader}"
             Text="Choose an icon" />
-        <ui:InfoBar
-            x:Name="UploadError"
-            Margin="0,0,0,8"
-            IsClosable="True"
-            Severity="Error"
-            Title="That file couldn't be used" />
         <Border Padding="16,16,8,8" Style="{StaticResource Surface}">
             <StackPanel>
                 <ItemsControl
@@ -216,7 +239,8 @@
                         AutomationProperties.HelpText="Choose an SVG file to use as this agent's icon"
                         AutomationProperties.Name="Add an SVG icon"
                         Click="OnAdd"
-                        Style="{StaticResource AddTile}">
+                        Style="{StaticResource AddTile}"
+                        ToolTipService.ShowOnDisabled="True">
                         <Grid VerticalAlignment="Center">
                             <StackPanel x:Name="AddLabel">
                                 <ui:SymbolIcon FontSize="24" Symbol="Add24" />
@@ -240,11 +264,25 @@
                         </Grid>
                     </Button>
                 </WrapPanel>
+
+                <!--  Right under the tiles it is about: what went wrong with an added file, or the
+                      icon just removed (with Undo); otherwise the hints for adding one.  -->
+                <Grid Margin="0,4,8,8">
+                    <ui:InfoBar x:Name="StatusBar" IsClosable="True" />
+                    <ui:Button
+                        x:Name="UndoButton"
+                        Margin="0,0,52,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Click="OnUndoRemove"
+                        Content="Undo"
+                        Visibility="Collapsed" />
+                </Grid>
                 <ui:TextBlock
+                    x:Name="AddHint"
                     Margin="0,4,8,8"
                     FontTypography="Caption"
-                    Style="{StaticResource Secondary}"
-                    Text="SVG files up to 256 KB. Flat shapes, gradients, groups and transforms work best. Scripts and links to other files are removed, and each agent can keep up to 24 of your own icons." />
+                    Style="{StaticResource Secondary}" />
             </StackPanel>
         </Border>
 

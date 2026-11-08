@@ -28,18 +28,19 @@ public sealed class NotifierRenderer : IDisposable
     /// centred at (<paramref name="centerX"/>/<paramref name="centerY"/>) and tilted by
     /// <paramref name="swingDeg"/> (0 = upright), plus its badges: the "+N" pill when others wait and
     /// the "?" badge (drawn last, on top, and kept upright) when it is blocked on you. A thin contrast
-    /// rim keeps the bare logo legible over any window behind it. Leaves no transform behind.</summary>
+    /// rim (<see cref="RimWidth"/>, at <paramref name="dpi"/>: 1 = 96 DPI) keeps the bare logo legible
+    /// over any window behind it. Leaves no transform behind.</summary>
     public void DrawToken(Graphics g, CursorSettings s, TokenFace face,
-                          float centerX, float centerY, float tokenSidePx, float swingDeg)
-        => DrawToken(g, s, face, s.IconFor(face.Tool), centerX, centerY, tokenSidePx, swingDeg);
+                          float centerX, float centerY, float tokenSidePx, float swingDeg, float dpi)
+        => DrawToken(g, s, face, s.IconFor(face.Tool), centerX, centerY, tokenSidePx, swingDeg, dpi);
 
     /// <summary>As the other overload, but with <paramref name="iconId"/> instead of the icon the
     /// settings choose for the agent (the panel's icon gallery draws every choice).</summary>
     public void DrawToken(Graphics g, CursorSettings s, TokenFace face, string iconId,
-                          float centerX, float centerY, float tokenSidePx, float swingDeg)
+                          float centerX, float centerY, float tokenSidePx, float swingDeg, float dpi)
     {
         float box = Math.Max(8f, tokenSidePx);
-        float edge = box * 0.06f;          // contrast rim so a bare logo reads on any background
+        float edge = RimWidth(box, dpi);
         var square = new RectangleF(-box / 2f, -box / 2f, box, box);
 
         var saved = g.Save();
@@ -60,6 +61,24 @@ public sealed class NotifierRenderer : IDisposable
 
     public void Dispose() => _sprites.Dispose();
 
+    /// <summary>The width and height of what <paramref name="iconId"/> draws, as fractions of its box
+    /// (the longer one is about 1: icons are fitted by their visible pixels); a square for a tool with
+    /// no icon. Lets a host size icons of different shapes to the same visual weight.</summary>
+    public SizeF IconShape(string tool, string iconId)
+    {
+        const float Probe = 128f;
+        if (_sprites.Get(tool, iconId, Probe, RimWidth(Probe, 1f)) is not { } sprite) return new SizeF(DotRatio, DotRatio);
+        return new SizeF(sprite.Visual.Width / Probe, sprite.Visual.Height / Probe);
+    }
+
+    /// <summary>The contrast rim's width for a box of <paramref name="box"/> px at <paramref name="dpi"/>:
+    /// 6% of the box on a small token, and never more than 3 px at 96 DPI, so a big token gets a fine
+    /// edge rather than a sticker's border.</summary>
+    public static float RimWidth(float box, float dpi) => Math.Min(box * MaxRimRatio, 3f * Math.Max(dpi, 0.5f));
+
+    /// <summary>The widest the rim gets, as a fraction of the box (<see cref="TokenCanvas"/> allows for it).</summary>
+    public const float MaxRimRatio = 0.06f;
+
     // The unknown-tool dot's diameter as a fraction of the box.
     const float DotRatio = 0.7f;
 
@@ -73,8 +92,10 @@ public sealed class NotifierRenderer : IDisposable
         {
             float d = Math.Min(box.Width, box.Height) * DotRatio;
             var dot = new RectangleF(box.X + (box.Width - d) / 2f, box.Y + (box.Height - d) / 2f, d, d);
-            using (var rim = new Pen(TokenSprites.RimFor(Color.Gray), edge))
-                g.DrawEllipse(rim, dot);
+            using (var outer = new Pen(TokenSprites.RimLight, edge * 2f))
+                g.DrawEllipse(outer, dot);
+            using (var inner = new Pen(TokenSprites.RimDark, edge))
+                g.DrawEllipse(inner, dot);
             using (var fill = new SolidBrush(Color.Gray))
                 g.FillEllipse(fill, dot);
             return dot;

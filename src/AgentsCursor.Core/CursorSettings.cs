@@ -127,27 +127,24 @@ public sealed class CursorSettings
         Version = CurrentVersion; // a loaded older file has been migrated by now
     }
 
-    /// <summary>Puts the token's look back to the defaults: size, placement, corner, outline colour
-    /// and every agent's icon. Leaves the notifier switch, the linger timeout and the hidden-while-using
-    /// list alone.</summary>
-    public void ResetAppearance()
+    /// <summary>Puts the token's size and where it shows (placement and corner) back to the defaults:
+    /// what the Token page edits. Each agent's icon has its own reset on the Icons page, and the
+    /// notifier switch, the linger timeout, the outline colour and the hidden-while-using list are
+    /// left alone.</summary>
+    public void ResetSizeAndPosition()
     {
         var defaults = new CursorSettings();
         Size = defaults.Size;
         Placement = defaults.Placement;
         Corner = defaults.Corner;
-        OutlineColor = defaults.OutlineColor;
-        Icons = defaults.Icons;
     }
 
-    /// <summary>True when the look <see cref="ResetAppearance"/> resets is already the default. (A
+    /// <summary>True when what <see cref="ResetSizeAndPosition"/> resets is already the default. (A
     /// method, not a property, so it stays out of the saved JSON.)</summary>
-    public bool HasDefaultAppearance()
+    public bool HasDefaultSizeAndPosition()
     {
         var defaults = new CursorSettings();
-        return Size == defaults.Size && Placement == defaults.Placement && Corner == defaults.Corner
-               && string.Equals(OutlineColor, defaults.OutlineColor, StringComparison.OrdinalIgnoreCase)
-               && Icons.Count == 0;
+        return Size == defaults.Size && Placement == defaults.Placement && Corner == defaults.Corner;
     }
 
     /// <summary>An independent copy. Every field is a value type, an immutable string, or a read-only

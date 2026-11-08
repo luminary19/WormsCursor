@@ -28,9 +28,10 @@ public static partial class AgentHookRegistrar
     // Today's entry: the shipped plugin folder as a file: URL.
     static string OpenCodeEntry(string pluginDir) => new Uri(pluginDir).AbsoluteUri;
 
-    // Ours: a specifier (file: URL, absolute path, or a path relative to the config) of a folder ending
-    // in \integrations\opencode — today's plugin, an older or moved copy, or the plugin this
-    // repository's checkout used to register.
+    // Ours: a specifier (file: URL, absolute path, or a path relative to the config) of a folder, or its
+    // index.ts, that holds AgentsCursor's OpenCode plugin: today's, an older or moved copy, or this
+    // repository's checkout. A folder of someone else's that happens to be named integrations\opencode
+    // is theirs.
     static bool IsOpenCodeEntry(string? specifier)
     {
         if (string.IsNullOrWhiteSpace(specifier)) return false;
@@ -48,7 +49,7 @@ public static partial class AgentHookRegistrar
             return false;
         }
         if (path.EndsWith("\\index.ts", StringComparison.OrdinalIgnoreCase)) path = path[..^"\\index.ts".Length];
-        return path.EndsWith("\\integrations\\opencode", StringComparison.OrdinalIgnoreCase);
+        return HoldsOurPlugin(path, "opencode");
     }
 
     static List<JsoncEdit.Element> OpenCodeEntries(JsoncEdit.Document doc)

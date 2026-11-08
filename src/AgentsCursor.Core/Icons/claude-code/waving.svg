@@ -1,8 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="1 -2 30 23" shape-rendering="crispEdges">
-  <!-- Claude Code waving: the pixel critter with its left arm raised (clear of the "?" badge) in a wave, happy ^ ^ eyes and motion ticks. -->
-  <g transform="translate(31 0) scale(-1 1)">
-    <path fill="#D97757" d="M3 5H21V17H3ZM0 11H3V14H0ZM21 9.5H25.5V12.5H21ZM22.5 3H25.5V9.5H22.5ZM22 0H26V3H22ZM4.5 17H6V20H4.5ZM7.5 17H9V20H7.5ZM15 17H16.5V20H15ZM18 17H19.5V20H18Z"/>
-    <path fill="#2B1B14" d="M4.5 9.5H6V11H4.5ZM6 8H7.5V9.5H6ZM7.5 9.5H9V11H7.5ZM15 9.5H16.5V11H15ZM16.5 8H18V9.5H16.5ZM18 9.5H19.5V11H18ZM10.5 12.5H13.5V14H10.5Z"/>
-    <path fill="#D97757" d="M19 0H20.5V3H19ZM27.5 0H29V3H27.5Z"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-3 -3 28 24" shape-rendering="crispEdges">
+  <!-- Claude Code waving: the pixel critter, nearly as big as the original, its left arm raised in a wave with an open hand, happy ^ ^ eyes and two motion ticks, all clear of the badge corner. -->
+  <path fill="#D97757" d="M3 5H21V17H3ZM21 11H24V14H21ZM0 9.5H3V12.5H0ZM-1.5 3.5H1.5V11H-1.5ZM-1.5 0.5H3V3.5H-1.5ZM3 2H4.5V3.5H3ZM4.5 17H6V20H4.5ZM7.5 17H9V20H7.5ZM15 17H16.5V20H15ZM18 17H19.5V20H18Z"/>
+  <path fill="#2B1B14" d="M4.5 9.5H6V11H4.5ZM6 8H7.5V9.5H6ZM7.5 9.5H9V11H7.5ZM15 9.5H16.5V11H15ZM16.5 8H18V9.5H16.5ZM18 9.5H19.5V11H18ZM10.5 12.5H13.5V14H10.5Z"/>
+  <path fill="#D97757" d="M6 -0.5H7.5V1H6ZM7.5 1.5H9V3H7.5Z"/>
 </svg>

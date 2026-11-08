@@ -22,9 +22,11 @@ public enum HookState
     ConfigConflict,
 }
 
-/// <summary>A supported agent tool and where its config lives. <paramref name="AfterChange"/> is the step
-/// the tool itself needs after AgentsCursor changes that config, before the change takes effect.</summary>
-public sealed record HookTool(string Id, string DisplayName, string ConfigHint, string AfterChange);
+/// <summary>A supported agent and where its config lives. <paramref name="Detail"/> says which of its
+/// apps the connection covers, when that needs saying (empty otherwise). <paramref name="AfterChange"/>
+/// is the step the agent itself needs after AgentsCursor changes that config, before the change takes
+/// effect.</summary>
+public sealed record HookTool(string Id, string DisplayName, string Detail, string ConfigHint, string AfterChange);
 
 /// <summary>One connection <see cref="AgentHookRegistrar.RefreshConnected"/> brought up to date:
 /// <paramref name="Error"/> is null when it worked, else why it couldn't be written.</summary>
@@ -38,9 +40,15 @@ public sealed record RefreshResult(HookTool Tool, string? Error);
 /// <c>&lt;file&gt;.agentscursor.bak</c> (never overwritten afterwards, so it keeps the pre-AgentsCursor
 /// file), every write merges rather than overwrites, and a malformed config is reported (never
 /// clobbered). Our entries are recognised by a marker that survives a moved exe (the
-/// <c>hook --tool &lt;id&gt;</c> arguments, or a plugin path ending in <c>integrations\&lt;id&gt;</c>), so
-/// they can be found again across reinstalls, including the WormsCursor.exe this app was called before
-/// its rename — and only those entries are ever removed, never a user's own.
+/// <c>hook --tool &lt;id&gt;</c> arguments, or a plugin folder whose <c>package.json</c> names AgentsCursor's
+/// plugin, <c>agentscursor-&lt;id&gt;</c>), so they can be found again across reinstalls, including the
+/// WormsCursor.exe this app was called before its rename — and only those entries are ever changed or
+/// removed, never a user's own. (A plugin entry whose folder is gone can't be shown to be ours, so it
+/// is left alone too.)
+///
+/// Every path written or compared derives from the exe's path as it is on disk (<see cref="OnDisk"/>),
+/// not as it was typed to launch it: Windows paths ignore case, but the configs are compared as text,
+/// and a launch from a lower-cased path must not make every connection read as outdated.
 /// </summary>
 public static partial class AgentHookRegistrar
 {
@@ -57,7 +65,8 @@ public static partial class AgentHookRegistrar
     /// can be exercised without touching real tool configs.</summary>
     public static string? HomeOverride;
 
-    static string Exe => Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "AgentsCursor.exe");
+    static readonly Lazy<string> ExePath = new(() => OnDisk(Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "AgentsCursor.exe")));
+    static string Exe => ExePath.Value;
     static string Home => HomeOverride ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
     // A tool's config directory from its environment variable, unless the test seam is set.
@@ -73,6 +82,47 @@ public static partial class AgentHookRegistrar
     /// the hook commands, so a moved app reads as outdated the same way for every tool.</summary>
     public static string PluginDir(string toolId) => Path.Combine(Path.GetDirectoryName(Exe)!, "integrations", toolId);
 
+    /// <summary><paramref name="path"/> spelled as it is on disk: the drive letter upper-cased and each
+    /// existing part in its real case (a short 8.3 name becomes the long one). From the first part that
+    /// doesn't exist on, the rest is kept as given.</summary>
+    internal static string OnDisk(string path)
+    {
+        string full;
+        try { full = Path.GetFullPath(path); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return path; }
+        string root = Path.GetPathRoot(full) ?? "";
+        string result = root.Length >= 2 && root[1] == ':' ? char.ToUpperInvariant(root[0]) + root[1..] : root;
+        string[] parts = full[root.Length..].Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < parts.Length; i++)
+        {
+            FileSystemInfo? match = null;
+            try { match = new DirectoryInfo(result).EnumerateFileSystemInfos(parts[i]).FirstOrDefault(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
+            if (match is null) return Path.Combine(result, string.Join('\\', parts[i..]));
+            result = Path.Combine(result, match.Name);
+        }
+        return result;
+    }
+
+    /// <summary>True when <paramref name="folder"/> holds AgentsCursor's plugin for
+    /// <paramref name="toolId"/>: its <c>package.json</c> is named <c>agentscursor-&lt;id&gt;</c>, as every
+    /// copy this app ships is (and the checkout it is built from).</summary>
+    static bool HoldsOurPlugin(string folder, string toolId)
+    {
+        try
+        {
+            string manifest = Path.Combine(folder, "package.json");
+            if (!File.Exists(manifest)) return false;
+            return JsonNode.Parse(File.ReadAllText(manifest)) is JsonObject package
+                   && StringValue(package["name"]) == "agentscursor-" + toolId;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException
+                                       or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
     // The plugin folder to register, which must exist: a build without the integrations can't connect.
     static string ShippedPluginDir(string toolId, string name)
     {
@@ -84,14 +134,14 @@ public static partial class AgentHookRegistrar
 
     public static IReadOnlyList<HookTool> Tools { get; } = new[]
     {
-        new HookTool("claude-code", "Claude Code", "~/.claude/settings.json",
+        new HookTool("claude-code", "Claude Code", "", "~/.claude/settings.json",
             "Start a new Claude Code session to pick it up."),
         // Codex runs a changed hook only after you trust it (Codex: /hooks), separately in Orca.
-        new HookTool("codex", "Codex (desktop + CLI)", "CODEX_HOME/hooks.json",
+        new HookTool("codex", "Codex", "Desktop app and CLI", "CODEX_HOME/hooks.json",
             "In Codex, approve the changed AgentsCursor hooks under /hooks, also in sessions Orca starts, then start a new session."),
-        new HookTool("opencode", "OpenCode", "OPENCODE_CONFIG_DIR/opencode.jsonc",
+        new HookTool("opencode", "OpenCode", "", "OPENCODE_CONFIG_DIR/opencode.jsonc",
             "Run \"opencode reload\" in open OpenCode sessions, or start a new one. Orca picks it up too."),
-        new HookTool("pi", "Pi", "PI_CODING_AGENT_DIR/settings.json",
+        new HookTool("pi", "Pi", "", "PI_CODING_AGENT_DIR/settings.json",
             "Run /reload in open Pi sessions, or start a new one."),
     };
 

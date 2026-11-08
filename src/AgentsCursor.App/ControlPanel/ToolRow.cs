@@ -23,6 +23,7 @@ public sealed class ToolRow : INotifyPropertyChanged
     public HookTool Tool { get; }
     public ImageSource Logo { get; }
     public string Name => Tool.DisplayName;
+    public string Detail => Tool.Detail;
     public string ConfigPath { get; private set; } = "";
 
     public HookState State { get; private set; }

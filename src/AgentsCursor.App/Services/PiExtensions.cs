@@ -14,15 +14,24 @@ public static partial class AgentHookRegistrar
     public static string PiPath
         => Path.Combine(ConfigDirFromEnvironment("PI_CODING_AGENT_DIR") ?? Path.Combine(Home, ".pi", "agent"), "settings.json");
 
-    // Ours: an inclusion (no `-`/`!` prefix; an optional `+` is ignored) of a path that, without a
-    // trailing index.ts, ends in \integrations\pi — today's plugin folder, or the one an older or moved
-    // copy of AgentsCursor registered.
+    // Ours: an inclusion (no `-`/`!` prefix; an optional `+` is ignored) of a folder, or its index.ts,
+    // that holds AgentsCursor's Pi plugin: today's, or one an older or moved copy registered. A
+    // relative path is relative to Pi's agent folder. A folder of someone else's that happens to be
+    // named integrations\pi is theirs.
     static bool IsPiEntry(string entry)
     {
         if (entry.StartsWith('-') || entry.StartsWith('!')) return false;
-        string path = entry.TrimStart('+').Replace('/', '\\').TrimEnd('\\');
+        string path;
+        try
+        {
+            path = Path.GetFullPath(entry.TrimStart('+').Replace('/', '\\'), Path.GetDirectoryName(PiPath)!).TrimEnd('\\');
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
         if (path.EndsWith("\\index.ts", StringComparison.OrdinalIgnoreCase)) path = path[..^"\\index.ts".Length];
-        return path.EndsWith("\\integrations\\pi", StringComparison.OrdinalIgnoreCase);
+        return HoldsOurPlugin(path, "pi");
     }
 
     // The settings' `extensions` array (null when absent), which must hold only strings.

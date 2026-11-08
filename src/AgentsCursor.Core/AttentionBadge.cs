@@ -20,9 +20,10 @@ public static class AttentionBadge
     public const float RadiusRatio = 0.22f;
 
     /// <summary>How far the badge's centre sits inside the logo's top-right corner, as a fraction of
-    /// the badge radius: enough to overlap the logo like an app badge, little enough to keep clear
-    /// of the logo's features (the Claude critter's right eye).</summary>
-    const float Inset = 0.12f;
+    /// the badge radius. None: the centre is on the corner, so a quarter of the disc overlaps the logo,
+    /// like an app's notification badge, and the logo's own features keep clear of it. (The icons keep
+    /// that corner, and the band along the top where the "+N" pill tucks in, free of faces.)</summary>
+    const float Inset = 0f;
 
     /// <summary>How far the badge reaches past its logo's top and right edges, as a fraction of the
     /// token side (the disc only; the soft shadow fades out just beyond it). Hosts that keep the

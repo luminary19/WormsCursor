@@ -1,17 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 84" shape-rendering="crispEdges">
-  <!-- Pi pie: a pixel pie slice, its crust in pi-cursor's column palette, a pi cut into the filling. -->
-  <path fill="#ff00af" d="M0 10H10V24H0Z"/>
-  <path fill="#e817b6" d="M10 0H20V10H10ZM10 10H20V24H10Z"/>
-  <path fill="#d12ebe" d="M20 0H30V10H20ZM20 10H30V24H20Z"/>
-  <path fill="#ba45c5" d="M30 0H40V10H30ZM30 10H40V24H30Z"/>
-  <path fill="#a35ccc" d="M40 0H50V10H40ZM40 10H50V24H40Z"/>
-  <path fill="#8c73d3" d="M50 0H60V10H50ZM50 10H60V24H50Z"/>
-  <path fill="#758bdb" d="M60 0H70V10H60ZM60 10H70V24H60Z"/>
-  <path fill="#5ea2e2" d="M70 0H80V10H70ZM70 10H80V24H70Z"/>
-  <path fill="#47b9e9" d="M80 0H90V10H80ZM80 10H90V24H80Z"/>
-  <path fill="#30d0f0" d="M90 0H100V10H90ZM90 10H100V24H90Z"/>
-  <path fill="#19e7f8" d="M100 0H110V10H100ZM100 10H110V24H100Z"/>
-  <path fill="#02feff" d="M110 10H120V24H110Z"/>
-  <path fill="#ffe3bd" d="M10 24H110V36H10ZM20 36H100V48H20ZM30 48H90V60H30ZM40 60H80V72H40ZM50 72H70V84H50Z"/>
-  <path fill="#1d1230" d="M41 30H79V36H41ZM47 36H53V52H47ZM67 36H73V50H67ZM73 46H77V52H73ZM43 50H47V52H43Z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" shape-rendering="crispEdges">
+  <!-- Pi pie: a whole pixel pie seen from above at a tilt, its crust in pi-cursor's column palette and a big pi on the filling. -->
+  <path fill="#ff00af" d="M0 20H10V50H0Z"/>
+  <path fill="#e817b6" d="M10 10H20V60H10Z"/>
+  <path fill="#d12ebe" d="M20 10H30V20H20ZM20 50H30V60H20Z"/>
+  <path fill="#ba45c5" d="M30 0H40V10H30ZM30 50H40V60H30Z"/>
+  <path fill="#a35ccc" d="M40 0H50V10H40ZM40 50H50V60H40Z"/>
+  <path fill="#8c73d3" d="M50 0H60V10H50ZM50 50H60V60H50Z"/>
+  <path fill="#758bdb" d="M60 0H70V10H60ZM60 50H70V60H60Z"/>
+  <path fill="#5ea2e2" d="M70 0H80V10H70ZM70 50H80V60H70Z"/>
+  <path fill="#47b9e9" d="M80 0H90V10H80ZM80 50H90V60H80Z"/>
+  <path fill="#30d0f0" d="M90 10H100V20H90ZM90 50H100V60H90Z"/>
+  <path fill="#19e7f8" d="M100 10H110V60H100Z"/>
+  <path fill="#02feff" d="M110 20H120V50H110Z"/>
+  <path fill="#ffe3bd" d="M30 10H90V20H30ZM20 20H100V50H20Z"/>
+  <path fill="#c99a62" d="M10 60H110V70H10ZM20 70H100V80H20Z"/>
+  <path fill="#a8783f" d="M20 66H100V70H20ZM30 76H90V80H30Z"/>
+  <path fill="#1d1230" d="M34 22H86V29H34ZM44 29H51V46H44ZM40 44H44V48H40ZM69 29H76V44H69ZM76 40H80V46H76Z"/>
 </svg>

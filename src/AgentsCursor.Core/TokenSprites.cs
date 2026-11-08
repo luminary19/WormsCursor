@@ -8,8 +8,9 @@ namespace AgentsCursor.Core;
 /// <summary>
 /// Rasterises token icons (SVG, through SVG.NET) into cached sprites for one renderer. Every icon is
 /// fitted by its <b>visible pixels</b>, not its viewBox, so icons with different padding all look the
-/// same size, and each gets a generic contrast rim (its alpha mask dilated, in a light colour for a
-/// dark icon and a dark one for a light icon) so a bare icon reads over any window. The sprite also
+/// same size, and each gets the same two-tone contrast rim (its alpha mask dilated: a dark inner band,
+/// then a light outer one) so any icon reads over any window, dark or light, and a gallery of icons
+/// is edged alike whatever their colours. The sprite also
 /// reports where the icon sits in its box (<see cref="Sprite.Visual"/>), which is what the "?" badge
 /// and the "+N" pill anchor to.
 ///
@@ -182,47 +183,56 @@ internal sealed class TokenSprites : IDisposable
         return new Sprite(image, pad, new RectangleF(ox, oy, w, h));
     }
 
-    // Composites the icon over its alpha mask dilated by <rim> px (a disc, anti-aliased at its edge),
-    // filled with a contrast colour picked from the icon's average colour.
+    /// <summary>The rim's two bands around the icon: dark next to it (it edges the icon on a light
+    /// screen), light outside that (it edges the whole on a dark one). Inside a hole in the icon (the
+    /// Claude critter's eyes, the gaps in the Codex knot) the rim is the one of the two that contrasts
+    /// with the icon itself, so the hole reads as part of the picture on any screen.</summary>
+    internal static readonly Color RimDark = Color.FromArgb(28, 28, 28), RimLight = Color.FromArgb(246, 246, 246);
+    const float DarkShare = 0.55f; // of the rim's width
+
+    // Composites the icon, outside it, over its alpha mask dilated by the dark band's width, over the
+    // mask dilated by the whole rim in the light colour; inside its holes, over the mask dilated by the
+    // whole rim in the colour that contrasts with the icon (discs, anti-aliased at their edges).
     static void AddRim(Bitmap image, float rim)
     {
         int w = image.Width, h = image.Height;
         var px = Pixels(image);
-        var rimColor = RimFor(AverageColor(px));
-
-        int reach = (int)MathF.Ceiling(rim + 0.5f);
-        var kernel = new List<(int Dx, int Dy, float Cover)>();
-        for (int dy = -reach; dy <= reach; dy++)
-            for (int dx = -reach; dx <= reach; dx++)
-            {
-                float cover = Math.Clamp(rim + 0.5f - MathF.Sqrt(dx * dx + dy * dy), 0f, 1f);
-                if (cover > 0f) kernel.Add((dx, dy, cover));
-            }
+        var hole = Luminance(AverageColor(px)) < 110f ? RimLight : RimDark;
+        var outerKernel = Disc(rim);
+        var innerKernel = Disc(rim * DarkShare);
+        var outside = Outside(px, w, h);
+        bool NearOutside(int x, int y)
+            => outside[y * w + x] || (x > 0 && outside[y * w + x - 1]) || (x < w - 1 && outside[y * w + x + 1])
+               || (y > 0 && outside[(y - 1) * w + x]) || (y < h - 1 && outside[(y + 1) * w + x]);
 
         var output = new byte[px.Length];
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
                 int i = (y * w + x) * 4;
-                if (px[i + 3] == 255) // fully covered by the icon: no rim shows through
+                if (px[i + 3] == 255) // covered by the icon: no rim shows through
                 {
                     Buffer.BlockCopy(px, i, output, i, 4);
                     continue;
                 }
-                float ring = 0f; // the rim's alpha here, 0..1
-                foreach (var (dx, dy, cover) in kernel)
+                float outer = Dilated(px, w, h, x, y, outerKernel), srcA = px[i + 3] / 255f;
+                float dark, light;
+                if (!NearOutside(x, y)) // in a hole
                 {
-                    int sx = x + dx, sy = y + dy;
-                    if ((uint)sx >= (uint)w || (uint)sy >= (uint)h) continue;
-                    float a = px[(sy * w + sx) * 4 + 3] / 255f * cover;
-                    if (a > ring) { ring = a; if (ring >= 1f) break; }
+                    dark = hole == RimDark ? outer * (1f - srcA) : 0f;
+                    light = hole == RimLight ? outer * (1f - srcA) : 0f;
                 }
-                float srcA = px[i + 3] / 255f, under = ring * (1f - srcA);
-                // Premultiplied "source over": icon + rim * (1 - icon alpha).
-                output[i] = (byte)Math.Min(255f, px[i] + rimColor.B * under + 0.5f);
-                output[i + 1] = (byte)Math.Min(255f, px[i + 1] + rimColor.G * under + 0.5f);
-                output[i + 2] = (byte)Math.Min(255f, px[i + 2] + rimColor.R * under + 0.5f);
-                output[i + 3] = (byte)Math.Min(255f, px[i + 3] + 255f * under + 0.5f);
+                else
+                {
+                    // Premultiplied "source over", front to back: icon, then the dark band, then the light one.
+                    float inner = Dilated(px, w, h, x, y, innerKernel);
+                    dark = inner * (1f - srcA);
+                    light = outer * (1f - srcA) * (1f - inner);
+                }
+                output[i] = (byte)Math.Min(255f, px[i] + RimDark.B * dark + RimLight.B * light + 0.5f);
+                output[i + 1] = (byte)Math.Min(255f, px[i + 1] + RimDark.G * dark + RimLight.G * light + 0.5f);
+                output[i + 2] = (byte)Math.Min(255f, px[i + 2] + RimDark.R * dark + RimLight.R * light + 0.5f);
+                output[i + 3] = (byte)Math.Min(255f, px[i + 3] + 255f * (dark + light) + 0.5f);
             }
         var data = image.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
         try
@@ -231,21 +241,6 @@ internal sealed class TokenSprites : IDisposable
                 Marshal.Copy(output, y * w * 4, data.Scan0 + y * data.Stride, w * 4);
         }
         finally { image.UnlockBits(data); }
-    }
-
-    // The bitmap's premultiplied BGRA bytes, tightly packed (w * 4 per row).
-    static byte[] Pixels(Bitmap bitmap)
-    {
-        int w = bitmap.Width, h = bitmap.Height;
-        var bytes = new byte[w * h * 4];
-        var data = bitmap.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
-        try
-        {
-            for (int y = 0; y < h; y++)
-                Marshal.Copy(data.Scan0 + y * data.Stride, bytes, y * w * 4, w * 4);
-        }
-        finally { bitmap.UnlockBits(data); }
-        return bytes;
     }
 
     // The alpha-weighted average colour of the icon's pixels (premultiplied sums / total alpha).
@@ -261,12 +256,76 @@ internal sealed class TokenSprites : IDisposable
         return Color.FromArgb((int)Math.Min(255, r * scale), (int)Math.Min(255, g * scale), (int)Math.Min(255, b * scale));
     }
 
-    /// <summary>A light rim for a dark icon, a dark rim for a light one: whichever contrasts with the
-    /// opposite background (a near-black icon needs a light edge to show on a dark screen).</summary>
-    internal static Color RimFor(Color fill)
+    static float Luminance(Color c) => 0.299f * c.R + 0.587f * c.G + 0.114f * c.B;
+
+    // The pixels outside the icon: the mostly clear ones reachable from the image's edge (the sprite has
+    // a clear border, so all of the outside is connected). A clear pixel not reached is in a hole.
+    static bool[] Outside(byte[] px, int w, int h)
     {
-        float lum = 0.299f * fill.R + 0.587f * fill.G + 0.114f * fill.B;
-        return lum < 110 ? Color.FromArgb(240, 240, 240) : Color.FromArgb(36, 36, 36);
+        const byte Clear = 128;
+        var outside = new bool[w * h];
+        var queue = new Queue<int>();
+        void Reach(int x, int y)
+        {
+            int k = y * w + x;
+            if (outside[k] || px[k * 4 + 3] >= Clear) return;
+            outside[k] = true;
+            queue.Enqueue(k);
+        }
+        for (int x = 0; x < w; x++) { Reach(x, 0); Reach(x, h - 1); }
+        for (int y = 0; y < h; y++) { Reach(0, y); Reach(w - 1, y); }
+        while (queue.Count > 0)
+        {
+            int k = queue.Dequeue(), x = k % w, y = k / w;
+            if (x > 0) Reach(x - 1, y);
+            if (x < w - 1) Reach(x + 1, y);
+            if (y > 0) Reach(x, y - 1);
+            if (y < h - 1) Reach(x, y + 1);
+        }
+        return outside;
+    }
+
+    // The offsets within <radius> px, each with how much of that pixel the disc covers.
+    static (int Dx, int Dy, float Cover)[] Disc(float radius)
+    {
+        int reach = (int)MathF.Ceiling(radius + 0.5f);
+        var kernel = new List<(int Dx, int Dy, float Cover)>();
+        for (int dy = -reach; dy <= reach; dy++)
+            for (int dx = -reach; dx <= reach; dx++)
+            {
+                float cover = Math.Clamp(radius + 0.5f - MathF.Sqrt(dx * dx + dy * dy), 0f, 1f);
+                if (cover > 0f) kernel.Add((dx, dy, cover));
+            }
+        return kernel.ToArray();
+    }
+
+    // The icon's alpha at (x, y) dilated by <kernel>, 0..1.
+    static float Dilated(byte[] px, int w, int h, int x, int y, (int Dx, int Dy, float Cover)[] kernel)
+    {
+        float ring = 0f;
+        foreach (var (dx, dy, cover) in kernel)
+        {
+            int sx = x + dx, sy = y + dy;
+            if ((uint)sx >= (uint)w || (uint)sy >= (uint)h) continue;
+            float a = px[(sy * w + sx) * 4 + 3] / 255f * cover;
+            if (a > ring) { ring = a; if (ring >= 1f) break; }
+        }
+        return ring;
+    }
+
+    // The bitmap's premultiplied BGRA bytes, tightly packed (w * 4 per row).
+    static byte[] Pixels(Bitmap bitmap)
+    {
+        int w = bitmap.Width, h = bitmap.Height;
+        var bytes = new byte[w * h * 4];
+        var data = bitmap.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+        try
+        {
+            for (int y = 0; y < h; y++)
+                Marshal.Copy(data.Scan0 + y * data.Stride, bytes, y * w * 4, w * 4);
+        }
+        finally { bitmap.UnlockBits(data); }
+        return bytes;
     }
 
     public void Dispose()

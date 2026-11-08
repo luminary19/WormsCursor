@@ -78,12 +78,18 @@ public sealed class TokenPreview : FrameworkElement
         RenderFrame();
     }
 
+    /// <summary>The width, in DIPs, a preview without <see cref="Roam"/> needs for a token of
+    /// <paramref name="size"/>: the token, its badges and its bob.</summary>
+    public static double IdleWidth(int size) => size * 1.5 + 2 * Padding;
+
     protected override Size MeasureOverride(Size available)
     {
         double side = _look.Size;
-        if (!Roam) return new Size(side * 1.5 + 2 * Padding, side * 1.55 + 2 * Padding);
+        if (!Roam) return new Size(IdleWidth(_look.Size), side * 1.55 + 2 * Padding);
+        // Roaming fills the area the page gives it (a fixed height, so a size change moves nothing).
         double width = double.IsInfinity(available.Width) ? side * 4 : available.Width;
-        return new Size(width, side * 2.5 + 2 * Padding);
+        double height = double.IsInfinity(available.Height) ? side * 2.5 + 2 * Padding : available.Height;
+        return new Size(width, height);
     }
 
     protected override void OnRenderSizeChanged(SizeChangedInfo info)
@@ -141,7 +147,7 @@ public sealed class TokenPreview : FrameworkElement
             g.Clear(Gdi.Color.Transparent);
             g.SmoothingMode = GdiDrawing2D.SmoothingMode.AntiAlias;
             var (cx, cy, swing, pointer) = Roam ? RoamPose(w, h, t, dt, tokenPx, scale) : IdlePose(w, h, t, tokenPx, scale);
-            _renderer.DrawToken(g, _look, new TokenFace(Tool, Blocked, Others), cx, cy, tokenPx, swing);
+            _renderer.DrawToken(g, _look, new TokenFace(Tool, Blocked, Others), cx, cy, tokenPx, swing, scale);
             if (pointer is { } p) DrawPointer(g, p, scale); // the real pointer is always on top too
         }
 
@@ -175,13 +181,19 @@ public sealed class TokenPreview : FrameworkElement
         var placement = _look.Placement;
         if (placement != _motionFor) { _tether = default; _flip = Flip.None; _motionFor = placement; }
 
-        // The loop: wide and slow side to side, a gentle rise and fall, around a centre that leaves the
-        // token room on its rest side.
+        // The loop: wide and slow side to side, and a gentle rise and fall. Vertically it keeps the
+        // pointer and the token resting by it centred in the preview, and rises and falls only as far
+        // as leaves the token room to spare, so it doesn't flip above or below the pointer on its own
+        // (as it would at a screen edge) unless the token is too big for the preview.
         var plain = TokenMotion.RestFor(placement == NotifierPlacement.Corner ? NotifierPlacement.BelowPointer : placement, tokenPx, scale, Flip.None);
         float phase = t / LoopSeconds * 2f * MathF.PI;
         float spanX = Math.Max(0f, w / 2f - tokenPx * 0.9f - 24f * scale);
         float ax = w / 2f + spanX * MathF.Sin(phase) - plain.Dx / 2f;
-        float ay = h / 2f - plain.Dy / 2f + tokenPx * 0.12f * MathF.Sin(phase * 2f);
+        float half = TokenMotion.RestHalfExtent(tokenPx);
+        float top = Math.Min(0f, plain.Dy - half), bottom = Math.Max(TokenMotion.PointerClearance * scale, plain.Dy + half);
+        float slack = (h - (bottom - top)) / 2f;
+        float rise = Math.Clamp(slack - 0.25f * tokenPx, 0f, tokenPx * 0.12f);
+        float ay = slack - top + rise * MathF.Sin(phase * 2f);
         var pointer = new Gdi.PointF(ax, ay);
 
         if (placement == NotifierPlacement.Corner)
@@ -197,8 +209,7 @@ public sealed class TokenPreview : FrameworkElement
         var area = new Gdi.RectangleF(0, 0, w, h);
         _flip = TokenMotion.Edges(_flip, pointer, plain, tokenPx, area);
         var rest = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, tokenPx, scale, _flip), pointer, tokenPx, area);
-        float maxSwing = placement == NotifierPlacement.BesidePointer ? TokenMotion.BesideMaxSwing : 180f;
-        var step = TokenMotion.Step(ref _tether, ax, ay, rest, tokenPx, dt, entrance: false, maxSwing, area);
+        var step = TokenMotion.Step(ref _tether, ax, ay, rest, tokenPx, dt, entrance: false, TokenMotion.MaxSwingFor(placement), area);
         return (ax + step.OffsetX, ay + step.OffsetY, step.SwingDeg, pointer);
     }
 

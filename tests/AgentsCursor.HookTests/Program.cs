@@ -51,6 +51,8 @@ var tests = new (string Name, Action Run)[]
     ("OpenCode JSONC edits keep comments, commas and line endings byte-identical", OpenCodeRegistration),
     ("OpenCode's config is written in place, so a hard link to it sees the change", OpenCodeHardLink),
     ("Startup refresh updates only outdated connections and leaves the rest untouched", RefreshConnectedOnly),
+    ("A plugin folder is ours only when it holds AgentsCursor's plugin, never by its name alone", ForeignPluginFolders),
+    ("Paths compare as spelled on disk, whatever case the exe was launched with", OnDiskPaths),
     ("Every agent's original icon renders, fitted, with the badge on its top-right", BuiltInIcons),
     ("Placement \"Cursor\" migrates to BelowPointer; numbers, unknowns and v2 files load right", AppearanceTests.PlacementMigration),
     ("Icon choices normalize, round-trip, copy safely and reset", AppearanceTests.IconSettings),
@@ -444,7 +446,7 @@ static void BadgeDrawing()
                 {
                     using var canvas = new Bitmap(dim, dim);
                     using (var g = Graphics.FromImage(canvas))
-                        renderer.DrawToken(g, settings, new TokenFace(icon.Tool, blocked, others), icon.Id, mid, mid, side, 0f);
+                        renderer.DrawToken(g, settings, new TokenFace(icon.Tool, blocked, others), icon.Id, mid, mid, side, 0f, 1f);
                     var c = canvas.GetPixel(px, py);
                     bool yellow = c.A > 240 && c.R > 230 && c.G > 170 && c.B < 90;
                     if (yellow != blocked)
@@ -457,7 +459,7 @@ static void BadgeDrawing()
 static RectangleF IconBounds(string tool, string iconId, int side)
 {
     using var sprites = new TokenSprites();
-    var sprite = sprites.Get(tool, iconId, side, side * 0.06f)!;
+    var sprite = sprites.Get(tool, iconId, side, NotifierRenderer.RimWidth(side, 1f))!;
     var v = sprite.Visual;
     return new RectangleF(-side / 2f + v.X, -side / 2f + v.Y, v.Width, v.Height);
 }
@@ -880,7 +882,7 @@ static void ConcurrentRendering()
             {
                 using var g = Graphics.FromImage(canvas);
                 var tool = IconCatalog.Tools[frames % IconCatalog.Tools.Count];
-                renderer.DrawToken(g, settings, new TokenFace(tool, Blocked: true, Others: 1), 128f, 128f, 96f, 0f);
+                renderer.DrawToken(g, settings, new TokenFace(tool, Blocked: true, Others: 1), 128f, 128f, 96f, 0f, 1f);
                 Interlocked.Increment(ref frames);
             }
             catch (InvalidOperationException) { Interlocked.Increment(ref failures); }
@@ -916,18 +918,14 @@ static void LiveSettingsEdits()
     Equal(CursorSettings.MaxSize, saves[^1].Size);
     Equal(CursorSettings.MinTimeoutSeconds, live.Live.AgentNotifierTimeoutSeconds);
 
-    // Resetting the look leaves the switch, the timeout and the program list alone.
+    // Resetting size and position leaves the switch, the timeout, the program list and the icons alone.
     live.Change(s => { s.Placement = NotifierPlacement.Corner; s.Corner = ScreenCorner.TopLeft; s.SuppressedPrograms = new[] { "cs2.exe" }; });
-    Equal(false, live.Live.HasDefaultAppearance());
-    live.Change(s => s.ResetAppearance());
-    Equal(true, live.Live.HasDefaultAppearance());
-    Equal(NotifierPlacement.BelowPointer, live.Live.Placement);
-    // Icons are part of the look.
     live.Change(s => s.Icons = IconChoices.With(s.Icons, "pi", "pi.shades"));
-    Equal(false, live.Live.HasDefaultAppearance());
-    live.Change(s => s.ResetAppearance());
-    Equal(true, live.Live.HasDefaultAppearance());
-    Equal("pi.original", live.Live.IconFor("pi"));
+    Equal(false, live.Live.HasDefaultSizeAndPosition());
+    live.Change(s => s.ResetSizeAndPosition());
+    Equal(true, live.Live.HasDefaultSizeAndPosition());
+    Equal(NotifierPlacement.BelowPointer, live.Live.Placement);
+    Equal("pi.shades", live.Live.IconFor("pi"));
     Equal(false, live.Live.AgentNotifierEnabled);
     Equal(CursorSettings.MinTimeoutSeconds, live.Live.AgentNotifierTimeoutSeconds);
     Equal("cs2.exe", Joined(live.Live.SuppressedPrograms));
@@ -1122,9 +1120,9 @@ static void ThemeSetting() => WithHome(home =>
 
     // Resetting the token's look leaves the panel's theme alone.
     var settings = new CursorSettings { Theme = ThemePreference.Light, Size = 150 };
-    settings.ResetAppearance();
+    settings.ResetSizeAndPosition();
     Equal(ThemePreference.Light, settings.Theme);
-    Equal(true, settings.HasDefaultAppearance());
+    Equal(true, settings.HasDefaultSizeAndPosition());
 });
 
 static string Joined(IEnumerable<string> names) => string.Join('|', names);
@@ -1400,7 +1398,7 @@ static void PiRegistration() => WithHome(home =>
     string original = JsonSerializer.Serialize(new
     {
         theme = "powerline-aura",
-        extensions = new[] { "-builtin:mcp", @"C:\Users\me\WormsCursor\integrations\pi", "./extensions/mine" },
+        extensions = new[] { "-builtin:mcp", OldCopy(home, "WormsCursor", "pi"), "./extensions/mine" },
         packages = new[] { "npm:pi-web-access" },
     });
     File.WriteAllText(path, original);
@@ -1490,7 +1488,7 @@ static void OpenCodeRegistration() => WithHome(home =>
     // The old repo checkout's plugin (an object carrying the retired plugin's options) is ours but
     // outdated: it becomes the bare entry at the same position, and nothing else changes by a byte,
     // CRLF line ends, comments and trailing commas included.
-    const string oldPlugin = "{\r\n      \"package\": \"file:///C:/Users/hoang/Lumicity/Projects/Personal/WormsCursor/integrations/opencode\",\r\n      \"options\": { \"enabled\": true, \"tokenSize\": 64 } // tuned\r\n    }";
+    string oldPlugin = "{\r\n      \"package\": \"" + new Uri(OldCopy(home, "checkout", "opencode")).AbsoluteUri + "\",\r\n      \"options\": { \"enabled\": true, \"tokenSize\": 64 } // tuned\r\n    }";
     string Config(string plugins) => "{\r\n  // my config\r\n  \"$schema\": \"https://opencode.ai/config.json\",\r\n  \"plugins\": [\r\n    \"opencode-foo@1.0\", // pinned\r\n"
         + plugins + "    \"./plugins/mine\",\r\n  ],\r\n  /* block */ \"model\": \"anthropic/x\", // ünïcode\r\n}\r\n";
     string original = Config("    " + oldPlugin + ",\r\n");
@@ -1535,7 +1533,9 @@ static void OpenCodeRegistration() => WithHome(home =>
     }
 
     // Duplicates and other copies collapse into one entry, where the first one was.
-    File.WriteAllText(path, "{\"plugins\": [\"x\", \"file:///D:/Apps/AgentsCursor/integrations/opencode/\", \"y\", " + quoted + ", \"C:\\\\old\\\\integrations\\\\opencode\\\\index.ts\"]}");
+    string movedCopy = new Uri(OldCopy(home, "Apps", "opencode")).AbsoluteUri + "/";
+    string oldIndex = JsonSerializer.Serialize(Path.Combine(OldCopy(home, "old", "opencode"), "index.ts"));
+    File.WriteAllText(path, "{\"plugins\": [\"x\", \"" + movedCopy + "\", \"y\", " + quoted + ", " + oldIndex + "]}");
     Equal(HookState.Outdated, AgentHookRegistrar.GetState("opencode"));
     AgentHookRegistrar.Register("opencode");
     Equal("{\"plugins\": [\"x\", " + quoted + ", \"y\"]}", File.ReadAllText(path));
@@ -1607,14 +1607,14 @@ static void RefreshConnectedOnly() => WithHome(home =>
 
     AgentHookRegistrar.Register("codex");
     string codex = AgentHookRegistrar.CodexPath;
-    string exe = JsonSerializer.Serialize(Environment.ProcessPath!)[1..^1];
+    string exe = JsonSerializer.Serialize(AgentHookRegistrar.OnDisk(Environment.ProcessPath!))[1..^1];
     File.WriteAllText(codex, File.ReadAllText(codex).Replace(exe, @"C:\\Users\\me\\AppData\\Local\\WormsCursor\\current\\WormsCursor.exe"));
     File.Delete(codex + ".agentscursor.bak");
     Equal(HookState.Outdated, AgentHookRegistrar.GetState("codex"));
 
     string openCode = AgentHookRegistrar.OpenCodePath;
     Directory.CreateDirectory(Path.GetDirectoryName(openCode)!);
-    File.WriteAllText(openCode, "{\"plugins\": [\"file:///C:/src/WormsCursor/integrations/opencode\"]}");
+    File.WriteAllText(openCode, "{\"plugins\": [\"" + new Uri(OldCopy(home, "src", "opencode")).AbsoluteUri + "\"]}");
 
     string pi = AgentHookRegistrar.PiPath;
     Directory.CreateDirectory(Path.GetDirectoryName(pi)!);
@@ -1636,7 +1636,7 @@ static void RefreshConnectedOnly() => WithHome(home =>
 
     // An unreadable config stays as it is; a write that fails is reported for that tool only.
     File.WriteAllText(claude, "{ broken");
-    File.WriteAllText(pi, "{\"extensions\": [\"C:\\\\old\\\\integrations\\\\pi\"]}");
+    File.WriteAllText(pi, JsonSerializer.Serialize(new { extensions = new[] { OldCopy(home, "old", "pi") } }));
     File.SetAttributes(pi, FileAttributes.ReadOnly);
     try
     {
@@ -1651,6 +1651,69 @@ static void RefreshConnectedOnly() => WithHome(home =>
     finally { File.SetAttributes(pi, FileAttributes.Normal); }
 });
 
+// A copy of AgentsCursor's plugin for <tool> in <home>\<name>\integrations\<tool>, as an older or
+// moved install leaves it: the folder with our package.json.
+static string OldCopy(string home, string name, string tool)
+{
+    string dir = Path.Combine(home, name, "integrations", tool);
+    Directory.CreateDirectory(dir);
+    File.Copy(Path.Combine(AgentHookRegistrar.PluginDir(tool), "package.json"), Path.Combine(dir, "package.json"), overwrite: true);
+    return dir;
+}
+
+static void ForeignPluginFolders() => WithHome(home =>
+{
+    // Someone else's plugins that happen to live in folders named integrations\pi and
+    // integrations\opencode, one with its own package.json and one with none, plus a folder that is
+    // gone: none is ours, so nothing reads as connected and the startup refresh writes nothing.
+    string theirs = Path.Combine(home, "work", "acme", "integrations");
+    Directory.CreateDirectory(Path.Combine(theirs, "pi"));
+    File.WriteAllText(Path.Combine(theirs, "pi", "package.json"), "{\"name\": \"acme-pi\"}");
+    Directory.CreateDirectory(Path.Combine(theirs, "opencode"));
+    File.WriteAllText(Path.Combine(theirs, "opencode", "index.ts"), "export default {}");
+    string gone = Path.Combine(home, "gone", "integrations");
+
+    string pi = AgentHookRegistrar.PiPath, openCode = AgentHookRegistrar.OpenCodePath;
+    Directory.CreateDirectory(Path.GetDirectoryName(pi)!);
+    Directory.CreateDirectory(Path.GetDirectoryName(openCode)!);
+    string piText = JsonSerializer.Serialize(new { extensions = new[] { Path.Combine(theirs, "pi"), Path.Combine(gone, "pi") } });
+    string openCodeText = "{\"plugins\": [\"" + new Uri(Path.Combine(theirs, "opencode")).AbsoluteUri + "\", \""
+        + new Uri(Path.Combine(gone, "opencode")).AbsoluteUri + "\"]}";
+    File.WriteAllText(pi, piText);
+    File.WriteAllText(openCode, openCodeText);
+
+    Equal(HookState.NotRegistered, AgentHookRegistrar.GetState("pi"));
+    Equal(HookState.NotRegistered, AgentHookRegistrar.GetState("opencode"));
+    Equal(0, AgentHookRegistrar.RefreshConnected().Count);
+    Equal(piText, File.ReadAllText(pi));
+    Equal(openCodeText, File.ReadAllText(openCode));
+    Equal(false, File.Exists(pi + ".agentscursor.bak"));
+
+    // Connecting adds ours beside theirs; disconnecting takes only ours away again.
+    AgentHookRegistrar.Register("pi");
+    AgentHookRegistrar.Register("opencode");
+    Equal(HookState.Registered, AgentHookRegistrar.GetState("pi"));
+    Equal(HookState.Registered, AgentHookRegistrar.GetState("opencode"));
+    Equal(3, JsonNode.Parse(File.ReadAllText(pi))!["extensions"]!.AsArray().Count);
+    AgentHookRegistrar.Unregister("pi");
+    AgentHookRegistrar.Unregister("opencode");
+    Equal(JsonNode.Parse(piText)!["extensions"]!.ToJsonString(), JsonNode.Parse(File.ReadAllText(pi))!["extensions"]!.ToJsonString());
+    Equal(openCodeText, File.ReadAllText(openCode));
+});
+
+static void OnDiskPaths() => WithHome(home =>
+{
+    string dir = Path.Combine(home, "MixedCase", "Sub Folder");
+    Directory.CreateDirectory(dir);
+    string file = Path.Combine(dir, "AgentsCursor.exe");
+    File.WriteAllText(file, "");
+    string typed = char.ToLowerInvariant(file[0]) + file[1..].ToLowerInvariant();
+    Equal(file, AgentHookRegistrar.OnDisk(typed));
+    Equal(file, AgentHookRegistrar.OnDisk(file.Replace("Sub Folder", "sub folder\\.\\")));
+    // From the first part that doesn't exist, the rest is kept as given.
+    Equal(Path.Combine(dir, "Not", "There.exe"), AgentHookRegistrar.OnDisk(Path.Combine(dir.ToUpperInvariant(), "Not", "There.exe")));
+});
+
 // ---------- icons ----------
 
 static void BuiltInIcons()
@@ -1663,7 +1726,7 @@ static void BuiltInIcons()
         Equal($"{tool}.original", icon.Id);
         foreach (int side in new[] { 48, 96 })
         {
-            var sprite = sprites.Get(tool, icon.Id, side, side * 0.06f) ?? throw new InvalidOperationException($"{tool} has no sprite.");
+            var sprite = sprites.Get(tool, icon.Id, side, NotifierRenderer.RimWidth(side, 1f)) ?? throw new InvalidOperationException($"{tool} has no sprite.");
             var v = sprite.Visual;
             // Fitted by its visible pixels: it fills the box along its longer side, and stays inside.
             Equal(true, v.X >= -0.01f && v.Y >= -0.01f && v.Right <= side + 0.01f && v.Bottom <= side + 0.01f);

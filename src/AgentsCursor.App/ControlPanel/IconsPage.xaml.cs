@@ -4,16 +4,18 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using AgentsCursor.Core;
+using InfoBar = Wpf.Ui.Controls.InfoBar;
+using InfoBarSeverity = Wpf.Ui.Controls.InfoBarSeverity;
 
 namespace AgentsCursor.App.ControlPanel;
 
 /// <summary>
 /// What each agent looks like on the token: a preview of the chosen icon in both states ("Done", and
-/// "Needs you" with the "?" and a "+1"), a row of agents to pick from, and that agent's gallery: its
-/// original logo, its mascots, the SVGs you added (each removable), and "Add SVG…". Choosing applies
-/// at once through <see cref="LiveSettings.Change"/>. An added file is sanitised, test-drawn and stored
-/// by <see cref="CustomIconStore"/> on a background task; if it can't be used, the reason shows here
-/// and the agent keeps its icon.
+/// "Needs you" with the "?" and a "+1"), each over dark and over light, a row of agents to pick from,
+/// and that agent's gallery: its original logo, its mascots, the SVGs you added (each removable, with
+/// Undo), and "Add SVG…". Choosing applies at once through <see cref="LiveSettings.Change"/>. An added
+/// file is sanitised, test-drawn and stored by <see cref="CustomIconStore"/> on a background task; if
+/// it can't be used, the reason shows right under the tiles and the agent keeps its icon.
 ///
 /// The tiles are radio groups: Tab reaches the selected one, the arrow keys move the choice. The
 /// thumbnails are drawn by the panel's own renderer on the UI thread (<see cref="ToolLogo"/>).
@@ -26,12 +28,21 @@ public partial class IconsPage : Page
     IconTile[] _icons = Array.Empty<IconTile>();
     IReadOnlyDictionary<string, string>? _shownChoices; // the choices the tiles reflect
     double _dpi;
-    bool _uploading; // an added file is being checked and stored
+    bool _uploading;          // an added file is being checked and stored
+    RemovedIcon? _removed;    // the icon just removed, while its Undo is offered
+    const double MinAgentTileWidth = 150; // DIPs; narrower and the agents go two to a row
 
     public IconsPage(LiveSettings settings)
     {
         _settings = settings;
         InitializeComponent();
+        // The hint under the tiles gives way to the status bar while it is open, however it closes.
+        DependencyPropertyDescriptor.FromProperty(InfoBar.IsOpenProperty, typeof(InfoBar))
+            .AddValueChanged(StatusBar, (_, _) =>
+            {
+                AddHint.Visibility = StatusBar.IsOpen ? Visibility.Collapsed : Visibility.Visible;
+                if (!StatusBar.IsOpen) UndoButton.Visibility = Visibility.Collapsed;
+            });
         Loaded += (_, _) => Rebuild();
         _settings.Changed += Refresh;
         Refresh();
@@ -46,12 +57,22 @@ public partial class IconsPage : Page
 
     static string NameOf(string tool) => IconCatalog.AgentName(tool);
 
+    TokenPreview[] Previews => new[] { DoneOnDark, DoneOnLight, BlockedOnDark, BlockedOnLight };
+
+    void ShowPreviews(CursorSettings s)
+    {
+        foreach (var preview in Previews)
+        {
+            preview.Tool = _tool;
+            preview.Show(s);
+        }
+    }
+
     void Refresh()
     {
         var s = _settings.Current;
-        DonePreview.Tool = BlockedPreview.Tool = _tool;
-        DonePreview.Show(s);
-        BlockedPreview.Show(s);
+        ShowPreviews(s);
+        FitSwatches();
         ResetButton.IsEnabled = s.Icons.Count > 0;
         // Only an icon choice changes the tiles (a size drag on the Token page leaves them alone). The
         // tiles update in place, so the keyboard focus stays where it is.
@@ -81,16 +102,30 @@ public partial class IconsPage : Page
         IconTile Tile(string id, string name, bool custom) => new(id, name, ToolLogo.Render(_tool, id, 48, _dpi), custom, agent)
             { IsSelected = id == chosen };
         _icons = IconCatalog.ForTool(_tool).Select(i => Tile(i.Id, i.Name, false))
-            .Concat(IconSource.Custom.List(_tool).Select((id, n) => Tile(id, $"Your icon {n + 1}", true)))
+            .Concat(IconSource.Custom.List(_tool).Select(id => Tile(id, IconSource.Custom.NameOf(_tool, id) ?? "Added icon", true)))
             .ToArray();
         BuiltInList.ItemsSource = _icons.Where(i => !i.IsCustom).ToArray();
         CustomList.ItemsSource = _icons.Where(i => i.IsCustom).ToArray();
         _shownChoices = s.Icons;
         GalleryHeader.Text = $"Choose an icon for {agent}";
         ShowAddState();
-        DonePreview.Tool = BlockedPreview.Tool = _tool;
-        DonePreview.Show(s);
-        BlockedPreview.Show(s);
+        ShowPreviews(s);
+    }
+
+    // The two state swatches side by side when four whole tokens fit across, else one above the other.
+    void OnSwatchesSize(object sender, SizeChangedEventArgs e) => FitSwatches();
+
+    void FitSwatches()
+    {
+        double half = TokenPreview.IdleWidth(_settings.Live.Size);
+        Swatches.Columns = Swatches.ActualWidth >= 4 * half + 2 * 16 ? 2 : 1;
+    }
+
+    // Four agents to a row; two when the page is too narrow for four.
+    void OnAgentListSize(object sender, SizeChangedEventArgs e)
+    {
+        if (Find<System.Windows.Controls.Primitives.UniformGrid>(AgentList) is { } grid)
+            grid.Columns = e.NewSize.Width >= 4 * MinAgentTileWidth ? 4 : 2;
     }
 
     void OnAgentChecked(object sender, RoutedEventArgs e)
@@ -98,7 +133,7 @@ public partial class IconsPage : Page
         if (((FrameworkElement)sender).DataContext is not AgentTile tile || tile.Tool == _tool) return;
         _tool = tile.Tool;
         foreach (var agent in _agents) agent.Update(agent.Tool == _tool, agent.Image);
-        UploadError.IsOpen = false;
+        CloseStatus();
         RebuildGallery();
     }
 
@@ -111,16 +146,38 @@ public partial class IconsPage : Page
 
     void OnReset(object sender, RoutedEventArgs e) => _settings.Change(s => s.Icons = IconChoices.None);
 
+    // Removing is one click, so it can be undone: the bar under the tiles offers Undo until the next
+    // thing happens there.
     void OnRemoveIcon(object sender, RoutedEventArgs e)
     {
         if (((FrameworkElement)sender).DataContext is not IconTile tile) return;
-        UploadError.IsOpen = false;
-        try { IconSource.Custom.Remove(_tool, tile.Id, _settings); }
+        CloseStatus();
+        try
+        {
+            _removed = IconSource.Custom.Remove(_tool, tile.Id, _settings);
+            ShowStatus(InfoBarSeverity.Informational, "Icon removed", $"\u201C{tile.Name}\u201D is gone from {NameOf(_tool)}'s icons.", undo: true);
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            ShowError("Couldn't remove that icon", ex.Message);
+            ShowStatus(InfoBarSeverity.Error, "Couldn't remove that icon", ex.Message);
         }
         RebuildGallery();
+    }
+
+    void OnUndoRemove(object sender, RoutedEventArgs e)
+    {
+        if (_removed is not { } removed) return;
+        CloseStatus();
+        try { IconSource.Custom.Restore(removed, _settings); }
+        catch (InvalidIconException ex)
+        {
+            ShowStatus(InfoBarSeverity.Error, "That icon couldn't be put back", $"{Sentence(ex.Message)}.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ShowStatus(InfoBarSeverity.Error, "That icon couldn't be put back", ex.Message);
+        }
+        if (removed.Tool == _tool) RebuildGallery();
     }
 
     async void OnAdd(object sender, RoutedEventArgs e)
@@ -135,7 +192,7 @@ public partial class IconsPage : Page
         if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
 
         string tool = _tool, agent = NameOf(tool);
-        UploadError.IsOpen = false;
+        CloseStatus();
         _uploading = true;
         ShowAddState();
         try
@@ -144,18 +201,18 @@ public partial class IconsPage : Page
             {
                 if (new FileInfo(dialog.FileName).Length > SvgSanitizer.MaxBytes)
                     throw new InvalidIconException("it's larger than 256 KB");
-                return IconSource.Custom.Add(tool, File.ReadAllText(dialog.FileName));
+                return IconSource.Custom.Add(tool, File.ReadAllText(dialog.FileName), Path.GetFileName(dialog.FileName));
             });
             _settings.Change(s => s.Icons = IconChoices.With(s.Icons, tool, id));
             if (tool == _tool) RebuildGallery();
         }
         catch (InvalidIconException ex)
         {
-            ShowError("That file couldn't be used", $"{Sentence(ex.Message)}. {agent} keeps its current icon.");
+            ShowStatus(InfoBarSeverity.Error, "That file couldn't be used", $"{Sentence(ex.Message)}. {agent} keeps its current icon.");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            ShowError("That file couldn't be used", $"It couldn't be read or saved ({ex.Message.TrimEnd('.')}). {agent} keeps its current icon.");
+            ShowStatus(InfoBarSeverity.Error, "That file couldn't be used", $"It couldn't be read or saved ({ex.Message.TrimEnd('.')}). {agent} keeps its current icon.");
         }
         finally
         {
@@ -164,19 +221,34 @@ public partial class IconsPage : Page
         }
     }
 
-    // The "Add SVG…" tile: busy while a file is being checked (for any agent), off at the limit.
+    // The "Add SVG…" tile: busy while a file is being checked (for any agent), off at the limit, and
+    // the hint under the tiles saying why.
     void ShowAddState()
     {
-        AddButton.IsEnabled = !_uploading && _icons.Count(i => i.IsCustom) < CustomIconStore.MaxPerTool;
+        bool full = _icons.Count(i => i.IsCustom) >= CustomIconStore.MaxPerTool;
+        AddButton.IsEnabled = !_uploading && !full;
         AddLabel.Visibility = _uploading ? Visibility.Collapsed : Visibility.Visible;
         AddBusy.Visibility = _uploading ? Visibility.Visible : Visibility.Collapsed;
+        string limit = $"{NameOf(_tool)} has {CustomIconStore.MaxPerTool} of your icons, the most it keeps. Remove one to add another.";
+        AddButton.ToolTip = full ? limit : null;
+        AddHint.Text = full ? limit
+            : $"SVG files up to 256 KB. Square images work best. Flat shapes, gradients, groups and transforms draw well. Scripts and links to other files are removed, and each agent keeps up to {CustomIconStore.MaxPerTool} of your icons.";
     }
 
-    void ShowError(string title, string message)
+    // The bar under the tiles, in place of the hint: an error, or a removal with its Undo.
+    void ShowStatus(InfoBarSeverity severity, string title, string message, bool undo = false)
     {
-        UploadError.Title = title;
-        UploadError.Message = message;
-        UploadError.IsOpen = true;
+        StatusBar.Severity = severity;
+        StatusBar.Title = title;
+        StatusBar.Message = message;
+        StatusBar.IsOpen = true;
+        UndoButton.Visibility = undo ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    void CloseStatus()
+    {
+        StatusBar.IsOpen = false;
+        _removed = null;
     }
 
     static string Sentence(string reason) => reason.Length == 0 ? reason : char.ToUpperInvariant(reason[0]) + reason[1..];

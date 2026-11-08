@@ -10,10 +10,10 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - **Pick each agent's look, mascots included.** The new **Icons** page lets every agent wear its own
   logo, one of three mascots drawn for it, or a picture of your own. Claude Code can wave, party or
   play peekaboo; Codex comes as a googly-eyed buddy, mid-spin or dozing off; OpenCode's mark gets a
-  face, bracket arms or a stack of windows; Pi strolls, wears 8-bit shades or turns into a slice of
+  face, bracket arms or a stack of windows; Pi strolls, wears 8-bit shades or turns into a whole
   pie. **Add SVG…** takes your own file (up to 256 KB, 24 per agent): it's cleaned before it's kept,
   so nothing in it can run or fetch anything from elsewhere, and if it can't be used the page says why
-  and the agent keeps its icon. The yellow "?" and the "+N" sit on every icon, and the page previews
+  and the agent keeps its icon; removing one of your icons can be undone. The yellow "?" and the "+N" sit on every icon, and the page previews
   both looks over dark and light. **Reset all icons to the originals** puts everything back.
 - **Above or beside the pointer, not just below.** **Position** now offers **Below the pointer** (the
   hanging token you know), **Above the pointer** (floating like a balloon on a string) and **Beside
@@ -92,7 +92,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - **The token bounces, and you choose where.** On the **Token** page pick a position next to the
   pointer (it follows on a springy string, with a gentle idle bob) or a **screen corner** (it sits in
   the corner you choose and bounces in place). Plus a **size** slider and a live preview.
-  **Reset size, position and icons** puts the look back. Settings saved by this version name the
+  **Reset size and position** puts those back. Settings saved by this version name the
   position differently, so an older AgentsCursor reading them starts from its defaults. The DPI of the monitor it's shown on is honoured, so the token keeps a
   consistent size across mixed-DPI setups — which also retires the old mixed-DPI cursor flicker.
 - **The bounce is fluid.** The token animates on a dedicated high-resolution thread

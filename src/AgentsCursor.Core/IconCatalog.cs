@@ -21,8 +21,7 @@ public static class IconCatalog
     /// <summary>The agents AgentsCursor draws, in the order the panel lists them.</summary>
     public static IReadOnlyList<string> Tools { get; } = new[] { "claude-code", "codex", "opencode", "pi" };
 
-    /// <summary>The agent's short name, as the icon gallery labels it ("Codex", not the connection's
-    /// "Codex (desktop & CLI)").</summary>
+    /// <summary>The agent's short name, as the panel labels it everywhere ("Codex").</summary>
     public static string AgentName(string tool) => tool switch
     {
         "claude-code" => "Claude Code",

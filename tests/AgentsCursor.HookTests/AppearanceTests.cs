@@ -113,11 +113,12 @@ static class AppearanceTests
         File.WriteAllText(path, "{\"Icons\": {\"pi\": \"pi.nope\", \"codex\": \"codex.sleepy\"}}");
         Equal("codex=codex.sleepy", Show(SettingsStore.Load(path).Icons), "hand-edited unknown built-in dropped");
 
-        // Part of the look.
-        Equal(false, s.HasDefaultAppearance(), "icons chosen");
-        s.ResetAppearance();
-        Equal(true, s.HasDefaultAppearance(), "after reset");
-        Equal(0, s.Icons.Count, "reset clears icons");
+        // The Token page's reset leaves the icons alone: they have their own, on the Icons page.
+        Equal(true, s.HasDefaultSizeAndPosition(), "icons aren't size or position");
+        s.Size = 150;
+        s.ResetSizeAndPosition();
+        Equal(true, s.HasDefaultSizeAndPosition(), "after reset");
+        Equal("codex=" + custom + "|pi=pi.shades", Show(s.Icons), "reset keeps the icons");
     });
 
     static string Show(IReadOnlyDictionary<string, string> icons)
@@ -169,18 +170,58 @@ static class AppearanceTests
         Rejects(Wrap("<rect fill=\"url(https://x/p.svg#g)\" width=\"9\" height=\"9\"/>"), "outside");
         Rejects(Wrap("<style>.a{fill:url(file:///c:/x)}</style>"), "outside");
 
-        // Malformed, hostile or oversized files are refused.
-        Rejects($"<!DOCTYPE svg [<!ENTITY x \"boom\">]><svg xmlns=\"{Ns}\">&x;</svg>", "DTD");
-        Rejects("<html xmlns=\"http://www.w3.org/1999/xhtml\"/>", "root");
-        Rejects("<svg viewBox=\"0 0 1 1\"/>", "root"); // not in the SVG namespace
-        Rejects("<svg xmlns=\"http://www.w3.org/2000/svg\"><rect>", "XML");
-        Rejects("not xml at all", "XML");
+        // What exporters write is read: the SVG 1.1 DOCTYPE (skipped unread), and a root with no namespace.
+        string doctype = SvgSanitizer.Sanitize("<?xml version=\"1.0\"?>\n<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" "
+            + "\"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n" + Square);
+        True(!doctype.Contains("DOCTYPE") && doctype.Contains("<rect"), "DOCTYPE skipped: " + doctype);
+        string bare = SvgSanitizer.Sanitize("<svg viewBox=\"0 0 10 10\"><g><rect width=\"10\" height=\"10\" fill=\"#3A7\"/></g></svg>");
+        Equal(XName.Get("rect", Ns), XDocument.Parse(bare).Descendants().Last().Name, "a namespace-less file is read as SVG");
+
+        // Malformed, hostile or oversized files are refused, in words a person can act on.
+        Rejects($"<!DOCTYPE svg [<!ENTITY x \"boom\">]><svg xmlns=\"{Ns}\">&x;</svg>", "couldn't be read"); // never expanded
+        Rejects("<html xmlns=\"http://www.w3.org/1999/xhtml\"/>", "isn't an SVG image");
+        Rejects("<svg xmlns=\"http://www.w3.org/2000/svg\">\n<rect>", "couldn't be read (line 2)");
+        Rejects("not xml at all", "isn't an SVG image");
+        Rejects("\uFFFDPNG\r\n\u001a\n\0\0\0\rIHDR", "isn't an SVG image"); // a PNG renamed to .svg
         Rejects(Wrap("<!--" + new string('x', SvgSanitizer.MaxBytes) + "-->"), "256 KB");
         Rejects(Wrap(string.Concat(Enumerable.Repeat("<g/>", SvgSanitizer.MaxElements)) ), "elements");
         Rejects(Wrap(string.Concat(Enumerable.Repeat("<g>", 70)) + string.Concat(Enumerable.Repeat("</g>", 70))), "nested");
 
+        // References that would make drawing recurse for ever (a stack overflow kills the app) or run
+        // for ever are refused before anything draws them.
+        const string xl = "xmlns:xlink=\"http://www.w3.org/1999/xlink\"";
+        string Svg(string body) => $"<svg xmlns=\"{Ns}\" {xl} viewBox=\"0 0 10 10\"><rect width=\"9\" height=\"9\"/>{body}</svg>";
+        foreach (var (body, why) in new[]
+        {
+            ("<pattern id=\"p\" width=\"5\" height=\"5\"><rect width=\"5\" height=\"5\" fill=\"url(#p)\"/></pattern><rect width=\"9\" height=\"9\" fill=\"url(#p)\"/>", "pattern filled with itself"),
+            ("<pattern id=\"p\" xlink:href=\"#p\" width=\"5\" height=\"5\"/><rect width=\"9\" height=\"9\" fill=\"url(#p)\"/>", "pattern inheriting itself"),
+            ("<linearGradient id=\"g\" xlink:href=\"#h\"/><linearGradient id=\"h\" href=\"#g\"/><rect width=\"9\" height=\"9\" fill=\"url(#g)\"/>", "gradients inheriting each other"),
+            ("<g id=\"a\"><use href=\"#a\"/></g>", "a use of its own group"),
+            ("<style>.c{clip-path:url(#c)}</style><clipPath id=\"c\"><rect class=\"c\" width=\"5\" height=\"5\"/></clipPath><rect class=\"c\" width=\"9\" height=\"9\"/>", "a stylesheet clipping a clip path with itself"),
+            ("<g fill=\"url(#p)\"><pattern id=\"p\" width=\"5\" height=\"5\"><rect width=\"5\" height=\"5\"/></pattern><rect width=\"9\" height=\"9\"/></g>", "a pattern whose content inherits its own fill"),
+        })
+            Rejects(Svg(body), "refers back to itself");
+        string fanOut = "<rect id=\"u0\" width=\"1\" height=\"1\"/>" + string.Concat(Enumerable.Range(1, 9).Select(i =>
+            $"<g id=\"u{i}\">" + string.Concat(Enumerable.Repeat($"<use href=\"#u{i - 1}\"/>", 10)) + "</g>"));
+        Rejects(Svg($"<defs>{fanOut}</defs><use href=\"#u9\"/>"), "too complex"); // 10^9 rectangles
+        string chain = string.Concat(Enumerable.Range(0, 70).Select(i => $"<g id=\"c{i}\"><use href=\"#c{i + 1}\"/></g>"));
+        Rejects(Svg($"<defs>{chain}<rect id=\"c70\" width=\"1\" height=\"1\"/></defs><use href=\"#c0\"/>"), "nest"); // 140 levels drawn
+        string vertices = "M0 0" + string.Concat(Enumerable.Range(1, 2000).Select(i => $"L{i % 10} {i % 7}"));
+        string marker = "<marker id=\"m\">" + string.Concat(Enumerable.Repeat("<rect width=\"1\" height=\"1\"/>", 20)) + "</marker>";
+        Rejects(Svg($"<defs>{marker}</defs><path d=\"{vertices}\" style=\"marker-mid:url(#m)\"/>"), "too complex"); // 40,000 marks
+
+        // What real icons do with references stays fine: an Illustrator-style stylesheet of gradient
+        // fills and a clip path, a gradient inheriting another, and one shape used many times.
+        string illustrator = Svg("<defs><style>.cls-1{fill:url(#linear-gradient);}.cls-2{clip-path:url(#clip-path);}</style>"
+            + "<clipPath id=\"clip-path\"><rect width=\"8\" height=\"8\"/></clipPath>"
+            + "<linearGradient id=\"base\"><stop offset=\"0\" stop-color=\"#f0a\"/><stop offset=\"1\" stop-color=\"#0af\"/></linearGradient>"
+            + "<linearGradient id=\"linear-gradient\" xlink:href=\"#base\" x1=\"0\" x2=\"1\"/><circle id=\"dot\" r=\"0.5\"/></defs>"
+            + "<g class=\"cls-2\"><rect class=\"cls-1\" width=\"10\" height=\"10\"/>"
+            + string.Concat(Enumerable.Range(0, 200).Select(i => $"<use href=\"#dot\" x=\"{i % 10}\" y=\"{i / 20}\"/>")) + "</g>");
+        True(SvgSanitizer.Sanitize(illustrator).Contains("url(#linear-gradient)"), "an Illustrator-style file is kept");
+
         // The output is a well-formed SVG the renderer can draw.
-        foreach (string output in new[] { active, links, css })
+        foreach (string output in new[] { active, links, css, doctype, bare, SvgSanitizer.Sanitize(illustrator) })
         {
             Equal(XName.Get("svg", Ns), XDocument.Parse(output).Root!.Name, "root");
             True(TokenSprites.VisibleSize(output, 64) is not null, "output draws: " + output);
@@ -225,15 +266,42 @@ static class AppearanceTests
         string reason = "";
         try { store.Add("pi", $"<svg xmlns=\"{Ns}\" viewBox=\"0 0 10 10\"><g/></svg>"); }
         catch (InvalidIconException ex) { reason = ex.Message; }
-        True(reason.Contains("rendered empty"), "empty drawing reason: " + reason);
+        True(reason.Contains("anything visible"), "empty drawing reason: " + reason);
 
-        // Removing the icon an agent shows puts the agent back on its original first.
+        // A file whose references loop is turned down with a reason, and the app lives on (before,
+        // drawing it overflowed the stack, which no catch can stop).
+        reason = "";
+        try { store.Add("pi", $"<svg xmlns=\"{Ns}\" viewBox=\"0 0 10 10\"><pattern id=\"p\" width=\"5\" height=\"5\"><rect width=\"5\" height=\"5\" fill=\"url(#p)\"/></pattern><rect width=\"9\" height=\"9\" fill=\"url(#p)\"/></svg>"); }
+        catch (InvalidIconException ex) { reason = ex.Message; }
+        True(reason.Contains("refers back to itself"), "looping file reason: " + reason);
+
+        // An icon keeps the name of the file it came from, tidied; adding the same picture again keeps it.
+        string named = store.Add("pi", Square.Replace("#3A7", "#37A"), "C:\\art\\  My\tLogo  .svg");
+        Equal("My Logo", store.NameOf("pi", named), "tidied file name");
+        Equal(named, store.Add("pi", Square.Replace("#3A7", "#37A"), "other.svg"));
+        Equal("My Logo", store.NameOf("pi", named), "the first name stays");
+        Equal<string?>(null, store.NameOf("pi", id), "added without a name");
+        Equal(id + "," + named, string.Join(',', store.List("pi")), "oldest first");
+
+        // Removing the icon an agent shows puts the agent back on its original first; Undo puts the
+        // icon back as it was: same id, name, place in the list, and the agent's choice.
         var live = new LiveSettings(new CursorSettings(), _ => { });
         live.Change(s => s.Icons = IconChoices.With(IconChoices.With(s.Icons, "pi", id), "codex", "codex.spin"));
-        store.Remove("pi", id, live);
+        var removed = store.Remove("pi", id, live);
         Equal("pi.original", live.Live.IconFor("pi"), "removed icon deselected");
         Equal("codex.spin", live.Live.IconFor("codex"), "other agents untouched");
         Equal(false, File.Exists(path), "file deleted");
+        Equal(named, string.Join(',', store.List("pi")), "listed without it");
+        store.Restore(removed, live);
+        Equal(id, live.Live.IconFor("pi"), "undo re-selects it");
+        Equal(id + "," + named, string.Join(',', store.List("pi")), "undo restores its place");
+        var removedNamed = store.Remove("pi", named, live);
+        Equal(false, File.Exists(Path.ChangeExtension(store.PathFor("pi", named)!, ".name")), "its name goes with it");
+        store.Restore(removedNamed, live);
+        Equal("My Logo", store.NameOf("pi", named), "undo restores its name");
+        Equal(id, live.Live.IconFor("pi"), "undoing an icon that wasn't shown changes no choice");
+        store.Remove("pi", named, live);
+        store.Remove("pi", id, live);
 
         // At most MaxPerTool per agent; re-adding one already kept still works at the limit.
         string first = "";
@@ -303,7 +371,7 @@ static class AppearanceTests
                     try
                     {
                         using var g = Graphics.FromImage(canvas);
-                        renderer.DrawToken(g, settings, new TokenFace("pi", true, 2), 100f, 100f, 80f + frames % 3 * 8f, frames % 20 - 10f);
+                        renderer.DrawToken(g, settings, new TokenFace("pi", true, 2), 100f, 100f, 80f + frames % 3 * 8f, frames % 20 - 10f, 1f);
                         Interlocked.Increment(ref frames);
                     }
                     catch (Exception) { Interlocked.Increment(ref failures); }
@@ -329,7 +397,7 @@ static class AppearanceTests
         var bitmap = new Bitmap(side * 2, side * 2, PixelFormat.Format32bppArgb);
         using var renderer = new NotifierRenderer();
         using var g = Graphics.FromImage(bitmap);
-        renderer.DrawToken(g, new CursorSettings(), new TokenFace(tool, false, 0), iconId, side, side, side, 0f);
+        renderer.DrawToken(g, new CursorSettings(), new TokenFace(tool, false, 0), iconId, side, side, side, 0f, 1f);
         return bitmap;
     }
 
@@ -362,7 +430,7 @@ static class AppearanceTests
                 True(stream!.Length <= 8 * 1024, $"{icon.Id} is {stream.Length} bytes; at most 8 KB");
             }
             const int side = 48;
-            var sprite = sprites.Get(icon.Tool, icon.Id, side, side * 0.06f)!;
+            var sprite = sprites.Get(icon.Tool, icon.Id, side, NotifierRenderer.RimWidth(side, 1f))!;
             var v = sprite.Visual;
             float aspect = v.Width / v.Height;
             True(aspect >= 0.6f && aspect <= 1.6f, $"{icon.Id} aspect {aspect:0.00}");
@@ -404,7 +472,7 @@ static class AppearanceTests
                         using (var g = Graphics.FromImage(canvas))
                         {
                             g.Clear(Color.Transparent);
-                            renderer.DrawToken(g, settings, new TokenFace(icon.Tool, blocked, 9), icon.Id, side / 2f, side / 2f, size, swing);
+                            renderer.DrawToken(g, settings, new TokenFace(icon.Tool, blocked, 9), icon.Id, side / 2f, side / 2f, size, swing, 1f);
                         }
                         var px = Pixels(canvas);
                         for (int i = 0; i < side; i++)
@@ -449,12 +517,10 @@ static class AppearanceTests
             for (int i = 0; i < 2000; i++)
             {
                 if (i % 7 == 0) { ax = rng.Next(-3000, 3000); ay = rng.Next(-3000, 3000); }
-                var p = TokenMotion.Step(ref s, ax, ay, rest, t, 0.05f, false,
-                    placement == NotifierPlacement.BesidePointer ? TokenMotion.BesideMaxSwing : 180f);
+                var p = TokenMotion.Step(ref s, ax, ay, rest, t, 0.05f, false, TokenMotion.MaxSwingFor(placement));
                 float d = MathF.Sqrt((s.X - ax) * (s.X - ax) + (s.Y - ay) * (s.Y - ay));
                 True(d <= maxLen, $"{placement}: string at {d:0.0} > {maxLen:0.0}");
-                if (placement == NotifierPlacement.BesidePointer)
-                    True(MathF.Abs(p.SwingDeg) <= TokenMotion.BesideMaxSwing + 0.001f, "beside tilt clamped");
+                True(MathF.Abs(p.SwingDeg) <= TokenMotion.MaxSwingFor(placement) + 0.001f, $"{placement}: tilt clamped, never upside down");
             }
         }
 

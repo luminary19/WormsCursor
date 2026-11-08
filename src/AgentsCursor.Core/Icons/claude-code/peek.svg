@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 1 26 19" shape-rendering="crispEdges">
-  <!-- Claude Code peekaboo: the pixel critter peeking up over a ledge, big eyes looking up. -->
+  <!-- Claude Code peekaboo: the pixel critter peeking up over a ledge, big eyes looking up, set low enough to stay clear of the badge. -->
   <path fill="#D97757" d="M3 3H21V15H3ZM0 13H4.5V15.5H0ZM19.5 13H24V15.5H19.5Z"/>
-  <path fill="#FFFFFF" d="M4.5 6H10.5V12H4.5ZM13.5 6H19.5V12H13.5Z"/>
-  <path fill="#2B1B14" d="M7.5 6H10.5V9.5H7.5ZM16.5 6H19.5V9.5H16.5Z"/>
+  <path fill="#FFFFFF" d="M4.5 7.5H10.5V13.5H4.5ZM13.5 7.5H19.5V13.5H13.5Z"/>
+  <path fill="#2B1B14" d="M7.5 7.5H10.5V11H7.5ZM16.5 7.5H19.5V11H16.5Z"/>
   <path fill="#A9533A" d="M0 15.5H24V18.5H0Z"/>
 </svg>

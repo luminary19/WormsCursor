@@ -10,24 +10,43 @@ namespace AgentsCursor.App.ControlPanel;
 /// original logo, since a card identifies the agent) and the Icons page's tiles.</summary>
 static class ToolLogo
 {
-    /// <summary>The original logo of <paramref name="toolId"/> at <paramref name="sizeDip"/> DIPs, rendered
-    /// at <paramref name="dpiScale"/> so it is crisp.</summary>
+    // The share of the well the renderer's box may take: its contrast rim reaches a little past it.
+    const float BoxShare = 0.86f;
+    // For the cards, the side of a square of the same area as the logo, as a share of the well.
+    const float CardWeight = 0.72f;
+
+    /// <summary>The original logo of <paramref name="toolId"/> in a well of <paramref name="sizeDip"/>
+    /// DIPs, rendered at <paramref name="dpiScale"/> so it is crisp. The four logos have very different
+    /// shapes (the wide Claude critter, the tall OpenCode mark), so each is sized by its area, not its
+    /// longer side: side by side on the Agents page they carry the same visual weight.</summary>
     public static BitmapSource Render(string toolId, double sizeDip, double dpiScale)
-        => Render(toolId, IconCatalog.OriginalId(toolId), sizeDip, dpiScale);
+    {
+        string iconId = IconCatalog.OriginalId(toolId);
+        using var renderer = new NotifierRenderer();
+        var shape = renderer.IconShape(toolId, iconId);
+        float area = MathF.Sqrt(Math.Max(1e-3f, shape.Width * shape.Height));
+        float share = Math.Min(BoxShare, CardWeight / area);
+        return Render(renderer, toolId, iconId, sizeDip, dpiScale, share);
+    }
 
     /// <summary>The icon <paramref name="iconId"/> of <paramref name="toolId"/> at <paramref name="sizeDip"/>
-    /// DIPs, rendered at <paramref name="dpiScale"/>. Uses a renderer of its own on the calling (UI) thread.</summary>
+    /// DIPs, rendered at <paramref name="dpiScale"/> and fitted as the token fits it. Uses a renderer of
+    /// its own on the calling (UI) thread.</summary>
     public static BitmapSource Render(string toolId, string iconId, double sizeDip, double dpiScale)
     {
-        int px = Math.Max(1, (int)Math.Round(sizeDip * dpiScale));
         using var renderer = new NotifierRenderer();
+        return Render(renderer, toolId, iconId, sizeDip, dpiScale, BoxShare);
+    }
+
+    static BitmapSource Render(NotifierRenderer renderer, string toolId, string iconId, double sizeDip, double dpiScale, float share)
+    {
+        int px = Math.Max(1, (int)Math.Round(sizeDip * dpiScale));
         using var bitmap = new Gdi.Bitmap(px, px, GdiImaging.PixelFormat.Format32bppPArgb);
         using (var g = Gdi.Graphics.FromImage(bitmap))
         {
             g.Clear(Gdi.Color.Transparent);
-            // The renderer's contrast rim reaches a little past the box; leave it room.
             renderer.DrawToken(g, new CursorSettings(), new TokenFace(toolId, Blocked: false, Others: 0), iconId,
-                px / 2f, px / 2f, px * 0.86f, 0f);
+                px / 2f, px / 2f, px * share, 0f, (float)dpiScale);
         }
 
         var data = bitmap.LockBits(new Gdi.Rectangle(0, 0, px, px), GdiImaging.ImageLockMode.ReadOnly,

@@ -56,6 +56,14 @@ public static class TokenMotion
     /// <summary>The largest tilt a token beside the pointer takes, either way (a tooltip shouldn't spin).</summary>
     public const float BesideMaxSwing = 35f;
 
+    /// <summary>The largest tilt a token hanging below or floating above the pointer takes, either way:
+    /// a lively swing, but never upside down (the "?" stays upright; the logo would not).</summary>
+    public const float HangingMaxSwing = 80f;
+
+    /// <summary>The arrow pointer's reach below its hotspot, plus a small gap, at 96 DPI: the standard
+    /// Windows arrow is about 12 x 19 px, and the real pointer is always drawn on top of the token.</summary>
+    public const float PointerClearance = 22f;
+
     /// <summary>How far above its anchor the corner bounce can lift the token, as a fraction of its size.</summary>
     public const float CornerHop = 0.22f;
 
@@ -65,20 +73,28 @@ public static class TokenMotion
     /// <summary>The entrance hop: the token's starting speed back along its string, in token sizes per second.</summary>
     public const float EntranceSpeed = 3f;
 
+    /// <summary>The largest tilt the token takes, either way, in <paramref name="placement"/>.</summary>
+    public static float MaxSwingFor(NotifierPlacement placement)
+        => placement == NotifierPlacement.BesidePointer ? BesideMaxSwing : HangingMaxSwing;
+
     /// <summary>The rest offset for <paramref name="placement"/> with a token of <paramref name="tokenPx"/>
     /// px on a monitor at <paramref name="dpi"/> (1 = 96 DPI), mirrored per <paramref name="flip"/>.
-    /// Below hangs just under the pointer; above floats clear of the arrow; beside trails off the arrow's
-    /// bottom-right like a tooltip. (Corner has no pointer rest; it gets the below offset.)</summary>
+    /// Below hangs under the pointer's arrow with its top, badges included, clear of it; above floats
+    /// just over the pointer's tip; beside trails off the arrow's bottom-right like a tooltip. Below and
+    /// above are each other's mirror: flipped, each takes the other's place, so a flip never puts the
+    /// token under the arrow. (Corner has no pointer rest; it gets the below offset.)</summary>
     public static Rest RestFor(NotifierPlacement placement, float tokenPx, float dpi, Flip flip)
     {
+        bool flipY = flip.HasFlag(Flip.Y);
+        float below = PointerClearance * dpi + tokenPx * (0.5f + AttentionBadge.Overhang);
+        float above = -0.62f * tokenPx;
         var (dx, dy) = placement switch
         {
-            NotifierPlacement.AbovePointer => (0f, -0.62f * tokenPx),
-            NotifierPlacement.BesidePointer => (14f * dpi + 0.50f * tokenPx, 18f * dpi + 0.30f * tokenPx),
-            _ => (0f, 0.42f * tokenPx),
+            NotifierPlacement.AbovePointer => (0f, flipY ? below : above),
+            NotifierPlacement.BesidePointer => (14f * dpi + 0.50f * tokenPx, (18f * dpi + 0.30f * tokenPx) * (flipY ? -1f : 1f)),
+            _ => (0f, flipY ? above : below),
         };
         if (flip.HasFlag(Flip.X)) dx = -dx;
-        if (flip.HasFlag(Flip.Y)) dy = -dy;
         return new Rest(dx, dy);
     }
 
@@ -86,7 +102,7 @@ public static class TokenMotion
     /// (<paramref name="ax"/>, <paramref name="ay"/>) plus <paramref name="rest"/>, and returns the pose to
     /// draw. The first call seeds the token at rest; with <paramref name="entrance"/> it starts with a hop
     /// back along the string, which springs out again. <paramref name="maxSwing"/> limits the tilt
-    /// either way (<see cref="BesideMaxSwing"/> beside the pointer). With <paramref name="workArea"/>
+    /// either way (<see cref="MaxSwingFor"/> the placement). With <paramref name="workArea"/>
     /// the screen's edges are a wall: the token (with its badge, <see cref="RestHalfExtent"/>) stops at
     /// them and loses its speed into them, so an overshoot never carries it off screen. Use the same
     /// area as <see cref="KeepOnScreen"/>, so the rest point is always inside the wall.</summary>
@@ -224,6 +240,6 @@ public static class TokenCanvas
     /// <summary>The canvas side, in whole px (even, so the token centre is a pixel corner).</summary>
     public static int Side(float tokenPx) => 2 * (int)MathF.Ceiling(HalfExtent(tokenPx));
 
-    // The contrast rim (6% of the side, see NotifierRenderer) plus anti-aliasing.
-    static float RimPad(float tokenPx) => tokenPx * 0.06f + 2f;
+    // The contrast rim at its widest (see NotifierRenderer.RimWidth) plus anti-aliasing.
+    static float RimPad(float tokenPx) => tokenPx * NotifierRenderer.MaxRimRatio + 2f;
 }

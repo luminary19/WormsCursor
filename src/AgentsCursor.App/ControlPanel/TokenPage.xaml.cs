@@ -38,7 +38,7 @@ public partial class TokenPage : Page
             else if (index > PointerPositions.Length)
                 _settings.Change(s => { s.Placement = NotifierPlacement.Corner; s.Corner = (ScreenCorner)(index - FirstCorner); });
         };
-        ResetButton.Click += (_, _) => _settings.Change(s => s.ResetAppearance());
+        ResetButton.Click += (_, _) => _settings.Change(s => s.ResetSizeAndPosition());
 
         _settings.Changed += Refresh;
         Refresh();
@@ -56,7 +56,7 @@ public partial class TokenPage : Page
         SizeSlider.Value = s.Size;
         SizeText.Text = $"{s.Size} px";
         PositionBox.SelectedIndex = PositionIndex(s);
-        ResetButton.IsEnabled = !s.HasDefaultAppearance();
+        ResetButton.IsEnabled = !s.HasDefaultSizeAndPosition();
 
         Preview.Tool = IconCatalog.Tools[0];
         Preview.Show(s);

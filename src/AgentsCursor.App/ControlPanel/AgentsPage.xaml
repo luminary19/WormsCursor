@@ -13,7 +13,8 @@
             </ResourceDictionary.MergedDictionaries>
             <BooleanToVisibilityConverter x:Key="VisibleWhen" />
 
-            <!--  One card per tool: logo, name + config path, status, actions.  -->
+            <!--  One card per agent: logo, name (and which of its apps it covers), status, config
+                  path, actions.  -->
             <DataTemplate x:Key="ToolCard" DataType="{x:Type local:ToolRow}">
                 <Border Padding="16,12,16,12" Style="{StaticResource Surface}">
                     <Grid>
@@ -23,16 +24,26 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <Image
-                            Width="28"
-                            Height="28"
-                            Margin="0,0,16,0"
+                            Width="36"
+                            Height="36"
+                            Margin="0,0,14,0"
                             VerticalAlignment="Center"
                             Source="{Binding Logo}" />
                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <ui:TextBlock
-                                FontTypography="Body"
-                                Text="{Binding Name}"
-                                TextTrimming="CharacterEllipsis" />
+                            <StackPanel Orientation="Horizontal">
+                                <ui:TextBlock
+                                    FontTypography="Body"
+                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                    Text="{Binding Name}"
+                                    TextTrimming="CharacterEllipsis" />
+                                <ui:TextBlock
+                                    x:Name="Detail"
+                                    Margin="8,0,0,0"
+                                    VerticalAlignment="Center"
+                                    FontTypography="Caption"
+                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                    Text="{Binding Detail}" />
+                            </StackPanel>
                             <StackPanel Margin="0,3,0,0" Orientation="Horizontal">
                                 <Ellipse x:Name="Dot" Style="{StaticResource StatusDot}" />
                                 <ui:TextBlock
@@ -91,6 +102,9 @@
                     <DataTrigger Binding="{Binding PrimaryIsAccent}" Value="True">
                         <Setter TargetName="Primary" Property="Appearance" Value="Primary" />
                     </DataTrigger>
+                    <DataTrigger Binding="{Binding Detail}" Value="">
+                        <Setter TargetName="Detail" Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
                     <DataTrigger Binding="{Binding Explanation}" Value="">
                         <Setter TargetName="Explanation" Property="Visibility" Value="Collapsed" />
                     </DataTrigger>
@@ -101,9 +115,9 @@
 
     <StackPanel Margin="40,28,40,40">
         <ui:TextBlock Style="{StaticResource PageTitle}" Text="Agents" />
-        <ui:TextBlock Style="{StaticResource PageLead}" Text="Connect your AI tools so they can tell AgentsCursor when they need you." />
+        <ui:TextBlock Style="{StaticResource PageLead}" Text="Connect your agents so they can tell AgentsCursor when they need you." />
 
-        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Tools" />
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Connections" />
         <ui:InfoBar
             x:Name="ErrorBar"
             Margin="0,0,0,8"

@@ -112,7 +112,7 @@ public partial class AgentsPage : Page
         {
             _logoDpi = dpi;
             _rows = AgentHookRegistrar.Tools
-                .Select(tool => new ToolRow(tool, ToolLogo.Render(tool.Id, 28, dpi)))
+                .Select(tool => new ToolRow(tool, ToolLogo.Render(tool.Id, 36, dpi)))
                 .ToArray();
             ToolList.ItemsSource = _rows;
         }

@@ -183,11 +183,11 @@ public sealed class NotifierOverlay : IDisposable
 
         // The token centre (screen px), its tilt, and the DPI of the monitor it's on, so the token keeps
         // a consistent physical size across mixed-DPI monitors.
-        float cx, cy, swing, tokenPx;
+        float cx, cy, swing, tokenPx, dpi;
         if (placement == NotifierPlacement.Corner)
         {
             var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
-            float dpi = DpiScaleForPoint(wa.Left + wa.Width / 2, wa.Top + wa.Height / 2);
+            dpi = DpiScaleForPoint(wa.Left + wa.Width / 2, wa.Top + wa.Height / 2);
             tokenPx = _settings.Size * dpi;
             // Room for the bounce (0.22) and the "?" badge's reach past the logo, so the hopping
             // token stays fully on screen in a top corner.
@@ -203,7 +203,7 @@ public sealed class NotifierOverlay : IDisposable
         else
         {
             GetCursorPos(out POINT c);
-            float dpi = DpiScaleForPoint(c.x, c.y);
+            dpi = DpiScaleForPoint(c.x, c.y);
             tokenPx = _settings.Size * dpi;
             // Mirror the rest offset per axis near the edges of the monitor under the pointer
             // (physical px under PerMonitorV2), then slide it along an edge it would still overhang;
@@ -211,8 +211,7 @@ public sealed class NotifierOverlay : IDisposable
             var work = Screen.FromPoint(new Point(c.x, c.y)).WorkingArea;
             _flip = TokenMotion.Edges(_flip, new PointF(c.x, c.y), TokenMotion.RestFor(placement, tokenPx, dpi, Flip.None), tokenPx, work);
             var rest = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, tokenPx, dpi, _flip), new PointF(c.x, c.y), tokenPx, work);
-            float maxSwing = placement == NotifierPlacement.BesidePointer ? TokenMotion.BesideMaxSwing : 180f;
-            var pose = TokenMotion.Step(ref _tether, c.x, c.y, rest, tokenPx, dt, _entrancePending, maxSwing, work);
+            var pose = TokenMotion.Step(ref _tether, c.x, c.y, rest, tokenPx, dt, _entrancePending, TokenMotion.MaxSwingFor(placement), work);
             _entrancePending = false;
             (cx, cy, swing) = (c.x + pose.OffsetX, c.y + pose.OffsetY, pose.SwingDeg);
         }
@@ -228,7 +227,7 @@ public sealed class NotifierOverlay : IDisposable
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             // The sub-pixel remainder keeps slow motion smooth while the window moves in whole pixels.
-            _renderer.DrawToken(g, _settings, face, cx - left, cy - top, tokenPx, swing);
+            _renderer.DrawToken(g, _settings, face, cx - left, cy - top, tokenPx, swing, dpi);
         }
 
         SetBitmap(_hwnd, _buffer!, left, top);
