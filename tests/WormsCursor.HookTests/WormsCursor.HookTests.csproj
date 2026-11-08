@@ -24,5 +24,6 @@
     <Compile Include="../../src/WormsCursor.Core/SettingsStore.cs" Link="SettingsStore.cs" />
     <Compile Include="../../src/WormsCursor.Core/SvgPath.cs" Link="SvgPath.cs" />
     <Compile Include="../../src/WormsCursor.Core/WindowPrograms.cs" Link="WindowPrograms.cs" />
+    <Compile Include="../../src/WormsCursor.OpenCodeOverlay/SuppressionListFile.cs" Link="SuppressionListFile.cs" />
   </ItemGroup>
 </Project>

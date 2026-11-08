@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using WormsCursor.App;
 using WormsCursor.App.Services;
 using WormsCursor.Core;
+using OpenCodeCursorOverlay;
 
 var tests = new (string Name, Action Run)[]
 {
@@ -24,6 +25,7 @@ var tests = new (string Name, Action Run)[]
     ("Autostart only counts a Run entry that launches this exe", AutostartTarget),
     ("Suppressed program names normalize and match case-insensitively", SuppressionMatching),
     ("The suppressed-program list round-trips through settings.json", SuppressionSettingsJson),
+    ("The OpenCode helper follows settings saves and survives a locked read", SuppressionListReload),
     ("Settings copies never share a mutable program list", SuppressionCopies),
     ("The foreground watcher and window listing resolve real exe names", ForegroundSmoke),
 };
@@ -510,7 +512,7 @@ static void SuppressionSettingsJson() => WithHome(home =>
     var settings = new CursorSettings { SuppressedPrograms = Array.Empty<string>() };
     SettingsStore.Save(settings, path);
     Equal(0, SettingsStore.Load(path).SuppressedPrograms.Count);
-    Equal(0, SettingsStore.Read(path).SuppressedPrograms.Count);
+    Equal(0, SettingsStore.TryRead(path)!.SuppressedPrograms.Count);
 
     settings.SuppressedPrograms = new[] { "dota2.exe", "cs2.exe" };
     SettingsStore.Save(settings, path);
@@ -522,11 +524,36 @@ static void SuppressionSettingsJson() => WithHome(home =>
     File.WriteAllText(path, """{"SuppressedPrograms": ["C:\\Games\\Dota2", "dota2.exe", ""]}""");
     Equal("Dota2.exe", Joined(SettingsStore.Load(path).SuppressedPrograms));
 
-    // The read-only path (the OpenCode helper) falls back to defaults but never moves a corrupt file.
+    // The read-only path (the OpenCode helper) reports a corrupt file as unreadable, not as the
+    // defaults, and never moves it; a missing file does mean the defaults.
     File.WriteAllText(path, "{ not json");
-    Equal("dota2.exe", Joined(SettingsStore.Read(path).SuppressedPrograms));
+    Equal<CursorSettings?>(null, SettingsStore.TryRead(path));
     Equal(true, File.Exists(path));
     Equal(0, Directory.GetFiles(home, "settings.json.corrupt-*").Length);
+    File.Delete(path);
+    Equal("dota2.exe", Joined(SettingsStore.TryRead(path)!.SuppressedPrograms));
+});
+
+// The OpenCode helper's view of the list: a save is announced whatever has focus, and a read that
+// fails (the file locked mid-save) keeps the last good list rather than reverting to the defaults.
+static void SuppressionListReload() => WithHome(home =>
+{
+    string path = Path.Combine(home, "WormsCursor", "settings.json");
+    using var list = new SuppressionListFile(path);
+    using var saved = new ManualResetEventSlim(false);
+    list.Changed += saved.Set;
+    Equal("dota2.exe", Joined(list.Current())); // nothing saved yet
+
+    SettingsStore.Save(new CursorSettings { SuppressedPrograms = Array.Empty<string>() }, path);
+    Equal(true, saved.Wait(TimeSpan.FromSeconds(5)));
+    Equal(0, list.Current().Count);
+
+    saved.Reset();
+    SettingsStore.Save(new CursorSettings { SuppressedPrograms = new[] { "cs2.exe" } }, path); // a replace
+    Equal(true, saved.Wait(TimeSpan.FromSeconds(5)));
+    using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        Equal(0, list.Current().Count); // locked: the last good list, not ["dota2.exe"]
+    Equal("cs2.exe", Joined(list.Current())); // retried once readable
 });
 
 static void SuppressionCopies()

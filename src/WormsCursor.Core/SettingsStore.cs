@@ -31,7 +31,7 @@ public static class SettingsStore
 
     /// <summary>Loads settings, or returns normalized defaults if missing/corrupt/unreadable. A corrupt
     /// file is preserved (moved aside) before falling back, never silently left to be overwritten.
-    /// For the owning app; another process that only reads the file uses <see cref="Read"/>.</summary>
+    /// For the owning app; another process that only reads the file uses <see cref="TryRead"/>.</summary>
     public static CursorSettings Load(string? path = null)
     {
         var source = path ?? DefaultPath;
@@ -40,11 +40,16 @@ public static class SettingsStore
         return loaded ?? new CursorSettings();
     }
 
-    /// <summary>Like <see cref="Load"/>, but never touches the file: a corrupt one is left for the
-    /// owning app to deal with. For a read-only consumer in another process (the OpenCode helper),
-    /// which must not move the tray app's settings out from under it.</summary>
-    public static CursorSettings Read(string? path = null)
-        => TryParse(path ?? DefaultPath, out _) ?? new CursorSettings();
+    /// <summary>For a read-only consumer in another process (the OpenCode helper), which must not move
+    /// the tray app's settings out from under it: never touches the file. Returns the defaults when no
+    /// file exists yet (nothing saved), but null when one exists and can't be read or parsed right now
+    /// (locked mid-save, ACL-denied, corrupt), so the caller keeps what it had instead of mistaking a
+    /// failed read for the default settings.</summary>
+    public static CursorSettings? TryRead(string? path = null)
+    {
+        var source = path ?? DefaultPath;
+        return File.Exists(source) ? TryParse(source, out _) : new CursorSettings();
+    }
 
     // The settings in `source`, normalized; null when it is missing, unreadable (locked, ACL-denied)
     // or corrupt. `corrupt` tells the last case apart: the file exists but isn't valid settings JSON.

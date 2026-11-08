@@ -6,48 +6,38 @@ namespace OpenCodeCursorOverlay;
 /// Hides the OpenCode token while a program on WormsCursor's suppression list owns the foreground
 /// window, using the same Core pieces as the tray app (linked source, no DLL): a
 /// <see cref="ForegroundWatcher"/> for focus changes and the list from the tray's own
-/// <c>%LocalAppData%\WormsCursor\settings.json</c>. The file is re-read on a focus change only when its
-/// write time moved, which is enough: the list is edited in the tray's Preferences, and switching back
-/// to the game afterwards is itself a focus change.
+/// <c>%LocalAppData%\WormsCursor\settings.json</c>. Both a focus change and a settings save re-check, so
+/// a list edited in the tray's Preferences applies even when focus returned to the game before the save.
 /// </summary>
 internal sealed class FocusSuppression : IDisposable
 {
     private readonly CursorOverlay overlay;
     private readonly ForegroundWatcher watcher = new();
+    private readonly SuppressionListFile settings = new(SettingsStore.DefaultPath);
     private readonly object gate = new();
-    private IReadOnlyList<string> programs = [];
-    private DateTime settingsWritten = DateTime.MinValue; // never a real write time, so the first check reads
 
     /// <summary>Call after the overlay's handle exists: decisions are posted to its UI thread.</summary>
     public FocusSuppression(CursorOverlay overlay)
     {
         this.overlay = overlay;
         watcher.Changed += Evaluate;
+        settings.Changed += Evaluate;
         Evaluate();
     }
 
-    // Runs on the constructing thread once, then on the watcher's thread for each focus change.
+    // Runs on the constructing thread once, then on the watcher threads for each focus change or save.
     private void Evaluate()
     {
         lock (gate) // posting under the lock keeps decisions in order
         {
-            RefreshPrograms();
-            var suppressed = ProgramSuppression.Matches(watcher.ForegroundProgram, programs);
+            var suppressed = ProgramSuppression.Matches(watcher.ForegroundProgram, settings.Current());
             overlay.Post(() => overlay.SetSuppressed(suppressed));
         }
     }
 
-    private void RefreshPrograms()
+    public void Dispose()
     {
-        // A missing file reports a fixed sentinel time, and Read then yields the defaults. If even the
-        // time can't be read (ACL-denied), the last list read stays in force.
-        DateTime written;
-        try { written = File.GetLastWriteTimeUtc(SettingsStore.DefaultPath); }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return; }
-        if (written == settingsWritten) return;
-        settingsWritten = written;
-        programs = SettingsStore.Read().SuppressedPrograms;
+        settings.Dispose();
+        watcher.Dispose();
     }
-
-    public void Dispose() => watcher.Dispose();
 }
