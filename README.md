@@ -76,6 +76,15 @@ in `%LocalAppData%\AgentsCursor\icons\`. Every icon gets the same contrast rim, 
 and the page previews both looks over dark and light. **Reset all icons to the originals** puts them
 back.
 
+The mascots move: each has a short idle loop that plays every few seconds and is still the rest of the
+time (Waving waves, Party's hat wiggles and its confetti twinkles, Peekaboo blinks and ducks behind its
+ledge until only its eyes peek over; Codex's Buddy blinks and rolls its eyes, Spin twirls, Sleepy's z's
+drift away; OpenCode's Buddy blinks its cursor eyes and taps a foot, Brackets flexes, Stack hops; Pi's
+Walker marches, Shades glint, Pie steams). **Animate mascots**, on by default, turns this off; mascots
+are also still while **Motion** is Still or Windows' animation effects are off (the switch then shows
+off, and its tooltip says why). Original logos and added icons never move. The loops run on the token's
+own animation clock, so nothing runs while no agent is waiting.
+
 The overlay touches no system state, so there's nothing to restore on exit, and it costs nothing when
 nothing's waiting (the animation only runs while at least one agent needs you).
 
@@ -290,7 +299,9 @@ AgentsCursor.sln
 │  │   ├─ CustomIconStore.cs  The SVGs you added: sanitised, content-addressed, in %LocalAppData%\AgentsCursor\icons
 │  │   ├─ SvgSanitizer.cs     Makes an untrusted SVG safe to keep and draw (no scripts, no outside references)
 │  │   ├─ SvgReferences.cs    Refuses an SVG whose references loop, nest too deep or draw too much
-│  │   ├─ TokenSprites.cs     Renders icons (SVG.NET) to cached sprites, fitted by visible pixels, with a contrast rim
+│  │   ├─ TokenSprites.cs     Renders icons (SVG.NET) to cached sprites, fitted by visible pixels, with a contrast rim;
+│  │   │                      a mascot gets a sprite per frame of its loop
+│  │   ├─ MascotMotion.cs     The mascots' idle loops (keyframed parts of their SVGs) and when they play
 │  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe); reports each ended wait
 │   ├─ WaitRecord.cs       One ended wait (agent, needs you / done, start, end, how it ended)
 │   ├─ WaitHistory.cs      The Analytics history: a JSON line per wait, a file per month, appended off the UI thread
@@ -360,7 +371,8 @@ make it. Its sidebar has six pages, opening on **Analytics**:
   pointer, or a screen corner), how it moves (Bouncy, Calm, Still), a live preview of a pointer
   gliding over dark and light with the token following it, and the sounds.
 - **Customization** — each agent's icon: its original logo, a mascot, or an SVG you add, with a preview of
-  both looks (the green check for "done", and the yellow "?" with a "+N" for "needs you").
+  both looks (the green check for "done", and the yellow "?" with a "+N" for "needs you"), and
+  **Animate mascots**.
 - **Agents** — connect, update or disconnect Claude Code, Codex, OpenCode and Pi, how long the token
   stays after an agent is done, and **Preview on screen**, which shows pretend agents on the real token.
 - **Apps** — **Show during meetings and screen sharing**, and the **Hide the token while using** list.

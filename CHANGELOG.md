@@ -7,6 +7,14 @@ GitHub releases. The release workflow pulls the matching section into each relea
 ## Unreleased
 
 ### Added
+- **Mascots that move.** Every mascot now has a small idle loop every few seconds: Claude Code waves,
+  shakes its party hat while the confetti twinkles, or blinks and sinks behind its ledge to peek;
+  Codex's buddy blinks and rolls its googly eyes, Spin twirls and wobbles to a stop, Sleepy's z's drift
+  off; OpenCode's buddy blinks its cursor eyes and taps a foot, Brackets flexes, Stack hops; Pi
+  marches, its shades glint, and its pie steams. They spend most of the time still, and stand still
+  with **Motion** set to Still or Windows' animation effects off. **Animate mascots** on the
+  **Customization** page turns them off; the previews and the gallery show them moving. Logos and your
+  own icons don't move.
 - **Analytics, the control panel's new home page.** See your **current** and **longest streak**
   (days in a row an agent needed you), your **average response** time over the last 30 days (from the
   yellow "?" appearing to your answer), a GitHub-style **activity** calendar of the last six months

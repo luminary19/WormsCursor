@@ -79,6 +79,10 @@ public sealed class CursorSettings
     /// (<see cref="MotionProfile.Effective"/>), whatever is saved here.</summary>
     public MotionStyle Motion { get; set; } = MotionStyle.Bouncy;
 
+    /// <summary>Let the built-in mascots play their idle loops (<see cref="MascotLoops"/>). On by
+    /// default; they stand still anyway while the token does (<see cref="MascotLoops.Animate"/>).</summary>
+    public bool AnimateMascots { get; set; } = true;
+
     // ---------- sounds (preferences UI) ----------
 
     /// <summary>Play a chime when a session starts waiting on you. Off by default.</summary>

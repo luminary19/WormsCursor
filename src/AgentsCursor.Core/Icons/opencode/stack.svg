@@ -1,10 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 -70 320 380">
-  <!-- OpenCode stack: two compact marks, one behind the other like a stack of open windows; the front one has a face. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-30 -100 360 440">
+  <!-- OpenCode stack: two compact marks, one behind the other like a stack of open windows; the front one has a face. Animated: "front" (hops) and "eyes" (blink like a caret) (MascotLoops). -->
   <path fill="#A39B9B" d="M240 -60H60V240H240V-60ZM110 0H230V180H110Z" fill-rule="evenodd"/>
-  <path fill="#4B4646" fill-rule="evenodd" d="M-14 -14H254V314H-14ZM0 0V300H240V0Z"/>
-  <path fill="#2E2A2A" d="M60 60H180V120H60Z"/>
-  <path fill="#4B4646" d="M60 120H180V240H60Z"/>
-  <path fill="#F1ECEC" d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z"/>
-  <path fill="#F1ECEC" d="M84 142H104V180H84ZM136 142H156V180H136Z"/>
-  <path fill="none" stroke="#F1ECEC" stroke-width="12" stroke-linecap="round" d="M104 204Q120 218 136 204"/>
+  <g id="front">
+    <path fill="#4B4646" fill-rule="evenodd" d="M-14 -14H254V314H-14ZM0 0V300H240V0Z"/>
+    <path fill="#2E2A2A" d="M60 60H180V120H60Z"/>
+    <path fill="#4B4646" d="M60 120H180V240H60Z"/>
+    <path fill="#F1ECEC" d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z"/>
+    <path id="eyes" fill="#F1ECEC" d="M84 142H104V180H84ZM136 142H156V180H136Z"/>
+    <path fill="none" stroke="#F1ECEC" stroke-width="12" stroke-linecap="round" d="M104 204Q120 218 136 204"/>
+  </g>
 </svg>

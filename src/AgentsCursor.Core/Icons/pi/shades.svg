@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100" shape-rendering="crispEdges">
-  <!-- Pi shades: the Powerline pi in 8-bit sunglasses worn low on its thick top bar, clear of the badge corner (pi-cursor's column palette). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-5 -5 130 110" shape-rendering="crispEdges">
+  <!-- Pi shades: the Powerline pi in 8-bit sunglasses worn low on its thick top bar, clear of the badge corner (pi-cursor's column palette). Animated: "glint" (the lens highlights sweep across) and "sparkle" (hidden at rest; pops at the left lens's corner) (MascotLoops). -->
   <path fill="#ff00af" d="M0 0H10V12H0Z"/>
   <path fill="#e817b6" d="M10 0H20V38H10ZM10 90H20V100H10Z"/>
   <path fill="#d12ebe" d="M20 0H30V38H20ZM20 38H30V90H20ZM20 90H30V100H20Z"/>
@@ -13,5 +13,6 @@
   <path fill="#19e7f8" d="M100 0H110V38H100ZM100 90H110V100H100Z"/>
   <path fill="#02feff" d="M110 0H120V12H110Z"/>
   <path fill="#1d1230" d="M12 17H108V22H12ZM22 22H54V27H22ZM66 22H98V27H66ZM26 27H54V32H26ZM66 27H94V32H66ZM31 32H49V36H31ZM71 32H89V36H71Z"/>
-  <path fill="#ffffff" d="M30 23H35V27H30ZM35 27H40V31H35ZM70 23H75V27H70ZM75 27H80V31H75Z"/>
+  <path id="glint" fill="#ffffff" d="M30 23H35V27H30ZM35 27H40V31H35ZM70 23H75V27H70ZM75 27H80V31H75Z"/>
+  <path id="sparkle" fill="#ffffff" opacity="0" d="M16 7H20V19H16ZM12 11H24V15H12Z"/>
 </svg>

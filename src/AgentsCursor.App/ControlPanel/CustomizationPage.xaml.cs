@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -19,6 +20,12 @@ namespace AgentsCursor.App.ControlPanel;
 ///
 /// The tiles are radio groups: Tab reaches the selected one, the arrow keys move the choice. The
 /// thumbnails are drawn by the panel's own renderer on the UI thread (<see cref="ToolLogo"/>).
+///
+/// "Animate mascots" (<see cref="CursorSettings.AnimateMascots"/>) plays the mascots' idle loops in
+/// the previews and the gallery tiles, and on the token; it shows off, disabled, while the token is
+/// still anyway (<see cref="MascotLoops.Animate"/>). The tiles step through their frames from
+/// <see cref="CompositionTarget.Rendering"/> only while the page is visible and a mascot is shown,
+/// each frame drawn once by the page's own renderer (UI thread only) and kept by its tile.
 /// </summary>
 public partial class CustomizationPage : Page
 {
@@ -30,6 +37,9 @@ public partial class CustomizationPage : Page
     double _dpi;
     bool _uploading;          // an added file is being checked and stored
     RemovedIcon? _removed;    // the icon just removed, while its Undo is offered
+    NotifierRenderer? _tileRenderer;            // draws the tiles' mascot frames, on the UI thread
+    readonly Stopwatch _tileClock = new();      // the tiles' loop clock, running while they animate
+    bool _tilesAnimating;
     const double MinAgentTileWidth = 150; // DIPs; narrower and the agents go two to a row
 
     public CustomizationPage(LiveSettings settings)
@@ -43,9 +53,66 @@ public partial class CustomizationPage : Page
                 ShowHint();
                 if (!StatusBar.IsOpen) UndoButton.Visibility = Visibility.Collapsed;
             });
-        Loaded += (_, _) => Rebuild();
+        Loaded += (_, _) => { _tileRenderer ??= new NotifierRenderer(); Rebuild(); };
+        Unloaded += (_, _) =>
+        {
+            AnimateTiles(false);
+            _tileRenderer?.Dispose();
+            _tileRenderer = null;
+        };
+        IsVisibleChanged += (_, _) => UpdateTileAnimation();
+        // Disabled while the token is still, so a change here is always the user's.
+        AnimateSwitch.Checked += (_, _) => SetAnimate(true);
+        AnimateSwitch.Unchecked += (_, _) => SetAnimate(false);
+        // Windows' animation effects switched on or off: show what applies now.
+        SystemParameters.StaticPropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(SystemParameters.ClientAreaAnimation)) Refresh();
+        };
         _settings.Changed += Refresh;
         Refresh();
+    }
+
+    void SetAnimate(bool on)
+    {
+        if (AnimateSwitch.IsEnabled && on != _settings.Live.AnimateMascots) _settings.Change(s => s.AnimateMascots = on);
+    }
+
+    // ---------- the gallery's mascot loops ----------
+
+    void UpdateTileAnimation()
+    {
+        bool on = IsVisible && _tileRenderer is not null
+                  && MascotLoops.Animate(_settings.Live, SystemParameters.ClientAreaAnimation)
+                  && _icons.Any(i => i.Loop is not null);
+        AnimateTiles(on);
+    }
+
+    void AnimateTiles(bool on)
+    {
+        if (on == _tilesAnimating) return;
+        _tilesAnimating = on;
+        if (on)
+        {
+            _tileClock.Restart(); // each showing starts at rest
+            CompositionTarget.Rendering += OnTileFrame;
+            return;
+        }
+        CompositionTarget.Rendering -= OnTileFrame;
+        _tileClock.Reset();
+        foreach (var tile in _icons) tile.ShowRest();
+    }
+
+    void OnTileFrame(object? sender, EventArgs e)
+    {
+        if (_tileRenderer is not { } renderer) return;
+        double clock = _tileClock.Elapsed.TotalSeconds;
+        foreach (var tile in _icons)
+        {
+            if (tile.Loop is not { } loop) continue;
+            // The middle of the frame's first sample, which FrameAt maps back to that frame.
+            tile.ShowFrame(loop.FrameAt(clock), frame => ToolLogo.Render(renderer, _tool, tile.Id, 48, _dpi, (frame + 0.5) / loop.Fps));
+        }
     }
 
     // Moved to a monitor with another scale: redraw the thumbnails so they stay crisp.
@@ -74,6 +141,13 @@ public partial class CustomizationPage : Page
         ShowPreviews(s);
         FitSwatches();
         ResetButton.IsEnabled = s.Icons.Count > 0;
+        bool effects = SystemParameters.ClientAreaAnimation;
+        bool still = MotionProfile.Effective(s.Motion, effects) == MotionStyle.Still;
+        AnimateSwitch.IsEnabled = !still;
+        AnimateSwitch.IsChecked = !still && s.AnimateMascots;
+        AnimateSwitch.ToolTip = !effects ? "Animation effects are off in Windows, so mascots stay still"
+            : still ? "Motion is Still, so mascots stay still" : null;
+        UpdateTileAnimation();
         // Only an icon choice changes the tiles (a size drag on the Sound and Display page leaves them alone). The
         // tiles update in place, so the keyboard focus stays where it is.
         if (ReferenceEquals(s.Icons, _shownChoices) || _agents.Length == 0) return;
@@ -100,7 +174,8 @@ public partial class CustomizationPage : Page
         var s = _settings.Current;
         string chosen = s.IconFor(_tool), agent = NameOf(_tool);
         IconTile Tile(string id, string name, bool custom) => new(id, name, ToolLogo.Render(_tool, id, 48, _dpi), custom, agent)
-            { IsSelected = id == chosen };
+            { IsSelected = id == chosen, Loop = custom ? null : MascotLoops.For(id) };
+        AnimateTiles(false); // the new tiles start at rest
         _icons = IconCatalog.ForTool(_tool).Select(i => Tile(i.Id, i.Name, false))
             .Concat(IconSource.Custom.List(_tool).Select(id => Tile(id, IconSource.Custom.NameOf(_tool, id) ?? "Added icon", true)))
             .ToArray();
@@ -110,6 +185,7 @@ public partial class CustomizationPage : Page
         GalleryHeader.Text = $"Choose an icon for {agent}";
         ShowAddState();
         ShowPreviews(s);
+        UpdateTileAnimation();
     }
 
     // The two state swatches side by side when four whole tokens fit across, else one above the other.
@@ -304,14 +380,34 @@ public sealed class AgentTile(string tool, string name, ImageSource image, bool 
     }
 }
 
-/// <summary>One icon in an agent's gallery: built-in, or one the user added (removable).</summary>
+/// <summary>One icon in an agent's gallery: built-in, or one the user added (removable). A mascot's
+/// tile shows the frame of its loop the page asks for, each drawn once and kept.</summary>
 public sealed class IconTile(string id, string name, ImageSource image, bool custom, string agent) : INotifyPropertyChanged
 {
     bool _selected;
+    int _frame;
+    readonly Dictionary<int, ImageSource> _frames = new() { [0] = image };
 
     public string Id { get; } = id;
     public string Name { get; } = name;
-    public ImageSource Image { get; } = image;
+    public ImageSource Image { get; private set; } = image;
+
+    /// <summary>The mascot's idle loop; null for an icon that stands still.</summary>
+    public MascotLoop? Loop { get; init; }
+
+    /// <summary>Shows the rest pose (the tile's own image).</summary>
+    public void ShowRest() => ShowFrame(0, _ => _frames[0]);
+
+    /// <summary>Shows <paramref name="frame"/>, drawing it with <paramref name="render"/> the first time
+    /// (frame 0, the rest pose, is the tile's own image).</summary>
+    public void ShowFrame(int frame, Func<int, ImageSource> render)
+    {
+        if (frame == _frame) return;
+        if (!_frames.TryGetValue(frame, out var picture)) _frames[frame] = picture = render(frame);
+        _frame = frame;
+        Image = picture;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Image)));
+    }
     public bool IsCustom { get; } = custom;
     public string AutomationName => $"{agent} icon: {Name}";
     public string RemoveName => $"Remove icon: {Name}";

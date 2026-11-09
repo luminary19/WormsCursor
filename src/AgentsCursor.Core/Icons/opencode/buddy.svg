@@ -1,9 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 330">
-  <!-- OpenCode buddy: the compact mark with a face: block-cursor eyes, a smile, little feet. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 -20 260 360">
+  <!-- OpenCode buddy: the compact mark with a face: block-cursor eyes, a smile, little feet. Animated: "eyes" (blink like a caret) and "footR" (taps) (MascotLoops). -->
   <path fill="#4B4646" d="M60 120H180V240H60Z"/>
   <path fill="#F1ECEC" d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z"/>
-  <path fill="#F1ECEC" d="M84 142H104V180H84ZM136 142H156V180H136Z"/>
+  <path id="eyes" fill="#F1ECEC" d="M84 142H104V180H84ZM136 142H156V180H136Z"/>
   <path fill="none" stroke="#F1ECEC" stroke-width="12" stroke-linecap="round" d="M104 204Q120 218 136 204"/>
   <path fill="#FF8FA8" d="M66 190H84V200H66ZM156 190H174V200H156Z"/>
-  <path fill="#F1ECEC" d="M36 312H96V330H36ZM144 312H204V330H144Z"/>
+  <path fill="#F1ECEC" d="M36 312H96V330H36Z"/>
+  <path id="footR" fill="#F1ECEC" d="M144 312H204V330H144Z"/>
 </svg>

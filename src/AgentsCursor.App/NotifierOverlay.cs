@@ -40,7 +40,8 @@ namespace AgentsCursor.App;
 /// <see cref="ForegroundWatcher"/> reports focus changes (event-driven); the meeting watcher checks
 /// only while a token would otherwise show. When the reason goes away and something still waits, the
 /// token reappears with its entrance. How it moves is <see cref="CursorSettings.Motion"/>, as Still
-/// while Windows' animation effects are off.
+/// while Windows' animation effects are off; a mascot plays its idle loop on the same clock unless
+/// <see cref="MascotLoops.Animate"/> says no.
 /// </summary>
 public sealed class NotifierOverlay : IDisposable
 {
@@ -259,7 +260,9 @@ public sealed class NotifierOverlay : IDisposable
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             // The sub-pixel remainder keeps slow motion smooth while the window moves in whole pixels.
-            _renderer.DrawToken(g, _settings, face, cx - left, cy - top, tokenPx, swing, dpi);
+            // A mascot plays its idle loop on the same clock (from its appearance, so it starts at rest).
+            double? mascotClock = MascotLoops.Animate(_settings, _animationEffects) ? _t : null;
+            _renderer.DrawToken(g, _settings, face, cx - left, cy - top, tokenPx, swing, dpi, mascotClock);
         }
 
         SetBitmap(_hwnd, _buffer!, left, top);

@@ -63,6 +63,12 @@ var tests = new (string Name, Action Run)[]
     ("At any swing, every icon with its badge and +9 stays inside the canvas", AppearanceTests.CanvasExtent),
     ("Every pointer placement settles at rest, stays on its string, hops in and flips at edges", AppearanceTests.Tether),
     ("Bouncy, Calm and Still keep their motion bounds; animations off means Still", AppearanceTests.MotionPresets),
+    ("Mascot loops pick frames deterministically, start at rest, rest most of the time and wrap", MascotTests.FrameSelection),
+    ("Mascots animate only when on and the token isn't still; no clock is the rest frame; originals never move", MascotTests.AnimateSetting),
+    ("Every mascot part is in its SVG, rests where the file draws it, and never leaves its viewBox", MascotTests.MascotArt),
+    ("Every mascot frame keeps one fit and badge anchor and stays in its box and the token canvas", MascotTests.FramesInBox),
+    ("Animated frames stay within the cache budget and an evicted frame is rebuilt", MascotTests.FrameBudget),
+    ("Mascot frames render on two threads at once, the same clock giving the same picture", MascotTests.ConcurrentFrames),
     ("A chime plays once per new waiting session, only while the token shows, one per burst", SoundAndMeetingTests.SoundDecisions),
     ("Sound settings default off, round-trip by name and clamp", SoundAndMeetingTests.SoundSettings),
     ("Volume scales the samples, never anything else", SoundAndMeetingTests.ChimeVolume),
@@ -465,7 +471,8 @@ static void BadgeDrawing()
                     using (var g = Graphics.FromImage(canvas))
                         renderer.DrawToken(g, settings, new TokenFace(icon.Tool, blocked, others), icon.Id, mid, mid, side, 0f, 1f);
                     var c = canvas.GetPixel(px, py);
-                    bool yellow = c.A > 240 && c.R > 230 && c.G > 170 && c.B < 120;
+                    // At 48 px the spot is about a pixel inside the puff's edge, so allow a little edge blend.
+                    bool yellow = c.A > 240 && c.R > 215 && c.G > 165 && c.B < 120;
                     bool green = c.A > 240 && c.G > 150 && c.G > c.R + 40 && c.G > c.B + 40;
                     if (blocked ? !yellow : !green)
                         throw new InvalidOperationException($"{icon.Id} {side}px +{others} blocked={blocked}: badge pixel was {c}.");

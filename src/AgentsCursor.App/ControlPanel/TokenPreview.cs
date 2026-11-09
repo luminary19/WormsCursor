@@ -23,7 +23,8 @@ namespace AgentsCursor.App.ControlPanel;
 /// The renderer is this control's own and lives on the UI thread from Loaded to Unloaded, never
 /// shared with the overlay's animation thread (GDI+ objects are not thread-safe). Frames come from
 /// <see cref="CompositionTarget.Rendering"/> only while the control is visible, so a hidden panel
-/// draws nothing. With Windows' animation effects turned off it shows one still frame.
+/// draws nothing. With Windows' animation effects turned off it shows one still frame. A mascot plays
+/// its idle loop while <see cref="MascotLoops.Animate"/> allows.
 /// </summary>
 public sealed class TokenPreview : FrameworkElement
 {
@@ -148,7 +149,8 @@ public sealed class TokenPreview : FrameworkElement
             g.Clear(Gdi.Color.Transparent);
             g.SmoothingMode = GdiDrawing2D.SmoothingMode.AntiAlias;
             var (cx, cy, swing, pointer) = Roam ? RoamPose(w, h, t, dt, tokenPx, scale, motion) : IdlePose(w, h, t, tokenPx, scale, motion);
-            _renderer.DrawToken(g, _look, new TokenFace(Tool, Blocked, Others), cx, cy, tokenPx, swing, scale);
+            double? mascotClock = _animating && MascotLoops.Animate(_look, SystemParameters.ClientAreaAnimation) ? now : null;
+            _renderer.DrawToken(g, _look, new TokenFace(Tool, Blocked, Others), cx, cy, tokenPx, swing, scale, mascotClock);
             if (pointer is { } p) DrawPointer(g, p, scale); // the real pointer is always on top too
         }
 

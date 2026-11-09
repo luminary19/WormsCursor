@@ -16,6 +16,11 @@ namespace AgentsCursor.Core;
 /// swing angle. There is intentionally never a fan of logos — multiple waiting agents collapse to one
 /// logo plus a "+N" count, which stays legible at any size.
 ///
+/// A mascot with an idle loop (<see cref="MascotLoops"/>) moves when the host passes a
+/// <c>mascotClock</c> (seconds on its animation clock; the host passes null while
+/// <see cref="MascotLoops.Animate"/> says no), and stands at rest otherwise. The badge and the "+N"
+/// anchor to the same place in every frame.
+///
 /// An instance owns the GDI+ objects it draws with (parsed icons + cached sprites), and GDI+ objects
 /// are not thread-safe — so each drawing thread creates its own renderer (the overlay's animation
 /// thread and the Preferences preview each hold one) and never shares it with another thread.
@@ -30,15 +35,18 @@ public sealed class NotifierRenderer : IDisposable
     /// the status cloud (drawn last, on top, and kept upright): a check when it finished, a "?" when it
     /// is blocked on you. A thin contrast
     /// rim (<see cref="RimWidth"/>, at <paramref name="dpi"/>: 1 = 96 DPI) keeps the bare logo legible
-    /// over any window behind it. Leaves no transform behind.</summary>
+    /// over any window behind it. A mascot shows the frame of its loop at <paramref name="mascotClock"/>
+    /// seconds (null: at rest). Leaves no transform behind.</summary>
     public void DrawToken(Graphics g, CursorSettings s, TokenFace face,
-                          float centerX, float centerY, float tokenSidePx, float swingDeg, float dpi)
-        => DrawToken(g, s, face, s.IconFor(face.Tool), centerX, centerY, tokenSidePx, swingDeg, dpi);
+                          float centerX, float centerY, float tokenSidePx, float swingDeg, float dpi,
+                          double? mascotClock = null)
+        => DrawToken(g, s, face, s.IconFor(face.Tool), centerX, centerY, tokenSidePx, swingDeg, dpi, mascotClock);
 
     /// <summary>As the other overload, but with <paramref name="iconId"/> instead of the icon the
     /// settings choose for the agent (the panel's icon gallery draws every choice).</summary>
     public void DrawToken(Graphics g, CursorSettings s, TokenFace face, string iconId,
-                          float centerX, float centerY, float tokenSidePx, float swingDeg, float dpi)
+                          float centerX, float centerY, float tokenSidePx, float swingDeg, float dpi,
+                          double? mascotClock = null)
     {
         float box = Math.Max(8f, tokenSidePx);
         float edge = RimWidth(box, dpi);
@@ -50,7 +58,7 @@ public sealed class NotifierRenderer : IDisposable
         g.TranslateTransform(centerX, centerY);
         g.RotateTransform(swingDeg);
 
-        var icon = DrawIcon(g, face.Tool, iconId, square, edge);
+        var icon = DrawIcon(g, face.Tool, iconId, square, edge, mascotClock);
         var (corner, radius) = StatusBadge.Place(icon, box);
         if (face.Others > 0)
             DrawCount(g, face.Others, corner, radius, box, Parse(s.OutlineColor, Color.Black));
@@ -63,14 +71,16 @@ public sealed class NotifierRenderer : IDisposable
     /// rim and no status badge or count, fitted as the token fits it in a box of side
     /// <paramref name="sidePx"/> centred at (<paramref name="centerX"/>/<paramref name="centerY"/>).
     /// For places that show which agent or icon this is rather than what it is doing (the panel's
-    /// Agents cards and icon tiles).</summary>
-    public void DrawIcon(Graphics g, string tool, string iconId, float centerX, float centerY, float sidePx, float dpi)
+    /// Agents cards and icon tiles). A mascot shows the frame of its loop at <paramref name="mascotClock"/>
+    /// seconds (null: at rest).</summary>
+    public void DrawIcon(Graphics g, string tool, string iconId, float centerX, float centerY, float sidePx, float dpi,
+                         double? mascotClock = null)
     {
         float box = Math.Max(8f, sidePx);
         var saved = g.Save();
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        DrawIcon(g, tool, iconId, new RectangleF(centerX - box / 2f, centerY - box / 2f, box, box), RimWidth(box, dpi));
+        DrawIcon(g, tool, iconId, new RectangleF(centerX - box / 2f, centerY - box / 2f, box, box), RimWidth(box, dpi), mascotClock);
         g.Restore(saved);
     }
 
@@ -100,9 +110,9 @@ public sealed class NotifierRenderer : IDisposable
     // Blits the tool's icon sprite (fitted to the box, rim included) and returns the rectangle the
     // icon actually covers, which the badges anchor to. A tool without an icon gets a grey dot, so a
     // future or unmapped tool still shows something.
-    RectangleF DrawIcon(Graphics g, string tool, string iconId, RectangleF box, float edge)
+    RectangleF DrawIcon(Graphics g, string tool, string iconId, RectangleF box, float edge, double? mascotClock)
     {
-        var sprite = _sprites.Get(tool, iconId, box.Width, edge);
+        var sprite = _sprites.Get(tool, iconId, box.Width, edge, mascotClock);
         if (sprite is null)
         {
             float d = Math.Min(box.Width, box.Height) * DotRatio;

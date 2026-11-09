@@ -188,6 +188,19 @@
             </UniformGrid>
         </Border>
 
+        <!--  The mascots' idle loops: the previews above and the gallery tiles play them while on. Off,
+              disabled, with a tooltip saying why, while the token itself is still (the Still motion,
+              or Windows' animation effects off).  -->
+        <ui:CardControl Margin="0,12,0,4" Icon="{ui:SymbolIcon Sparkle24}">
+            <ui:CardControl.Header>
+                <local:SettingHeader Title="Animate mascots" />
+            </ui:CardControl.Header>
+            <ui:ToggleSwitch
+                x:Name="AnimateSwitch"
+                AutomationProperties.Name="Animate mascots"
+                ToolTipService.ShowOnDisabled="True" />
+        </ui:CardControl>
+
         <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Agents" />
         <!--  The cells carry an 8 px gap on their right; the list gives it back so the row ends
               flush with the surfaces below.  -->

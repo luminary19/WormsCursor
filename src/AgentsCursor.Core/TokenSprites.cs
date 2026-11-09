@@ -1,7 +1,9 @@
+using System.Collections.Concurrent;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using Svg;
+using Svg.Transforms;
 
 namespace AgentsCursor.Core;
 
@@ -14,6 +16,12 @@ namespace AgentsCursor.Core;
 /// reports where the icon sits in its box (<see cref="Sprite.Visual"/>), which is what the status badge
 /// and the "+N" pill anchor to.
 ///
+/// A mascot with an idle loop (<see cref="MascotLoops"/>) gets one sprite per distinct frame, built the
+/// first time that frame is drawn. Every frame is fitted by the visible bounds of the whole loop, so the
+/// mascot keeps one size and one <see cref="Sprite.Visual"/> (the badge never jitters) and no frame can
+/// leave its box, and every frame's rim uses the rest frame's hole colour. Animated strips are kept
+/// within <see cref="AnimatedBudget"/> bytes, the least recently drawn dropped first.
+///
 /// Not thread-safe, by design (GDI+ objects and SVG documents throw when two threads share them): each
 /// <see cref="NotifierRenderer"/> owns one, and parses its own documents from the shared strings.
 /// </summary>
@@ -23,15 +31,39 @@ internal sealed class TokenSprites : IDisposable
     /// <see cref="Pad"/>), and the icon's visible bounds within its <c>side x side</c> box.</summary>
     public sealed record Sprite(Bitmap Image, int Pad, RectangleF Visual);
 
-    // An icon's parsed document and the bounds (in its own user units) of what it actually draws.
-    sealed record Parsed(SvgDocument Document, RectangleF Visible);
+    // An icon's parsed document, the bounds (in its own user units) of what it actually draws in any
+    // frame, and its loop with the document elements it moves (none for a still icon).
+    sealed record Parsed(SvgDocument Document, RectangleF Visible, MascotLoop? Loop, MovingPart[] Parts);
+
+    // An animated element, with the transforms its file gives it.
+    sealed record MovingPart(MascotPart Motion, SvgVisualElement Element, SvgTransform[] Original);
+
+    // The sprites of one icon at one size: one per frame (one for a still icon), built on first use.
+    sealed class Strip(Parsed? parsed, int frames)
+    {
+        public Parsed? Parsed { get; } = parsed;
+        public Sprite?[] Frames { get; } = new Sprite?[frames];
+        public bool[] Built { get; } = new bool[frames];
+        public Color? Hole;      // the rim colour inside the icon's holes, from the rest frame
+        public long Bytes;       // what its built frames hold (animated strips only)
+        public long LastUse;
+        public bool Animated => Frames.Length > 1;
+    }
 
     const int ProbePx = 256;        // the resolution the visible bounds are measured at
     const float FitPad = 0.01f;     // breathing room around the visible bounds, of their larger side
     const byte Visible = 16;        // the alpha that counts as drawn (ignores the faintest AA dust)
 
+    /// <summary>The most the animated strips of one instance hold, in bytes of pixels.</summary>
+    internal const long AnimatedBudget = 48L << 20;
+
     readonly Dictionary<string, Parsed?> _parsed = new(StringComparer.Ordinal);
-    readonly Dictionary<(string Tool, string Icon, int Side, int RimKey), Sprite?> _sprites = new();
+    readonly Dictionary<(string Tool, string Icon, int Side, int RimKey), Strip> _strips = new();
+    long _animatedBytes, _uses;
+
+    // The visible bounds of each animated built-in over its whole loop: the same for every instance,
+    // so measured once per process (it renders every frame).
+    static readonly ConcurrentDictionary<string, RectangleF?> LoopBounds = new(StringComparer.Ordinal);
 
     static TokenSprites() => EnsureConfigured();
 
@@ -48,19 +80,57 @@ internal sealed class TokenSprites : IDisposable
     /// <summary>The sprite of <paramref name="iconId"/> for <paramref name="tool"/> in a box of side
     /// <paramref name="side"/> px with a rim <paramref name="rim"/> px wide, built on first use (the
     /// tool's original when that icon can't be loaded or drawn); null when the tool has no icon (the
-    /// caller draws a placeholder).</summary>
-    public Sprite? Get(string tool, string iconId, float side, float rim)
+    /// caller draws a placeholder). A mascot with a loop shows the frame for <paramref name="clock"/>
+    /// seconds into it (<see cref="MascotLoop.FrameAt"/>), or its rest frame when that is null.</summary>
+    public Sprite? Get(string tool, string iconId, float side, float rim, double? clock = null)
     {
         int px = Math.Max(1, (int)MathF.Round(side));
         int rimKey = (int)MathF.Round(rim * 4f); // quarter-px rim resolution
         var key = (tool, iconId, px, rimKey);
-        if (!_sprites.TryGetValue(key, out var sprite))
+        if (!_strips.TryGetValue(key, out var strip))
         {
-            sprite = ParseOrOriginal(tool, iconId) is { } parsed ? Build(parsed, px, rimKey / 4f) : null;
-            _sprites[key] = sprite;
+            var parsed = ParseOrOriginal(tool, iconId);
+            strip = new Strip(parsed, parsed?.Loop?.FrameCount ?? 1);
+            _strips[key] = strip;
         }
-        return sprite;
+        strip.LastUse = ++_uses;
+        int frame = clock is { } c && strip.Parsed?.Loop is { } loop ? loop.FrameAt(c) : 0;
+        Ensure(strip, 0, px, rimKey / 4f); // first: the rest frame sets the hole colour
+        Ensure(strip, frame, px, rimKey / 4f);
+        if (strip.Animated) Trim(strip);
+        return strip.Frames[frame];
     }
+
+    void Ensure(Strip strip, int frame, int px, float rim)
+    {
+        if (strip.Built[frame]) return;
+        strip.Built[frame] = true;
+        if (strip.Parsed is not { } parsed) return;
+        var sprite = Build(parsed, px, rim, frame, ref strip.Hole);
+        strip.Frames[frame] = sprite;
+        if (!strip.Animated) return;
+        long bytes = 4L * sprite.Image.Width * sprite.Image.Height;
+        strip.Bytes += bytes;
+        _animatedBytes += bytes;
+    }
+
+    // Drops the least recently drawn animated strips (never <keep>) until they fit the budget.
+    void Trim(Strip keep)
+    {
+        while (_animatedBytes > AnimatedBudget)
+        {
+            var victims = _strips.Where(p => p.Value.Animated && p.Value != keep && p.Value.Bytes > 0)
+                                 .OrderBy(p => p.Value.LastUse).Take(1).ToArray();
+            if (victims.Length == 0) return;
+            var (key, strip) = (victims[0].Key, victims[0].Value);
+            foreach (var sprite in strip.Frames) sprite?.Image.Dispose();
+            _animatedBytes -= strip.Bytes;
+            _strips.Remove(key);
+        }
+    }
+
+    /// <summary>The bytes the animated strips hold now (tests).</summary>
+    internal long AnimatedBytes => _animatedBytes;
 
     /// <summary>The pixel size of what <paramref name="svgText"/> draws when its whole viewBox is fitted
     /// into <paramref name="px"/> x <paramref name="px"/>; null when it draws nothing. Parses its own
@@ -96,7 +166,13 @@ internal sealed class TokenSprites : IDisposable
             try
             {
                 var document = SvgDocument.FromSvg<SvgDocument>(text);
-                if (MeasureVisible(document) is { } visible) parsed = new Parsed(document, visible);
+                // Only a built-in has a loop: an added icon's id is never a built-in's.
+                var loop = IconCatalog.Find(iconId)?.Tool == tool ? MascotLoops.For(iconId) : null;
+                var parts = loop is null ? Array.Empty<MovingPart>() : PartsOf(document, loop, iconId);
+                var visible = loop is null ? MeasureVisible(document)
+                    : LoopBounds.GetOrAdd(cacheKey, _ => MeasureLoop(document, loop, parts));
+                Pose(loop, parts, 0);
+                if (visible is { } v) parsed = new Parsed(document, v, loop, parts);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
@@ -108,6 +184,73 @@ internal sealed class TokenSprites : IDisposable
         }
         _parsed[cacheKey] = parsed;
         return parsed;
+    }
+
+    // The elements <loop> moves, each with its file's transforms. A part missing from the file is a bug
+    // in the built-in art (the tests catch it); at run time it is logged and simply doesn't move.
+    static MovingPart[] PartsOf(SvgDocument document, MascotLoop loop, string iconId)
+    {
+        var parts = new List<MovingPart>();
+        foreach (var motion in loop.Parts)
+        {
+            if (document.GetElementById(motion.Id) is not SvgVisualElement element)
+            {
+                IconSource.Log?.Invoke($"icon '{iconId}' has no part '{motion.Id}' to animate");
+                continue;
+            }
+            parts.Add(new MovingPart(motion, element, element.Transforms?.ToArray() ?? Array.Empty<SvgTransform>()));
+        }
+        return parts.ToArray();
+    }
+
+    // Puts every moving part where <frame> has it: its pose (about its pivot, in its parent's units)
+    // ahead of its own transforms, at the pose's opacity.
+    static void Pose(MascotLoop? loop, MovingPart[] parts, int frame)
+    {
+        if (loop is null) return;
+        foreach (var part in parts)
+        {
+            var pose = loop.PoseAt(part.Motion, frame);
+            float px = part.Motion.PivotX, py = part.Motion.PivotY;
+            var transforms = new SvgTransformCollection();
+            if (pose.Dx != 0f || pose.Dy != 0f || pose.Turn != 0f || pose.ScaleX != 1f || pose.ScaleY != 1f)
+            {
+                transforms.Add(new SvgTranslate(pose.Dx + px, pose.Dy + py));
+                if (pose.Turn != 0f) transforms.Add(new SvgRotate(pose.Turn));
+                if (pose.ScaleX != 1f || pose.ScaleY != 1f) transforms.Add(new SvgScale(pose.ScaleX, pose.ScaleY));
+                transforms.Add(new SvgTranslate(-px, -py));
+            }
+            foreach (var own in part.Original) transforms.Add(own);
+            part.Element.Transforms = transforms;
+            part.Element.Opacity = pose.Opacity;
+        }
+    }
+
+    /// <summary>Each distinct frame of built-in <paramref name="iconId"/>'s loop with the bounds it
+    /// draws (null: nothing), and the viewBox they are measured in, which must hold every frame with
+    /// room to spare (what spills out of it is clipped). Throws when a part has no element. Tests.</summary>
+    internal static IReadOnlyList<(int Frame, RectangleF? Visible, RectangleF View)> MeasureFrames(string tool, string iconId)
+    {
+        var loop = MascotLoops.For(iconId) ?? throw new ArgumentException(iconId + " has no loop");
+        var document = SvgDocument.FromSvg<SvgDocument>(IconSource.Load(tool, iconId)!);
+        var parts = PartsOf(document, loop, iconId);
+        if (parts.Length != loop.Parts.Count)
+            throw new InvalidOperationException($"{iconId}: {loop.Parts.Count - parts.Length} part(s) missing from the SVG");
+        var view = ViewBoxOf(document);
+        return loop.Frames.Select(frame => { Pose(loop, parts, frame); return (frame, MeasureVisible(document), view); }).ToArray();
+    }
+
+    // The union of every distinct frame's visible bounds; null when no frame draws anything.
+    static RectangleF? MeasureLoop(SvgDocument document, MascotLoop loop, MovingPart[] parts)
+    {
+        RectangleF? union = null;
+        foreach (int frame in loop.Frames)
+        {
+            Pose(loop, parts, frame);
+            if (MeasureVisible(document) is not { } visible) continue;
+            union = union is { } u ? RectangleF.Union(u, visible) : visible;
+        }
+        return union;
     }
 
     // The document's own coordinate space: its viewBox, or its width x height when it has none.
@@ -160,7 +303,7 @@ internal sealed class TokenSprites : IDisposable
                               (maxX + 1 - minX) / scale, (maxY + 1 - minY) / scale);
     }
 
-    static Sprite Build(Parsed parsed, int side, float rim)
+    static Sprite Build(Parsed parsed, int side, float rim, int frame, ref Color? hole)
     {
         int pad = (int)MathF.Ceiling(rim) + 2; // room for the rim (plus anti-aliasing) outside the box
         int dim = side + 2 * pad;
@@ -177,9 +320,11 @@ internal sealed class TokenSprites : IDisposable
         {
             g.Clear(Color.Transparent);
             g.TranslateTransform(pad + ox, pad + oy);
+            Pose(parsed.Loop, parsed.Parts, frame);
             Render(parsed.Document, g, view, w, h);
         }
-        AddRim(image, rim);
+        hole ??= HoleRim(Pixels(image));
+        AddRim(image, rim, hole.Value);
         return new Sprite(image, pad, new RectangleF(ox, oy, w, h));
     }
 
@@ -193,11 +338,10 @@ internal sealed class TokenSprites : IDisposable
     // Composites the icon, outside it, over its alpha mask dilated by the dark band's width, over the
     // mask dilated by the whole rim in the light colour; inside its holes, over the mask dilated by the
     // whole rim in the colour that contrasts with the icon (discs, anti-aliased at their edges).
-    static void AddRim(Bitmap image, float rim)
+    static void AddRim(Bitmap image, float rim, Color hole)
     {
         int w = image.Width, h = image.Height;
         var px = Pixels(image);
-        var hole = Luminance(AverageColor(px)) < 110f ? RimLight : RimDark;
         var outerKernel = Disc(rim);
         var innerKernel = Disc(rim * DarkShare);
         var outside = Outside(px, w, h);
@@ -242,6 +386,9 @@ internal sealed class TokenSprites : IDisposable
         }
         finally { image.UnlockBits(data); }
     }
+
+    // The rim colour inside the icon's holes: the one of the two that contrasts with the icon.
+    static Color HoleRim(byte[] px) => Luminance(AverageColor(px)) < 110f ? RimLight : RimDark;
 
     // The alpha-weighted average colour of the icon's pixels (premultiplied sums / total alpha).
     static Color AverageColor(byte[] px)
@@ -330,8 +477,10 @@ internal sealed class TokenSprites : IDisposable
 
     public void Dispose()
     {
-        foreach (var sprite in _sprites.Values) sprite?.Image.Dispose();
-        _sprites.Clear();
+        foreach (var strip in _strips.Values)
+            foreach (var sprite in strip.Frames) sprite?.Image.Dispose();
+        _strips.Clear();
+        _animatedBytes = 0;
         _parsed.Clear();
     }
 }

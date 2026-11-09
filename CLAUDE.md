@@ -175,7 +175,8 @@ tests.
   colour), faces in one language (dark ink eyes on light bodies, white eyes on Codex's dark knot, which
   gets a solid face plate because the rim fills the knot's gaps), nothing finer than 1/24 of the
   bounds, aspect 0.6-1.6, at most 8 KB, and nothing important at the top-right where the badge sits
-  (the critter waves with its left arm). Rendered with SVG.NET (`Svg`, MS-PL) into cached sprites per
+  (the critter waves with its left arm). Each mascot's viewBox must hold every frame of its loop with
+  room to spare (the probe that measures it clips at the viewBox). Rendered with SVG.NET (`Svg`, MS-PL) into cached sprites per
   renderer: fitted by the icon's visible pixels (not its viewBox), with the same two-tone contrast rim
   for every icon (the alpha mask dilated: a dark band, then a light one; at most 3 px x DPI; a hole
   inside the icon takes whichever band contrasts with the icon). `NotifierRenderer.IconShape` lets a
@@ -184,6 +185,23 @@ tests.
   (logged once per icon). SVG.NET never fetches external images, elements or entities
   (`TokenSprites.EnsureConfigured`). Unknown tools get a grey dot. `IconChoices` normalises the
   per-agent choice (`CursorSettings.Icons`).
+- `MascotMotion.cs` — the mascots' idle loops. `MascotLoops.For(iconId)` gives a built-in mascot's
+  `MascotLoop` (originals and added icons: none): a few seconds long, sampled at its `Fps`, moving
+  `MascotPart`s, each an SVG element by `id` with a pivot and `MascotKey`s (`PartPose`: move, turn,
+  scale about the pivot, absolute opacity; `Ease` Smooth / Linear / Step for pixel-art pose swaps). A
+  loop starts at rest (each part where its file draws it; a part hidden in the file has opacity 0, e.g.
+  a confetti bit or the next z) and is at rest most of the time; a conveyor (Sleepy's z's, Pie's steam)
+  ends the loop with its copies swapped so the wrap is seamless. `FrameAt(clock)` is pure: each sample is
+  drawn as the first sample with the same poses (every rest sample is frame 0), so hosts cache one
+  picture per pose. `MascotLoops.Animate(settings, animationEffects)` = `AnimateMascots` unless the
+  effective motion is Still. Hosts pass a `mascotClock` (null = rest) to `DrawToken`/`DrawIcon`: the
+  overlay its own `_t` (from the token's appearance, on the animation thread; nothing new runs while
+  nothing waits), `TokenPreview` its frame clock, the Customization page's tiles a clock of their own.
+  `TokenSprites` keeps a strip of sprites per icon and size, a frame built the first time it is drawn,
+  every frame fitted by the **union** of the loop's visible bounds (measured once per process), so the
+  size and `Sprite.Visual`, which the badge and "+N" anchor to, never change between frames (or with the
+  switch); the rim's hole colour comes from the rest frame so it can't flip mid-loop; animated strips
+  are capped at `AnimatedBudget` (48 MB) per renderer, least recently drawn dropped first.
 - `CustomIconStore.cs` / `SvgSanitizer.cs` / `SvgReferences.cs` — added icons:
   `%LocalAppData%\AgentsCursor\icons\<tool>\<hash>.svg` holds the sanitised text, named by the first
   64 bits of its SHA-256 (the id is `custom:<hash>`), written to a temp name then moved, never
@@ -214,7 +232,7 @@ tests.
   their meaning), `Corner`, `Icons` (tool -> icon id, read-only and replaced on edit; `IconFor`), the
   notifier enable + linger timeout, `OutlineColor`, and
   `SuppressedPrograms`, `Motion` (`MotionStyle`), the sounds (`SoundsEnabled`, `NeedsYouSound`,
-  `DoneSound` as `Chime`, `SoundVolume` 0-100) and `ShowDuringMeetings`, plus the control panel's
+  `DoneSound` as `Chime`, `SoundVolume` 0-100), `ShowDuringMeetings` and `AnimateMascots`, plus the control panel's
   `Theme` (`ThemePreference` System/Light/Dark).
   (Name kept for continuity; it's now just the notifier's settings.)
   `SuppressedPrograms` is a read-only list normalized on every assignment and replaced (never mutated)
@@ -327,6 +345,10 @@ tests.
     store on a background task with a ProgressRing; dimmed with a tooltip when the agent has 24), and
     "Reset all icons to the originals". A refusal ("That file couldn't be used" + the reason +
     "<Agent> keeps its current icon.") and Undo show inline under "Your icons", in place of the hint.
+    Under the preview, "Animate mascots" (off, disabled, with a tooltip while Motion is Still or
+    Windows' animation effects are off); while it applies and the page is visible, the mascot tiles
+    step through their loops from `CompositionTarget.Rendering`, each frame drawn once by the page's own
+    renderer (`ToolLogo.Render` with a clock) and kept by its `IconTile`.
     Tiles are radio groups (`ChoiceTile` style): Tab reaches the selected one, the arrows move the
     choice, the focus ring shows only after keyboard input; tiles update in place so focus survives a
     change.

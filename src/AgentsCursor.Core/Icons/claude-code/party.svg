@@ -1,9 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -5 26 26" shape-rendering="crispEdges">
-  <!-- Claude Code party: the pixel critter, as big as the original, with a striped party cone on the left of its head and two bits of confetti, all clear of the badge corner. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-3 -7 30 28" shape-rendering="crispEdges">
+  <!-- Claude Code party: the pixel critter, as big as the original, with a striped party cone on the left of its head and two bits of confetti, all clear of the badge corner. Animated: "hat" (wiggles on its base), "confetti1"/"confetti2" (twinkle), "confetti3"/"confetti4" (hidden at rest; pop and drift down) (MascotLoops). -->
   <path fill="#D97757" d="M3 5H21V17H3ZM0 11H3V14H0ZM21 11H24V14H21ZM4.5 17H6V20H4.5ZM7.5 17H9V20H7.5ZM15 17H16.5V20H15ZM18 17H19.5V20H18Z"/>
   <path fill="#2B1B14" d="M6 8H7.5V11H6ZM16.5 8H18V11H16.5ZM10.5 12.5H13.5V14H10.5Z"/>
-  <path fill="#3AA99F" d="M3 3.5H12V5H3ZM4.5 0.5H10.5V2H4.5ZM6 -2.5H9V-1H6Z"/>
-  <path fill="#FFF1DE" d="M3.75 2H11.25V3.5H3.75ZM5.25 -1H9.75V0.5H5.25ZM6.75 -4H8.25V-2.5H6.75Z"/>
-  <path fill="#3AA99F" d="M0 0H1.5V1.5H0Z"/>
-  <path fill="#FFF1DE" d="M14.25 2.5H15.75V4H14.25Z"/>
+  <g id="hat" shape-rendering="geometricPrecision">
+    <path fill="#3AA99F" d="M3 3.5H12V5H3ZM4.5 0.5H10.5V2H4.5ZM6 -2.5H9V-1H6Z"/>
+    <path fill="#FFF1DE" d="M3.75 2H11.25V3.5H3.75ZM5.25 -1H9.75V0.5H5.25ZM6.75 -4H8.25V-2.5H6.75Z"/>
+  </g>
+  <path id="confetti1" fill="#3AA99F" d="M0 0H1.5V1.5H0Z"/>
+  <path id="confetti2" fill="#FFF1DE" d="M14.25 2.5H15.75V4H14.25Z"/>
+  <path id="confetti3" fill="#FFF1DE" opacity="0" d="M0.75 -4H2.25V-2.5H0.75Z"/>
+  <path id="confetti4" fill="#3AA99F" opacity="0" d="M12 -2.5H13.5V-1H12Z"/>
 </svg>

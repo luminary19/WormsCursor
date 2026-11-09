@@ -38,14 +38,21 @@ static class ToolLogo
         return Render(renderer, toolId, iconId, sizeDip, dpiScale, BoxShare);
     }
 
-    static BitmapSource Render(NotifierRenderer renderer, string toolId, string iconId, double sizeDip, double dpiScale, float share)
+    /// <summary>As the overload without a renderer, but drawn by <paramref name="renderer"/> (the caller's,
+    /// on its thread), showing a mascot's frame at <paramref name="mascotClock"/> seconds into its loop.</summary>
+    public static BitmapSource Render(NotifierRenderer renderer, string toolId, string iconId, double sizeDip, double dpiScale,
+                                      double? mascotClock)
+        => Render(renderer, toolId, iconId, sizeDip, dpiScale, BoxShare, mascotClock);
+
+    static BitmapSource Render(NotifierRenderer renderer, string toolId, string iconId, double sizeDip, double dpiScale, float share,
+                               double? mascotClock = null)
     {
         int px = Math.Max(1, (int)Math.Round(sizeDip * dpiScale));
         using var bitmap = new Gdi.Bitmap(px, px, GdiImaging.PixelFormat.Format32bppPArgb);
         using (var g = Gdi.Graphics.FromImage(bitmap))
         {
             g.Clear(Gdi.Color.Transparent);
-            renderer.DrawIcon(g, toolId, iconId, px / 2f, px / 2f, px * share, (float)dpiScale);
+            renderer.DrawIcon(g, toolId, iconId, px / 2f, px / 2f, px * share, (float)dpiScale, mascotClock);
         }
 
         var data = bitmap.LockBits(new Gdi.Rectangle(0, 0, px, px), GdiImaging.ImageLockMode.ReadOnly,

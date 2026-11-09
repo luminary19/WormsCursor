@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-130 -20 500 340">
-  <!-- OpenCode brackets: the compact mark flexing a < and a > like arms, with its face. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-150 -20 540 340">
+  <!-- OpenCode brackets: the compact mark flexing a < and a > like arms, with its face. Animated: "lt" and "gt" (flex out and back) and "eyes" (squeeze) (MascotLoops). -->
   <path fill="#4B4646" d="M60 120H180V240H60Z"/>
   <path fill="#F1ECEC" d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z"/>
-  <path fill="#F1ECEC" d="M84 142H104V180H84ZM136 142H156V180H136Z"/>
+  <path id="eyes" fill="#F1ECEC" d="M84 142H104V180H84ZM136 142H156V180H136Z"/>
   <path fill="none" stroke="#F1ECEC" stroke-width="12" stroke-linecap="round" d="M104 204Q120 218 136 204"/>
-  <path fill="none" stroke="#F1ECEC" stroke-width="40" stroke-linejoin="miter" stroke-linecap="square" d="M-28 84L-88 150L-28 216"/>
-  <path fill="none" stroke="#F1ECEC" stroke-width="40" stroke-linejoin="miter" stroke-linecap="square" d="M268 84L328 150L268 216"/>
+  <path id="lt" fill="none" stroke="#F1ECEC" stroke-width="40" stroke-linejoin="miter" stroke-linecap="square" d="M-28 84L-88 150L-28 216"/>
+  <path id="gt" fill="none" stroke="#F1ECEC" stroke-width="40" stroke-linejoin="miter" stroke-linecap="square" d="M268 84L328 150L268 216"/>
 </svg>

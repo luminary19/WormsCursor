@@ -1,18 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100" shape-rendering="crispEdges">
-  <!-- Pi walker: the Powerline pi strolling right, eyes low on its thick top bar, clear of the badge corner (pi-cursor's column palette). -->
-  <path fill="#ff00af" d="M0 0H10V12H0Z"/>
-  <path fill="#e817b6" d="M10 0H20V36H10ZM15 54H20V72H15ZM10 72H20V90H10ZM10 90H20V100H10Z"/>
-  <path fill="#d12ebe" d="M20 0H30V36H20ZM20 36H30V54H20ZM20 54H30V72H20ZM20 72H30V90H20ZM20 90H30V100H20Z"/>
-  <path fill="#ba45c5" d="M30 0H40V36H30ZM30 36H40V54H30ZM30 54H35V72H30ZM30 90H40V100H30Z"/>
-  <path fill="#a35ccc" d="M40 0H50V36H40Z"/>
-  <path fill="#8c73d3" d="M50 0H60V36H50Z"/>
-  <path fill="#758bdb" d="M60 0H70V36H60Z"/>
-  <path fill="#5ea2e2" d="M70 0H80V36H70Z"/>
-  <path fill="#47b9e9" d="M80 0H90V36H80ZM80 36H90V54H80ZM85 54H90V72H85Z"/>
-  <path fill="#30d0f0" d="M90 0H100V36H90ZM90 36H100V54H90ZM90 54H100V72H90ZM90 72H100V90H90ZM90 90H100V100H90Z"/>
-  <path fill="#19e7f8" d="M100 0H110V36H100ZM100 54H105V72H100ZM100 72H110V90H100ZM100 90H110V100H100Z"/>
-  <path fill="#02feff" d="M110 0H120V12H110ZM110 90H120V100H110Z"/>
-  <path fill="#ffffff" d="M30 17H48V35H30ZM68 17H86V35H68Z"/>
-  <path fill="#1d1230" d="M38 21H46V32H38ZM76 21H84V32H76Z"/>
-  <path fill="#ffffff" d="M39 22H42V25H39ZM77 22H80V25H77Z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-5 -10 130 115" shape-rendering="crispEdges">
+  <!-- Pi walker: the Powerline pi strolling right, eyes low on its thick top bar, clear of the badge corner (pi-cursor's column palette). Animated: "legL" and "legR" (step in turn; they run up under the bar, drawn last) and "bar" (dips as a foot lands) (MascotLoops). -->
+  <g id="legL">
+    <path fill="#e817b6" d="M15 54H20V72H15ZM10 72H20V100H10Z"/>
+    <path fill="#d12ebe" d="M20 30H30V100H20Z"/>
+    <path fill="#ba45c5" d="M30 30H40V54H30ZM30 54H35V72H30ZM30 90H40V100H30Z"/>
+  </g>
+  <g id="legR">
+    <path fill="#47b9e9" d="M80 30H90V54H80ZM85 54H90V72H85Z"/>
+    <path fill="#30d0f0" d="M90 30H100V100H90Z"/>
+    <path fill="#19e7f8" d="M100 54H105V72H100ZM100 72H110V100H100Z"/>
+    <path fill="#02feff" d="M110 90H120V100H110Z"/>
+  </g>
+  <g id="bar">
+    <path fill="#ff00af" d="M0 0H10V12H0Z"/>
+    <path fill="#e817b6" d="M10 0H20V36H10Z"/>
+    <path fill="#d12ebe" d="M20 0H30V36H20Z"/>
+    <path fill="#ba45c5" d="M30 0H40V36H30Z"/>
+    <path fill="#a35ccc" d="M40 0H50V36H40Z"/>
+    <path fill="#8c73d3" d="M50 0H60V36H50Z"/>
+    <path fill="#758bdb" d="M60 0H70V36H60Z"/>
+    <path fill="#5ea2e2" d="M70 0H80V36H70Z"/>
+    <path fill="#47b9e9" d="M80 0H90V36H80Z"/>
+    <path fill="#30d0f0" d="M90 0H100V36H90Z"/>
+    <path fill="#19e7f8" d="M100 0H110V36H100Z"/>
+    <path fill="#02feff" d="M110 0H120V12H110Z"/>
+    <path fill="#ffffff" d="M30 17H48V35H30ZM68 17H86V35H68Z"/>
+    <path fill="#1d1230" d="M38 21H46V32H38ZM76 21H84V32H76Z"/>
+    <path fill="#ffffff" d="M39 22H42V25H39ZM77 22H80V25H77Z"/>
+  </g>
 </svg>

@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" shape-rendering="crispEdges">
-  <!-- Pi pie: a whole pixel pie seen from above at a tilt, its crust in pi-cursor's column palette and a big pi on the filling. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-5 -40 130 125" shape-rendering="crispEdges">
+  <!-- Pi pie: a whole pixel pie seen from above at a tilt, its crust in pi-cursor's column palette and a big pi on the filling, two wisps of steam rising off it. Animated: "steam1"/"steam2" (rise and fade) and "steam1b"/"steam2b" (hidden at rest; come up into their place) (MascotLoops). -->
   <path fill="#ff00af" d="M0 20H10V50H0Z"/>
   <path fill="#e817b6" d="M10 10H20V60H10Z"/>
   <path fill="#d12ebe" d="M20 10H30V20H20ZM20 50H30V60H20Z"/>
@@ -16,4 +16,8 @@
   <path fill="#c99a62" d="M10 60H110V70H10ZM20 70H100V80H20Z"/>
   <path fill="#a8783f" d="M20 66H100V70H20ZM30 76H90V80H30Z"/>
   <path fill="#1d1230" d="M34 22H86V29H34ZM44 29H51V46H44ZM40 44H44V48H40ZM69 29H76V44H69ZM76 40H80V46H76Z"/>
+  <path id="steam1" fill="#e9e3f5" d="M40 -6H46V0H40ZM46 -12H52V-6H46ZM40 -18H46V-12H40Z"/>
+  <path id="steam1b" fill="#e9e3f5" opacity="0" d="M40 -6H46V0H40ZM46 -12H52V-6H46ZM40 -18H46V-12H40Z"/>
+  <path id="steam2" fill="#e9e3f5" d="M68 -10H74V-4H68ZM74 -16H80V-10H74ZM68 -22H74V-16H68Z"/>
+  <path id="steam2b" fill="#e9e3f5" opacity="0" d="M68 -10H74V-4H68ZM74 -16H80V-10H74ZM68 -22H74V-16H68Z"/>
 </svg>
