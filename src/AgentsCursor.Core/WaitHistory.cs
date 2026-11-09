@@ -84,20 +84,35 @@ public sealed class WaitHistory : IDisposable
     async Task WriteLoop()
     {
         Prune();
-        var batch = new List<WaitRecord>();
+        var batch = new List<WaitRecord>(); // what is left to write: a month that couldn't be appended stays
         while (await _queue.Reader.WaitToReadAsync().ConfigureAwait(false))
         {
             while (_queue.Reader.TryRead(out var record)) batch.Add(record);
-            Prune();
-            foreach (var month in batch.GroupBy(r => FileName(r.StartUtc)))
-                Append(month.Key, month);
-            Recorded?.Invoke();
-            Interlocked.Add(ref _pending, -batch.Count); // after Recorded: Flush covers its handlers too
-            batch.Clear();
+            Write(batch);
         }
+        if (batch.Count == 0) return;
+        Write(batch); // stopping: one last try for what couldn't be written before
+        if (batch.Count == 0) return;
+        LogOnce("lost", $"gave up on {batch.Count} wait(s) the history couldn't write");
+        Interlocked.Add(ref _pending, -batch.Count);
     }
 
-    void Append(string fileName, IEnumerable<WaitRecord> records)
+    // Appends the batch, month by month, and leaves in it only the records that couldn't be written
+    // (a file held by another program, say), to try again on the next wake or when stopping.
+    void Write(List<WaitRecord> batch)
+    {
+        Prune();
+        var failed = new List<WaitRecord>();
+        foreach (var month in batch.GroupBy(r => FileName(r.StartUtc)))
+            if (!Append(month.Key, month)) failed.AddRange(month);
+        int written = batch.Count - failed.Count;
+        if (written > 0) Recorded?.Invoke();
+        Interlocked.Add(ref _pending, -written); // after Recorded: Flush covers its handlers too
+        batch.Clear();
+        batch.AddRange(failed);
+    }
+
+    bool Append(string fileName, IEnumerable<WaitRecord> records)
     {
         string path = Path.Combine(_directory, fileName);
         try
@@ -115,10 +130,12 @@ public sealed class WaitHistory : IDisposable
             file.Seek(0, SeekOrigin.End);
             var bytes = Encoding.UTF8.GetBytes(text.ToString());
             file.Write(bytes, 0, bytes.Length);
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            LogOnce("write:" + fileName, $"couldn't add to the history file {fileName}: {ex.Message}");
+            LogOnce("write:" + fileName, $"couldn't add to the history file {fileName} (will try again): {ex.Message}");
+            return false;
         }
     }
 
@@ -230,8 +247,9 @@ public sealed class WaitHistory : IDisposable
             if (!Text(root, "tool", out var tool) || tool.Length is 0 or > MaxToolLength) return false;
             if (!Text(root, "kind", out var kindText) || !Enum.TryParse<WaitingState>(kindText, false, out var kind) || !Enum.IsDefined(kind)) return false;
             if (!Text(root, "outcome", out var outcomeText) || !Enum.TryParse<WaitEnd>(outcomeText, false, out var outcome) || !Enum.IsDefined(outcome)) return false;
-            if (!Time(root, "start", out var start) || !Time(root, "end", out var end) || end < start) return false;
-            record = new WaitRecord(tool, kind, start, end, outcome);
+            if (!Time(root, "start", out var start) || !Time(root, "end", out var end)) return false;
+            // An end before the start means the clock stepped back during the wait: it still happened.
+            record = new WaitRecord(tool, kind, start, end < start ? start : end, outcome);
             return true;
         }
         catch (JsonException)

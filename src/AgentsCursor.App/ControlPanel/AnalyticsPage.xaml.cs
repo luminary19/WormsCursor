@@ -4,6 +4,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
+using System.Windows.Threading;
 using AgentsCursor.Core;
 using Wpf.Ui.Controls;
 using TextBlock = Wpf.Ui.Controls.TextBlock;
@@ -16,13 +17,14 @@ namespace AgentsCursor.App.ControlPanel;
 /// the activity calendar (<see cref="ActivityHeatmap"/>), and who needed you in the last 30 days
 /// (<see cref="AgentDonut"/> + a legend). The numbers are <see cref="ActivityStats"/>'s.
 ///
-/// The history is read and summarised on a background task whenever the page is shown and whenever a
-/// wait is recorded while it is; the controls keep their size until the numbers arrive, so nothing
-/// jumps.
+/// The history is read and summarised on a background task whenever the page is shown, whenever a
+/// wait is recorded while it is, and at local midnight while it is (a new day); the controls keep
+/// their size until the numbers arrive, so nothing jumps.
 /// </summary>
 public partial class AnalyticsPage : Page
 {
     readonly IControlPanelHost _host;
+    readonly DispatcherTimer _midnight = new(); // while shown: today, the streak and the 30 days move on
     int _loads;       // the latest load; an older one finishing late is dropped
     bool _stale = true;
     ActivitySummary? _shown;
@@ -32,7 +34,13 @@ public partial class AnalyticsPage : Page
         _host = host;
         InitializeComponent();
         _host.History.Recorded += () => Dispatcher.BeginInvoke(() => { _stale = true; ReloadIfShown(); });
-        IsVisibleChanged += (_, _) => { _stale = true; ReloadIfShown(); };
+        _midnight.Tick += (_, _) => { _midnight.Stop(); _stale = true; ReloadIfShown(); };
+        IsVisibleChanged += (_, _) =>
+        {
+            if (!IsVisible) _midnight.Stop();
+            _stale = true;
+            ReloadIfShown();
+        };
         Loaded += (_, _) => ReloadIfShown();
         // The legend's swatches are drawn for one theme.
         Wpf.Ui.Appearance.ApplicationThemeManager.Changed += (_, _) => { if (_shown is not null) Show(_shown); };
@@ -66,6 +74,12 @@ public partial class AnalyticsPage : Page
     void Show(ActivitySummary summary)
     {
         _shown = summary;
+        if (IsVisible)
+        {
+            // Reload just after the next local midnight (a second late, so it is surely tomorrow).
+            _midnight.Interval = DateTime.Today.AddDays(1).AddSeconds(1) - DateTime.Now;
+            _midnight.Start();
+        }
         var culture = CultureInfo.CurrentCulture;
 
         ShowDays(CurrentTile, CurrentValue, CurrentDetail, "Current streak", summary.CurrentStreak,

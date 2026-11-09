@@ -64,6 +64,14 @@ static class SoundAndMeetingTests
         Equal(Chime.None, cues.Next(new[] { Blocked("a") }, new[] { Blocked("a"), Blocked("b") }, true, on, t0.AddMilliseconds(400)), "second in the burst");
         Equal(Chime.None, cues.Next(new[] { Blocked("a"), Blocked("b") }, new[] { Blocked("a"), Blocked("b"), Finished("c") }, true, on, t0.AddMilliseconds(900)), "third in the burst");
         Equal(Chime.Settle, cues.Next(new[] { Blocked("b") }, new[] { Blocked("b"), Finished("d") }, true, on, t0.AddMilliseconds(1100)), "after the burst");
+        // A "Needs you" isn't swallowed by a "Done" burst: it plays, and starts its own burst.
+        Equal(Chime.Rise, cues.Next(new[] { Blocked("b"), Finished("d") }, new[] { Blocked("b"), Finished("d"), Blocked("e") }, true, on, t0.AddMilliseconds(1500)), "needs you breaks a done burst");
+        Equal(Chime.None, cues.Next(new[] { Blocked("e") }, new[] { Blocked("e"), Blocked("f") }, true, on, t0.AddMilliseconds(1900)), "but not its own");
+        Equal(Chime.None, cues.Next(new[] { Blocked("f") }, new[] { Blocked("f"), Finished("g") }, true, on, t0.AddMilliseconds(2200)), "nor does a done");
+        var silentNeedsYou = new CursorSettings { SoundsEnabled = true, NeedsYouSound = Chime.None };
+        cues = new SoundCues();
+        Equal(Chime.Settle, cues.Next(None, new[] { Finished("a") }, true, silentNeedsYou, t0), "done");
+        Equal(Chime.None, cues.Next(new[] { Finished("a") }, new[] { Finished("a"), Blocked("b") }, true, silentNeedsYou, t0.AddMilliseconds(300)), "a silent needs-you breaks nothing");
         // A change that brings no arrival plays nothing (a session leaving, a sweep).
         Equal(Chime.None, cues.Next(new[] { Blocked("b"), Finished("d") }, new[] { Blocked("b") }, true, on, t0.AddSeconds(5)), "a session leaves");
 
@@ -336,6 +344,23 @@ static class SoundAndMeetingTests
         held.Add(stale);
         reader.DevicesInUse();
         Equal(1, lookedUp.Count, "forgotten once the store stopped listing it");
+    }
+
+    // A signal that can't be read counts as off, logged once, and the others still decide.
+    public static void MeetingSignalsFailing()
+    {
+        var now = DateTime.UtcNow;
+        var logged = new List<string>();
+        var broken = new MeetingSignals(() => throw new System.Security.SecurityException("denied"), _ => throw new InvalidOperationException(), logged.Add);
+        Equal(new Meeting(MeetingSignal.Presenting, null), broken.Read(() => true, () => false, now), "presenting still counts");
+        Equal(new Meeting(MeetingSignal.DisplayDuplicated, null), broken.Read(() => false, () => true, now), "duplicated still counts");
+        Equal<Meeting?>(null, broken.Read(() => throw new InvalidOperationException(), () => false, now), "nothing readable says on");
+        Equal(2, logged.Count, "each failing signal logged once");
+
+        var camera = new HeldDevice(MeetingSignal.Camera, "MSTeams_8wekyb3d8bbwe", now.AddMinutes(-3));
+        var cameraOnly = new MeetingSignals(() => new[] { camera },
+            _ => new Dictionary<string, DateTime> { [camera.App] = now.AddHours(-1) }, logged.Add);
+        Equal(new Meeting(MeetingSignal.Camera, camera.App), cameraOnly.Read(() => throw new InvalidOperationException(), () => throw new InvalidOperationException(), now), "the camera still counts");
     }
 
     // The live signals read without throwing on this machine (read-only; whatever they say).

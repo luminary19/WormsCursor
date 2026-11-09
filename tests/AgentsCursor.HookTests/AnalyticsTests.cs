@@ -174,7 +174,7 @@ static class AnalyticsTests
                 "[1,2,3]",                                                     // not an object
                 WaitHistory.Format(good).Replace("Blocked", "Sleeping"),       // unknown kind
                 WaitHistory.Format(good).Replace("Answered", "Shrugged"),      // unknown outcome
-                WaitHistory.Format(good with { EndUtc = good.StartUtc.AddSeconds(-5) }), // ends before it starts
+                WaitHistory.Format(good with { Tool = "gemini", EndUtc = good.StartUtc.AddSeconds(-5) }), // clock stepped back: kept, 0 s
                 WaitHistory.Format(good with { Tool = new string('x', 65) }),  // absurd tool id
                 WaitHistory.Format(good).Replace("\"tool\":\"pi\"", "\"tool\":7"), // wrong type
                 "\0\0\0\0",
@@ -183,7 +183,9 @@ static class AnalyticsTests
             }));
             var logged = new List<string>();
             using var history = new WaitHistory(dir, () => T0, logged.Add);
-            Equal("codex,pi", string.Join(',', history.Load().Select(r => r.Tool).Order()), "only whole records load, the rest still does");
+            Equal("codex,gemini,pi", string.Join(',', history.Load().Select(r => r.Tool).Order()), "only whole records load, the rest still does");
+            var reversed = history.Load().Single(r => r.Tool == "gemini");
+            Equal(reversed.StartUtc, reversed.EndUtc, "an end before the start reads as the start");
             Equal(1, logged.Count, "the skipped lines are logged once");
             history.Load();
             Equal(1, logged.Count, "and not again on the next load");
@@ -191,7 +193,44 @@ static class AnalyticsTests
             // Appending after the torn line ends it first, so the new record reads whole.
             history.Record(good with { Tool = "claude-code" });
             True(history.Flush(TimeSpan.FromSeconds(5)), "flushed");
-            Equal("claude-code,codex,pi", string.Join(',', history.Load().Select(r => r.Tool).Order()), "the torn line costs only itself");
+            Equal("claude-code,codex,gemini,pi", string.Join(',', history.Load().Select(r => r.Tool).Order()), "the torn line costs only itself");
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    public static void HistoryRetry()
+    {
+        string dir = TempDir();
+        try
+        {
+            WaitRecord At(int second, string tool = "codex") => new(tool, WaitingState.Finished,
+                new DateTime(2026, 11, 5, 9, 0, second, DateTimeKind.Utc), new DateTime(2026, 11, 5, 9, 1, second, DateTimeKind.Utc), WaitEnd.Resumed);
+            string path = Path.Combine(dir, "2026-11.jsonl");
+            File.WriteAllText(path, "");
+            var logged = new List<string>();
+
+            // Held by another program: nothing is lost, and nothing claims to be written.
+            using (var history = new WaitHistory(dir, () => T0, logged.Add))
+            {
+                using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    history.Record(At(1));
+                    True(!history.Flush(TimeSpan.FromMilliseconds(300)), "not written while the file is held");
+                }
+                Equal(1, logged.Count, "the failure is logged");
+                history.Record(At(2));
+                True(history.Flush(TimeSpan.FromSeconds(5)), "written on the next wake");
+                Equal(2, history.Load().Count, "with the one that failed");
+
+                // Stopping tries once more.
+                using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    history.Record(At(3));
+                    True(!history.Flush(TimeSpan.FromMilliseconds(300)), "held again");
+                }
+            }
+            using (var reader = new WaitHistory(dir, () => T0))
+                Equal(3, reader.Load().Count, "written when stopping");
         }
         finally { Directory.Delete(dir, true); }
     }

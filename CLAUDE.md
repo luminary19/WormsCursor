@@ -84,13 +84,15 @@ Duplication capture isn't recorded by Windows; a full-screen slideshow on one ex
 presentation mode. The way out is the one switch, and the Apps page names the app while it hides the
 token. `MeetingWatcher` only runs while `TokenVisibility.NeedsMeetingCheck` (something waits, on, no
 listed app in front, rule on): it checks once on `Watch(true)` (on the caller's thread, so the token
-never flashes up during a meeting) and then every second on a timer; off, it runs nothing. A failing
-check counts as no meeting and is logged once.
+never flashes up during a meeting) and then every second on a timer; off, it runs nothing. Each
+signal is read on its own: one that can't be read counts as off (logged once per signal) and the
+others still decide; a check that fails anyway counts as no meeting and is logged once.
 
 **Sounds.** Off by default (`SoundsEnabled`). `SoundCues` (Core, pure) picks the chime when the
 waiting set changes: `Arrivals` are sessions (`WaitingAgent.Session`, `AgentActivity`'s key) that
 weren't waiting or went finished -> blocked; a blocked arrival plays `NeedsYouSound`, else
-`DoneSound`; nothing while the token isn't shown; one chime per `Burst` (1 s). The tray calls it in
+`DoneSound`; nothing while the token isn't shown; one chime per `Burst` (1 s), except that a
+"Needs you" breaks through a burst that so far was "Done" (and starts its own). The tray calls it in
 `OnWaitingChanged` right after pushing the set to the overlay (so `Visibility` is current) and hands
 the result to `ChimePlayer`. The chimes are `Assets/Sounds/*.wav` (embedded as `Sounds/<name>.wav`),
 synthesised by `tools/generate-chimes.py` (16-bit mono 44.1 kHz, under 1 s, -3 dBFS peak).
@@ -117,7 +119,10 @@ tray stopping, in `StopEverything`). A finished wait ends `Resumed`, or `Expired
 itself still stays up until the call clears it; only the record's end is the answer moment. The tray hands each record to `WaitHistory`, which only
 queues it; one background task appends `{"tool","kind","start","end","outcome"}` lines to
 `%LocalAppData%\AgentsCursor\history\yyyy-MM.jsonl` (by UTC start month), ending a torn last line
-before appending; `Load` parses line by line (a bad line is skipped and logged once), keeps the current
+before appending; a month it can't append (the file held by another program) keeps its records for the
+next wake and one last try when stopping, and `Flush` reports them unwritten meanwhile; `Load` parses
+line by line (a bad line is skipped and logged once; an end before the start, the clock stepped back,
+reads as the start), keeps the current
 month + `RetainedMonths` (12) before it, and the writer deletes older month files. Nothing else is
 stored (no session id, project, path or prompt: the token's project label lives only in
 `WaitingAgent`/`TokenFace`, never in a `WaitRecord`); previews never touch `AgentActivity`, so they aren't
@@ -369,8 +374,8 @@ tests.
     response "Last 30 days"; the number large, the unit small; each tile's automation name reads it
     all), "Activity" (`ActivityHeatmap`) and "Who needed you" (`AgentDonut` with the 30-day total and
     "times, last 30 days" in the hole, and a legend row per agent: colour swatch, name, count, share).
-    It loads + summarises on a background task when shown and when `WaitHistory.Recorded` fires while
-    shown; empty: "No agent has needed you yet." (or "No agent needed you in the last 30 days.").
+    It loads + summarises on a background task when shown, when `WaitHistory.Recorded` fires while
+    shown, and at local midnight while shown; empty: "No agent has needed you yet." (or "No agent needed you in the last 30 days.").
     The unit everywhere is a time an agent needed you, never "tokens" (which reads as LLM tokens).
     `ActivityHeatmap` is an owner-drawn `FrameworkElement`: a column per week (the culture's first day
     on top, today in the last column), 26 to 53 weeks to fill the width at ~13 DIPs a column (GitHub's

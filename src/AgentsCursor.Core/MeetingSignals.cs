@@ -41,24 +41,46 @@ public sealed class MeetingSignals
 
     readonly Func<IReadOnlyList<HeldDevice>> _held;
     readonly Func<IEnumerable<string>, IReadOnlyDictionary<string, DateTime>> _runningSince;
+    readonly Action<string>? _log;
     readonly HashSet<(string App, DateTime Start)> _leftBehind = new();
+    readonly HashSet<string> _failed = new(StringComparer.Ordinal); // signals whose failure was logged
 
-    /// <summary>Reads the live consent store and process list.</summary>
-    public MeetingSignals() : this(HeldDevices, RunningSince) { }
+    /// <summary>Reads the live consent store and process list, reporting a signal it can't read to
+    /// <paramref name="log"/> (once per signal).</summary>
+    public MeetingSignals(Action<string>? log = null) : this(HeldDevices, RunningSince, log) { }
 
     /// <summary>Reads what <paramref name="held"/> lists, looking apps up with
     /// <paramref name="runningSince"/> (for each app, when its oldest running copy started; apps with no
     /// running copy left out).</summary>
     public MeetingSignals(Func<IReadOnlyList<HeldDevice>> held,
-        Func<IEnumerable<string>, IReadOnlyDictionary<string, DateTime>> runningSince)
+        Func<IEnumerable<string>, IReadOnlyDictionary<string, DateTime>> runningSince, Action<string>? log = null)
     {
         _held = held;
         _runningSince = runningSince;
+        _log = log;
     }
 
     /// <summary>The meeting Windows' signals add up to right now, or null.</summary>
-    public Meeting? Read()
-        => MeetingDetection.Detect(PresentationMode(), DisplaysDuplicated(), DevicesInUse(), DateTime.UtcNow);
+    public Meeting? Read() => Read(PresentationMode, DisplaysDuplicated, DateTime.UtcNow);
+
+    /// <summary>The meeting the signals add up to, each read on its own: a signal that can't be read
+    /// counts as off (and is logged once), and the others still decide.</summary>
+    internal Meeting? Read(Func<bool> presentationMode, Func<bool> displaysDuplicated, DateTime nowUtc)
+        => MeetingDetection.Detect(
+            Signal("presentation mode", presentationMode, false),
+            Signal("duplicated displays", displaysDuplicated, false),
+            Signal("devices in use", DevicesInUse, Array.Empty<DeviceUse>()),
+            nowUtc);
+
+    T Signal<T>(string name, Func<T> read, T off)
+    {
+        try { return read(); }
+        catch (Exception ex)
+        {
+            if (_failed.Add(name)) _log?.Invoke($"meeting check: couldn't read {name} (counting it as off): {ex}");
+            return off;
+        }
+    }
 
     /// <summary>Every device use the consent store lists as ongoing that isn't known to be left behind,
     /// with since when its app runs. A use found left behind now is remembered and skipped from then

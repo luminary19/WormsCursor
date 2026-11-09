@@ -23,7 +23,7 @@ public sealed class MeetingWatcher : IDisposable
     bool _disposed;
 
     /// <summary>Watches the live Windows signals (a <see cref="MeetingSignals"/> reader of its own).</summary>
-    public MeetingWatcher(Action<string> log) : this(new MeetingSignals().Read, Interval, log) { }
+    public MeetingWatcher(Action<string> log) : this(new MeetingSignals(log).Read, Interval, log) { }
 
     /// <summary>Watches what <paramref name="probe"/> reports, every <paramref name="interval"/>. A probe
     /// that throws counts as "no meeting" (so a broken signal can never hide the token for good); the

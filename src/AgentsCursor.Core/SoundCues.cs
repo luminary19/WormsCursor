@@ -22,7 +22,8 @@ public enum Chime
 /// waiting, or it moves from finished to blocked. A blocked arrival plays the "Needs you" chime, else a
 /// finished one plays "Done". Nothing plays while the token is hidden (turned off, an app on the list
 /// in front, a meeting), and a burst of arrivals within <see cref="Burst"/> of a chime is that chime:
-/// one sound, not one per session. One instance per player; call it on one thread.
+/// one sound, not one per session; except that a "Needs you" still plays right after a "Done", since
+/// it is the one that asks something of you. One instance per player; call it on one thread.
 /// </summary>
 public sealed class SoundCues
 {
@@ -30,6 +31,7 @@ public sealed class SoundCues
     public static readonly TimeSpan Burst = TimeSpan.FromSeconds(1);
 
     DateTime? _lastChime;
+    bool _burstNeedsYou; // the last chime was "Needs you"
 
     /// <summary>The waiting states the sessions in <paramref name="after"/> newly entered since
     /// <paramref name="before"/>, one per such session: a session that wasn't waiting, or that went
@@ -56,12 +58,18 @@ public sealed class SoundCues
         if (!settings.SoundsEnabled || !tokenShown || settings.SoundVolume <= 0) return Chime.None;
         var arrivals = Arrivals(before, after);
         if (arrivals.Count == 0) return Chime.None;
-        if (_lastChime is { } last && nowUtc - last < Burst) return Chime.None;
-
         // A blocked arrival outranks a finished one; a state whose chime is None gives way to the other.
-        var chime = arrivals.Contains(WaitingState.Blocked) ? settings.NeedsYouSound : Chime.None;
-        if (chime == Chime.None && arrivals.Contains(WaitingState.Finished)) chime = settings.DoneSound;
-        if (chime != Chime.None) _lastChime = nowUtc;
+        bool needsYou = arrivals.Contains(WaitingState.Blocked) && settings.NeedsYouSound != Chime.None;
+        // Within a burst only "Needs you" breaks through, and only a burst that so far was "Done".
+        if (_lastChime is { } last && nowUtc - last < Burst && (_burstNeedsYou || !needsYou)) return Chime.None;
+
+        var chime = needsYou ? settings.NeedsYouSound
+            : arrivals.Contains(WaitingState.Finished) ? settings.DoneSound : Chime.None;
+        if (chime != Chime.None)
+        {
+            _lastChime = nowUtc;
+            _burstNeedsYou = needsYou;
+        }
         return chime;
     }
 }

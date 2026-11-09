@@ -64,7 +64,8 @@ Off by default. Turn on **Play sounds** (Sound and Display page) for a short, so
 starts waiting on you: one for **Needs you** (default *Rise*, two notes going up) and one for **Done**
 (default *Settle*, two notes coming to rest), each picked from *Bell*, *Rise*, *Settle*, *Glow* or
 *None*, with a play button to hear it, and one **Volume**. A chime plays once per session that starts
-waiting (or goes from done to blocked); several within a second play one chime; and none plays while
+waiting (or goes from done to blocked); several within a second play one chime (but a **Needs you**
+right after a **Done** still plays); and none plays while
 the token is hidden (turned off, an app on the list in front, a meeting). The volume scales the sound
 itself; the system volume is never changed. The chimes are synthesised by `tools/generate-chimes.py`
 and built into the app.
