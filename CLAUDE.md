@@ -51,6 +51,44 @@ is in front; the overlay decides with the pure `ProgramSuppression.Matches`, so 
 re-evaluates at once. Agents keep being tracked meanwhile; when focus moves on and something still
 waits, the token comes back with its entrance.
 
+**Why the token is hidden is one decision.** `TokenVisibility.Decide` (Core, pure) returns the
+`HideReason`, checked in order: `NothingWaiting`, `TurnedOff`, `AppInFront`, `Meeting`, else shown. The
+overlay is the only caller (in `Reevaluate`, from the UI thread or a watcher's thread), parks when it
+isn't shown, and publishes the result as `NotifierOverlay.Visibility` + `VisibilityChanged`: the sounds
+read it (no chime for a hidden token) and the Apps page shows a `Meeting` reason under its switch.
+Add a new reason there, never as a separate check somewhere else.
+
+**Meetings and screen sharing.** Unless `CursorSettings.ShowDuringMeetings` (off by default), a
+meeting hides the token. `MeetingSignals` (Core, Win32, read-only) reads: `SHQueryUserNotificationState`
+= `QUNS_PRESENTATION_MODE`; `QueryDisplayConfig(QDC_DATABASE_CURRENT)` topology = clone (Win+P
+Duplicate); and the capability consent store
+(`HKCU\...\CapabilityAccessManager\ConsentStore\{microphone,webcam,graphicsCaptureProgrammatic,graphicsCaptureWithoutBorder}`,
+a key per package family, and per exe under `NonPackaged` with `#` for `\`), where
+`LastUsedTimeStop` = 0 means in use (the data behind Windows' privacy indicators; Windows 11 records
+Windows.Graphics.Capture use there too). `MeetingDetection.Detect` (pure) decides: presenting, then
+duplicated, then screen capture, camera, microphone; capture and camera count after
+`DeviceSettle` (1 s, so a screenshot's milliseconds-long capture never does), the microphone after
+`MicrophoneSettle` (10 s, so a short dictation doesn't). A "stop = 0" entry only counts while a copy
+of that app runs that started before the use did: entries left by an app killed mid-call or by a
+shutdown during one stay "in use" forever (the dev machine had four, the oldest ten months old), and
+counting them would hide the token for good. Limits: any app holding the microphone counts (game voice
+chat, an always-on voice app); Desktop Duplication capture isn't recorded by Windows; a full-screen
+slideshow on one extended display isn't presentation mode. `MeetingWatcher` only runs while
+`TokenVisibility.NeedsMeetingCheck` (something waits, on, no listed app in front, rule on): it checks
+once on `Watch(true)` (on the caller's thread, about 13 ms) and then every second on a timer; off, it
+runs nothing. A failing check counts as no meeting and is logged once.
+
+**Sounds.** Off by default (`SoundsEnabled`). `SoundCues` (Core, pure) picks the chime when the
+waiting set changes: `Arrivals` are sessions (`WaitingAgent.Session`, `AgentActivity`'s key) that
+weren't waiting or went finished -> blocked; a blocked arrival plays `NeedsYouSound`, else
+`DoneSound`; nothing while the token isn't shown; one chime per `Burst` (1 s). The tray calls it in
+`OnWaitingChanged` right after pushing the set to the overlay (so `Visibility` is current) and hands
+the result to `ChimePlayer`. The chimes are `Assets/Sounds/*.wav` (embedded as `Sounds/<name>.wav`),
+synthesised by `tools/generate-chimes.py` (16-bit mono 44.1 kHz, under 1 s, -3 dBFS peak).
+`ChimeAudio` scales a copy of the samples by `Gain(volume)` (squared), so the system volume is never
+touched, and `ChimePlayer` plays it with `PlaySound(SND_MEMORY | SND_ASYNC)` from a thread-pool thread
+(never the UI or animation thread), keeping the buffer alive until the next chime replaces it.
+
 Codex desktop and CLI use `%CODEX_HOME%/hooks.json` through the same shared engine hooks.
 Codex runs Windows hooks through PowerShell (`<shell> -NoProfile -Command <commandWindows>`), so the
 registered `commandWindows` is `& '<exe>' hook --tool codex` — a bare quoted path is a PowerShell
@@ -140,7 +178,7 @@ tests.
   on every load. `IconSource.Custom` is the store (tests point it at a temp folder). The store lives
   in Core, not the App, because the renderer (Core) reads it.
 - `AgentActivity.cs` — tracks which agent sessions currently **need the user** (thread-safe), exposes
-  `Waiting` (one `WaitingAgent(Tool, State)` per session, `State` = `WaitingState.Blocked` when an
+  `Waiting` (one `WaitingAgent(Tool, State, Session)` per session, `State` = `WaitingState.Blocked` when an
   approval/question/elicitation is pending, `Finished` when the turn just ended) and `WaitingCount`,
   raises `WaitingChanged`, and sweeps finished sessions after a TTL (blocked ones are never swept).
   A session reported over a plugin connection records it as its owner; `Release(owner)` drops them.
@@ -150,7 +188,9 @@ tests.
   (`BelowPointer`/`Corner`/`AbovePointer`/`BesidePointer`, explicit values so the old numbers keep
   their meaning), `Corner`, `Icons` (tool -> icon id, read-only and replaced on edit; `IconFor`), the
   notifier enable + linger timeout, `OutlineColor`, and
-  `SuppressedPrograms`, plus the control panel's `Theme` (`ThemePreference` System/Light/Dark).
+  `SuppressedPrograms`, `Motion` (`MotionStyle`), the sounds (`SoundsEnabled`, `NeedsYouSound`,
+  `DoneSound` as `Chime`, `SoundVolume` 0-100) and `ShowDuringMeetings`, plus the control panel's
+  `Theme` (`ThemePreference` System/Light/Dark).
   (Name kept for continuity; it's now just the notifier's settings.)
   `SuppressedPrograms` is a read-only list normalized on every assignment and replaced (never mutated)
   on edit, which is what keeps a `Clone()` (member-wise) snapshot independent. `ResetAppearance` /
@@ -162,7 +202,12 @@ tests.
   raises `Changed`. Nobody edits a copy and writes it back, so no editor can revert another's change
   with a stale snapshot. `Current` is a snapshot for reading; `Live` is the instance the overlay reads.
 - `TokenMotion.cs` — the token's motion as pure functions, shared by the overlay and the panel's
-  preview. Every pointer position is one tether: a spring (k 130, c 3, the old pendulum's) toward
+  preview, in the `MotionProfile` of the chosen `MotionStyle`: Bouncy (the numbers below), Calm (k 60,
+  c 9, half the swing, hop and bob, 0.7x the pace) or Still (infinite stiffness = rigid: the token sits
+  exactly at its rest point, upright, no hop, bob or corner bounce). `MotionProfile.For(style,
+  animationEffects)` makes every style Still while Windows' animation effects
+  (`SPI_GETCLIENTAREAANIMATION`) are off. Every pointer position is one tether: a spring (Bouncy: k 130,
+  c 3, the old pendulum's) toward
   pointer + `RestFor(placement)` (below `(0, 22dpi + (0.5 + badge overhang)t)`, so the token, badge
   and "+N" hang clear of the arrow; above `(0, -.62t)`; beside `(14dpi + .5t, 18dpi + .3t)`; below and
   above are each other's mirror, so a flip never lands under the arrow), a taut string at rest length
@@ -183,6 +228,9 @@ tests.
 - `WindowPrograms.cs` — Win32: window/process → exe name, and the visible top-level windows the
   "Add a program" picker lists.
 - `ForegroundWatcher.cs` — the event-driven foreground tracker described above.
+- `TokenVisibility.cs`, `MeetingDetection.cs`, `MeetingSignals.cs`, `MeetingWatcher.cs` — why the
+  token is hidden, and the meeting detection, described above.
+- `SoundCues.cs` (`Chime`, when a chime plays) and `ChimeAudio.cs` (volume) — the sounds, described above.
 
 ### `AgentsCursor.App` — the tray app (WinForms tray + WPF windows, `net8.0-windows`, AssemblyName `AgentsCursor`)
 - `Program.cs` — entry point. The `hook` verb short-circuits **first** (throwaway bridge, no UI),
@@ -192,11 +240,15 @@ tests.
   corner mode is a fixed corner with a continuous "ball" bounce. The window is re-centred on the token
   every frame (`TokenCanvas.Side`), so no swing or offset clips; a placement change re-seeds the
   motion. DPI-aware sizing; per-pixel alpha via `UpdateLayeredWindow`.
-  Owns a `ForegroundWatcher` and stays hidden + parked while a suppressed program is in front.
+  Owns a `ForegroundWatcher` and a `MeetingWatcher`, decides with `TokenVisibility.Decide` and stays
+  hidden + parked unless it says shown; publishes `Visibility`. Each frame moves with
+  `MotionProfile.For(Motion, animation effects)`; the Windows setting is re-read on every re-evaluation
+  and on `SystemEvents.UserPreferenceChanged`.
 - `TrayApplicationContext.cs` — owns the tray icon (Enabled / Preferences… / Exit), the
   `NotifierOverlay`, the pipe server + sweep timer, the `LiveSettings`, and the one control panel
   window (created on first use, kept for the app's lifetime; it is the panel's `IControlPanelHost`).
   Every settings change lands in `OnSettingsChanged` (linger TTL, menu check, overlay refresh).
+  Owns the `ChimePlayer` and `SoundCues` (chimes on new waiting sessions, see "Sounds").
   The "Enabled" item is the master on/off. On startup it moves WormsCursor's Start with Windows entry
   over, then (posted, after the pipe is up) runs `AgentHookRegistrar.RefreshConnected`: every
   connection that is ours but Outdated is re-registered in place, nothing else is touched, and one
@@ -208,20 +260,24 @@ tests.
   - `WpfHost.cs` — creates the one `System.Windows.Application` (`OnExplicitShutdown`, no `Run`) with
     WPF-UI's `ThemesDictionary` + `ControlsDictionary`; the WinForms loop pumps WPF too.
   - `ControlPanelWindow.xaml` — `FluentWindow` (Mica) with its `TitleBar` in its own row above a
-    `NavigationView` sidebar (Token, Icons, Agents, Apps, About) fed prebuilt pages through an
+    `NavigationView` sidebar (Sound and Display, Customization, Agents, Apps, About; `PanelSection`
+    names them, and the panel opens on Sound and Display) fed prebuilt pages through an
     `INavigationViewPageProvider`. The title bar is deliberately not handed to the NavigationView
     (that indents it for a back button and pushes the page down); its padding lines the app icon and
     name up with the sidebar items' icons and labels. The theme follows `CursorSettings.Theme`:
     System uses `SystemThemeWatcher` (live), Light/Dark apply directly; both go through
     `ApplicationThemeManager`, so WpfHost's opaque text brushes are re-derived. Closing hides it;
     the sidebar folds to icons below 860 DIPs; each page opens scrolled to the top.
-  - `TokenPage` — first a preview (260 DIPs high, half dark, half light) where a drawn pointer
+  - `SoundAndDisplayPage` — first a preview (260 DIPs high, half dark, half light) where a drawn pointer
     glides across both and the token follows it the chosen way, kept inside the preview
     (`TokenPreview` with `Roam`: Core renderer + `TokenMotion` → WPF bitmap on the UI thread, its own
     renderer); then the master switch, size, position (below / above / beside the pointer, a
-    separator, the four corners; picking a pointer position keeps the last corner), and "Reset size
-    and position" (`ResetSizeAndPosition`; icons keep their own reset).
-  - `IconsPage` — a preview of the selected agent's icon ("Done", and "Needs you" with the "?" and a
+    separator, the four corners; picking a pointer position keeps the last corner), Motion (Bouncy /
+    Calm / Still; disabled showing Still, with a tooltip, while Windows' animation effects are off),
+    and "Reset size and position" (`ResetSizeAndPosition`; icons keep their own reset). Then Sounds:
+    "Play sounds", and only while it is on, "Needs you" and "Done" (a play button + the chime box,
+    `IControlPanelHost.PlayChime`) and Volume.
+  - `CustomizationPage` — a preview of the selected agent's icon ("Done", and "Needs you" with the "?" and a
     "+1"; the two stack when they don't fit across), agent tiles (a `UniformGrid`, 4 per row, 2 when
     narrow), and that agent's gallery: built-ins, "Your icons" (each with its file name; the remove
     "x" shows on hover or keyboard focus, and removing offers Undo), "Add SVG…" (sanitise + validate +
@@ -236,7 +292,9 @@ tests.
     Connect / Update (+ Disconnect) / Disconnect / Show file, and after a change made this run the
     tool's `AfterChange` step. Also the linger timeout and "Preview on screen" (fakes blocked agents
     on the real overlay).
-  - `AppsPage` — the hide-while-using list (Remove per row, empty state), an inline "Add an app"
+  - `AppsPage` — at the top, "Show during meetings and screen sharing" (its second line says what
+    was detected while a meeting hides the token, from `IControlPanelHost.TokenVisibility`); then the
+    hide-while-using list (Remove per row, empty state), an inline "Add an app"
     picker (open windows or a typed file name), Restore the default list.
   - `AboutPage` — version, Check for updates → download → restart (`UpdateService`), What's new
     (release notes via `ReleaseNotesFormat`, a pure, tested Markdown reader), Theme, Start with
@@ -265,6 +323,7 @@ tests.
   would connect, and refresh at startup, Orca's copies instead of the user's.
 - `Services/UpdateService.cs` — Velopack `UpdateManager`: check, download, apply-and-restart, release
   notes; updating is unavailable (and says so) for dev builds run from `bin\`.
+- `Services/ChimePlayer.cs` — plays the embedded chimes, volume-scaled, off the UI thread (see "Sounds").
 - `SingleInstance.cs` (a second launch opens the panel and hands it foreground rights),
   `Autostart.cs` (per-user `HKCU\…\Run` behind the `IStartupEntries` seam; `MigrateLegacy` moves
   WormsCursor's Run value to ours, only if it was on), `Assets/`.
@@ -330,4 +389,5 @@ notes are extracted from the matching section. Auto-update wiring lives in `Serv
 - Settings live in `%LocalAppData%\AgentsCursor\` (not next to the exe) so updates don't wipe them.
   JSON load is tolerant; additive fields don't need a schema bump, and an old settings file (with the
   now-removed cursor-theming fields) loads cleanly — the extra fields are ignored.
-- `tools/generate-icon.py` builds the tray/app icon.
+- `tools/generate-icon.py` builds the tray/app icon; `tools/generate-chimes.py` synthesises the chimes
+  (pure standard library; rerun it and commit the WAVs after changing a chime).

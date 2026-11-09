@@ -113,7 +113,7 @@ static class AppearanceTests
         File.WriteAllText(path, "{\"Icons\": {\"pi\": \"pi.nope\", \"codex\": \"codex.sleepy\"}}");
         Equal("codex=codex.sleepy", Show(SettingsStore.Load(path).Icons), "hand-edited unknown built-in dropped");
 
-        // The Token page's reset leaves the icons alone: they have their own, on the Icons page.
+        // The Sound and Display page's reset leaves the icons alone: they have their own, on the Customization page.
         Equal(true, s.HasDefaultSizeAndPosition(), "icons aren't size or position");
         s.Size = 150;
         s.ResetSizeAndPosition();
@@ -495,20 +495,20 @@ static class AppearanceTests
 
             // The entrance hops back along the string, then springs out and settles at rest.
             var s = new TetherState();
-            TokenMotion.Step(ref s, 500, 500, rest, t, dt, entrance: true);
+            TokenMotion.Step(ref s, 500, 500, rest, t, dt, entrance: true, MotionProfile.Bouncy);
             float along = (s.X - 500) * ux + (s.Y - 500) * uy, across = (s.X - 500) * -uy + (s.Y - 500) * ux;
             True(along < len - 1f && MathF.Abs(across) < 0.01f, $"{placement}: entrance along {along:0.0} (rest {len:0.0}), across {across:0.00}");
             True(s.Vx * ux + s.Vy * uy < 0, $"{placement}: the hop heads back toward the pointer");
             float settled = float.MaxValue;
             for (int i = 1; i < 6 * 120; i++)
             {
-                TokenMotion.Step(ref s, 500, 500, rest, t, dt, entrance: false);
+                TokenMotion.Step(ref s, 500, 500, rest, t, dt, entrance: false, MotionProfile.Bouncy);
                 float off = MathF.Max(MathF.Abs(s.X - 500 - rest.Dx), MathF.Abs(s.Y - 500 - rest.Dy));
                 if (off > 1f) settled = float.MaxValue;
                 else if (settled == float.MaxValue) settled = i * dt;
             }
             True(settled <= 2.5f, $"{placement}: within 1 px of rest from {settled:0.00} s");
-            var pose = TokenMotion.Step(ref s, 500, 500, rest, t, dt, false);
+            var pose = TokenMotion.Step(ref s, 500, 500, rest, t, dt, false, MotionProfile.Bouncy);
             True(MathF.Abs(pose.SwingDeg) < 0.5f, $"{placement}: upright at rest ({pose.SwingDeg:0.00})");
 
             // The string never stretches past its slack, however the pointer jerks.
@@ -517,7 +517,7 @@ static class AppearanceTests
             for (int i = 0; i < 2000; i++)
             {
                 if (i % 7 == 0) { ax = rng.Next(-3000, 3000); ay = rng.Next(-3000, 3000); }
-                var p = TokenMotion.Step(ref s, ax, ay, rest, t, 0.05f, false, TokenMotion.MaxSwingFor(placement));
+                var p = TokenMotion.Step(ref s, ax, ay, rest, t, 0.05f, false, MotionProfile.Bouncy, MotionProfile.Bouncy.MaxSwingFor(placement));
                 float d = MathF.Sqrt((s.X - ax) * (s.X - ax) + (s.Y - ay) * (s.Y - ay));
                 True(d <= maxLen, $"{placement}: string at {d:0.0} > {maxLen:0.0}");
                 True(MathF.Abs(p.SwingDeg) <= TokenMotion.MaxSwingFor(placement) + 0.001f, $"{placement}: tilt clamped, never upside down");
@@ -539,7 +539,7 @@ static class AppearanceTests
                 var at = new PointF(px, py);
                 moving = TokenMotion.Edges(moving, at, TokenMotion.RestFor(placement, t, 1f, Flip.None), t, screen);
                 var kept = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, t, 1f, moving), at, t, screen);
-                TokenMotion.Step(ref s, px, py, kept, t, 1f / 60f, i == 0, 180f, screen);
+                TokenMotion.Step(ref s, px, py, kept, t, 1f / 60f, i == 0, MotionProfile.Bouncy, 180f, screen);
                 True(s.X - h >= -0.01f && s.X + h <= screen.Right + 0.01f && s.Y - h >= -0.01f && s.Y + h <= screen.Bottom + 0.01f,
                     $"{placement} frame {i}: token at {s.X:0},{s.Y:0} crosses the screen edge");
             }
@@ -582,16 +582,123 @@ static class AppearanceTests
                 True(cx - h >= work.Left - 0.01f && cx + h <= work.Right + 0.01f && cy - h >= work.Top - 0.01f && cy + h <= work.Bottom + 0.01f,
                     $"{placement} at {at}: resting token at {cx:0},{cy:0} leaves the work area");
                 var s = new TetherState();
-                for (int i = 0; i < 600; i++) TokenMotion.Step(ref s, at.X, at.Y, kept, t, dt, false);
-                True(MathF.Abs(TokenMotion.Step(ref s, at.X, at.Y, kept, t, dt, false).SwingDeg) < 0.5f, $"{placement} at {at}: upright at rest");
+                for (int i = 0; i < 600; i++) TokenMotion.Step(ref s, at.X, at.Y, kept, t, dt, false, MotionProfile.Bouncy);
+                True(MathF.Abs(TokenMotion.Step(ref s, at.X, at.Y, kept, t, dt, false, MotionProfile.Bouncy).SwingDeg) < 0.5f, $"{placement} at {at}: upright at rest");
             }
         var untouched = TokenMotion.KeepOnScreen(below, new PointF(500, 400), t, work);
         True(MathF.Abs(untouched.Dx - below.Dx) < 1e-3f && MathF.Abs(untouched.Dy - below.Dy) < 1e-3f, "mid-screen rest untouched");
 
-        // The corner bounce is unchanged.
-        var corner = TokenMotion.CornerBounce(0.7f, t);
+        // Bouncy's corner bounce is the original one.
+        var corner = TokenMotion.CornerBounce(0.7f, t, MotionProfile.Bouncy);
         Equal(t * 0.04f * MathF.Sin(0.7f * 1.6f), corner.OffsetX, "corner x");
         Equal(-t * 0.22f * MathF.Abs(MathF.Sin(0.7f * 3.0f)), corner.OffsetY, "corner y");
         Equal(3f * MathF.Sin(0.7f * 1.6f), corner.SwingDeg, "corner tilt");
+    }
+
+    // How one style moves from an entrance to rest at a still pointer: when it is back within 1 px of
+    // rest for good, how far it overshoots past rest along the string, how far the hop pulls it back,
+    // and the largest tilt while the pointer jerks about.
+    static (float Settled, float Overshoot, float Hop, float MaxTilt) Measure(MotionProfile motion, NotifierPlacement placement)
+    {
+        const float t = 96f, dt = 1f / 120f;
+        var rest = TokenMotion.RestFor(placement, t, 1f, Flip.None);
+        float len = rest.Length, ux = rest.Dx / len, uy = rest.Dy / len;
+        var s = new TetherState();
+        float settled = 0f, overshoot = 0f, hop = 0f;
+        for (int i = 0; i < 6 * 120; i++)
+        {
+            TokenMotion.Step(ref s, 500, 500, rest, t, dt, entrance: true, motion);
+            float along = (s.X - 500) * ux + (s.Y - 500) * uy;
+            overshoot = MathF.Max(overshoot, along - len);
+            hop = MathF.Max(hop, len - along);
+            float off = MathF.Max(MathF.Abs(s.X - 500 - rest.Dx), MathF.Abs(s.Y - 500 - rest.Dy));
+            if (off > 1f) settled = (i + 1) * dt;
+        }
+        var rng = new Random(3);
+        float ax = 500, ay = 500, tilt = 0f;
+        for (int i = 0; i < 2000; i++)
+        {
+            if (i % 7 == 0) { ax = rng.Next(-1500, 1500); ay = rng.Next(-1500, 1500); }
+            tilt = MathF.Max(tilt, MathF.Abs(TokenMotion.Step(ref s, ax, ay, rest, t, 0.05f, false, motion, motion.MaxSwingFor(placement)).SwingDeg));
+        }
+        return (settled, overshoot, hop, tilt);
+    }
+
+    public static void MotionPresets()
+    {
+        const float t = 96f;
+        // Windows' animation effects off makes every style Still; on, each is itself.
+        foreach (var style in Enum.GetValues<MotionStyle>())
+        {
+            Equal(MotionStyle.Still, MotionProfile.Effective(style, animationEffects: false), $"{style} without animations");
+            Equal(style, MotionProfile.Effective(style, animationEffects: true), $"{style} with animations");
+        }
+        Equal(MotionProfile.Still, MotionProfile.For(MotionStyle.Bouncy, false), "Bouncy without animations is Still");
+        Equal(MotionProfile.Calm, MotionProfile.For(MotionStyle.Calm, true), "Calm");
+
+        foreach (var placement in new[] { NotifierPlacement.BelowPointer, NotifierPlacement.AbovePointer, NotifierPlacement.BesidePointer })
+        {
+            var bouncy = Measure(MotionProfile.Bouncy, placement);
+            var calm = Measure(MotionProfile.Calm, placement);
+            var still = Measure(MotionProfile.Still, placement);
+
+            True(bouncy.Settled <= 2.5f, $"{placement}: Bouncy settles by {bouncy.Settled:0.00} s");
+            True(bouncy.Hop > 0.05f * t, $"{placement}: Bouncy hops in ({bouncy.Hop:0.0} px)");
+            True(bouncy.MaxTilt <= TokenMotion.MaxSwingFor(placement) + 0.001f && bouncy.MaxTilt > 0.5f * TokenMotion.MaxSwingFor(placement),
+                $"{placement}: Bouncy swings up to its limit ({bouncy.MaxTilt:0.0})");
+
+            // Calm: softer and quieter on every count, and done sooner.
+            True(calm.Settled <= 1.2f && calm.Settled < bouncy.Settled, $"{placement}: Calm settles by {calm.Settled:0.00} s (Bouncy {bouncy.Settled:0.00})");
+            True(calm.Overshoot < 0.5f * bouncy.Overshoot, $"{placement}: Calm overshoots {calm.Overshoot:0.0} px (Bouncy {bouncy.Overshoot:0.0})");
+            True(calm.Hop < 0.6f * bouncy.Hop && calm.Hop > 0f, $"{placement}: Calm's hop {calm.Hop:0.0} px (Bouncy {bouncy.Hop:0.0})");
+            True(calm.MaxTilt <= MotionProfile.Calm.MaxSwingFor(placement) + 0.001f, $"{placement}: Calm tilts at most {MotionProfile.Calm.MaxSwingFor(placement)} ({calm.MaxTilt:0.0})");
+            Equal(TokenMotion.MaxSwingFor(placement) / 2f, MotionProfile.Calm.MaxSwingFor(placement), $"{placement}: Calm's swing limit");
+
+            // Still: at rest from the first frame, never past it, no hop, never tilted.
+            Equal(0f, still.Settled, $"{placement}: Still is at rest at once");
+            True(still.Overshoot <= 0.001f && still.Hop <= 0.001f, $"{placement}: Still neither hops ({still.Hop}) nor overshoots ({still.Overshoot})");
+            Equal(0f, still.MaxTilt, $"{placement}: Still never tilts");
+        }
+
+        // Still follows the pointer exactly: every frame the token is at pointer + rest, upright.
+        var rest = TokenMotion.RestFor(NotifierPlacement.BesidePointer, t, 1f, Flip.None);
+        var s = new TetherState();
+        foreach (var (x, y) in new[] { (100f, 100f), (900f, 50f), (300f, 700f) })
+        {
+            var pose = TokenMotion.Step(ref s, x, y, rest, t, 0.016f, entrance: true, MotionProfile.Still);
+            True(MathF.Abs(pose.OffsetX - rest.Dx) < 1e-3f && MathF.Abs(pose.OffsetY - rest.Dy) < 1e-3f && pose.SwingDeg == 0f,
+                $"Still at {x},{y}: {pose}, rest {rest}");
+        }
+
+        // The idle bob and the corner bounce: Calm smaller than Bouncy, Still none at all.
+        for (float time = 0f; time < 4f; time += 0.05f)
+        {
+            True(MathF.Abs(TokenMotion.IdleBob(time, t, MotionProfile.Calm)) <= MotionProfile.Calm.BobHeight * t + 1e-3f, "Calm bob height");
+            True(MathF.Abs(TokenMotion.IdleBob(time, t, MotionProfile.Bouncy)) <= MotionProfile.Bouncy.BobHeight * t + 1e-3f, "Bouncy bob height");
+            Equal(0f, TokenMotion.IdleBob(time, t, MotionProfile.Still), "Still doesn't bob");
+            var calmCorner = TokenMotion.CornerBounce(time, t, MotionProfile.Calm);
+            True(-calmCorner.OffsetY <= MotionProfile.Calm.HopHeight * t + 1e-3f && MathF.Abs(calmCorner.SwingDeg) <= 1.5f + 1e-3f,
+                $"Calm corner at {time:0.00}: hop {-calmCorner.OffsetY:0.0}, tilt {calmCorner.SwingDeg:0.0}");
+            True(-TokenMotion.CornerBounce(time, t, MotionProfile.Bouncy).OffsetY <= TokenMotion.CornerHop * t + 1e-3f, "a corner leaves room for Bouncy's hop");
+            var stillCorner = TokenMotion.CornerBounce(time, t, MotionProfile.Still);
+            True(stillCorner.OffsetX == 0f && stillCorner.OffsetY == 0f && stillCorner.SwingDeg == 0f, $"Still corner at {time:0.00}: {stillCorner}");
+        }
+
+        // The setting: Bouncy by default, saved by name, a hand-edited number out of range back to Bouncy.
+        InTemp(dir =>
+        {
+            string path = Path.Combine(dir, "settings.json");
+            Equal(MotionStyle.Bouncy, new CursorSettings().Motion, "default motion");
+            SettingsStore.Save(new CursorSettings { Motion = MotionStyle.Calm }, path);
+            True(File.ReadAllText(path).Contains("\"Motion\": \"Calm\""), "saved by name");
+            Equal(MotionStyle.Calm, SettingsStore.Load(path).Motion, "round trip");
+            File.WriteAllText(path, "{\"Motion\": 9}");
+            Equal(MotionStyle.Bouncy, SettingsStore.Load(path).Motion, "out of range");
+            File.WriteAllText(path, "{\"Size\": 120}");
+            Equal(MotionStyle.Bouncy, SettingsStore.Load(path).Motion, "a file from before the setting");
+            var reset = new CursorSettings { Motion = MotionStyle.Still, Size = 150 };
+            reset.ResetSizeAndPosition();
+            Equal(MotionStyle.Still, reset.Motion, "Reset size and position keeps the motion");
+        });
     }
 }

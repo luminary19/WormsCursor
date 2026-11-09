@@ -7,21 +7,31 @@ using AgentsCursor.Core;
 namespace AgentsCursor.App.ControlPanel;
 
 /// <summary>
-/// The token's look: the master switch, the size (the slider, or double-click the "px" label to type
-/// an exact size), where it shows (below, above or beside the pointer,
-/// or one of the four screen corners, as one choice), and a live preview of a pointer gliding over dark
-/// and light with the token following it the chosen way (the faces and icons are the Icons page's). Every control writes its own fields through
+/// How the token shows and sounds: the master switch, the size (the slider, or double-click the "px"
+/// label to type an exact size), where it shows (below, above or beside the pointer, or one of the four
+/// screen corners, as one choice), how it moves (Bouncy, Calm or Still; Still, fixed, while Windows'
+/// animation effects are off), and a live preview of a pointer gliding over dark and light with the
+/// token following it the chosen way (the faces and icons are the Customization page's). Then the
+/// sounds: on/off, the "Needs you" and "Done" chimes (each with a play button) and their volume, shown
+/// only while sounds are on. Every control writes its own fields through
 /// <see cref="LiveSettings.Change"/> and the page redraws from the settings on each change, so it also
 /// follows edits made elsewhere (the tray's "Enabled").
 /// </summary>
-public partial class TokenPage : Page
+public partial class SoundAndDisplayPage : Page
 {
     readonly LiveSettings _settings;
+    readonly IControlPanelHost _host;
 
-    public TokenPage(LiveSettings settings)
+    // The chimes each sound box offers, in order (the default chime of each state is among them).
+    static readonly Chime[] Chimes = Enum.GetValues<Chime>();
+
+    public SoundAndDisplayPage(IControlPanelHost host)
     {
-        _settings = settings;
+        _host = host;
+        _settings = host.Settings;
         InitializeComponent();
+        NeedsYouBox.ItemsSource = Chimes.Select(ChimeName).ToArray();
+        DoneBox.ItemsSource = Chimes.Select(ChimeName).ToArray();
         SizeSlider.Minimum = CursorSettings.MinSize;
         SizeSlider.Maximum = CursorSettings.MaxSize;
 
@@ -43,10 +53,51 @@ public partial class TokenPage : Page
                 _settings.Change(s => { s.Placement = NotifierPlacement.Corner; s.Corner = (ScreenCorner)(index - FirstCorner); });
         };
         ResetButton.Click += (_, _) => _settings.Change(s => s.ResetSizeAndPosition());
+        MotionBox.SelectionChanged += (_, _) =>
+        {
+            // Disabled while Windows' animation effects are off, so a choice here is always the user's.
+            var motion = (MotionStyle)MotionBox.SelectedIndex;
+            if (MotionBox.IsEnabled && MotionBox.SelectedIndex >= 0 && motion != _settings.Live.Motion)
+                _settings.Change(s => s.Motion = motion);
+        };
+        // Windows' animation effects switched on or off: show what applies now.
+        SystemParameters.StaticPropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(SystemParameters.ClientAreaAnimation)) Refresh();
+        };
+
+        SoundsSwitch.Checked += (_, _) => SetSounds(true);
+        SoundsSwitch.Unchecked += (_, _) => SetSounds(false);
+        NeedsYouBox.SelectionChanged += (_, _) =>
+        {
+            if (NeedsYouBox.SelectedIndex < 0) return;
+            var chime = Chimes[NeedsYouBox.SelectedIndex];
+            if (chime != _settings.Live.NeedsYouSound) _settings.Change(s => s.NeedsYouSound = chime);
+        };
+        DoneBox.SelectionChanged += (_, _) =>
+        {
+            if (DoneBox.SelectedIndex < 0) return;
+            var chime = Chimes[DoneBox.SelectedIndex];
+            if (chime != _settings.Live.DoneSound) _settings.Change(s => s.DoneSound = chime);
+        };
+        PlayNeedsYou.Click += (_, _) => _host.PlayChime(_settings.Live.NeedsYouSound);
+        PlayDone.Click += (_, _) => _host.PlayChime(_settings.Live.DoneSound);
+        VolumeSlider.ValueChanged += (_, e) =>
+        {
+            int volume = (int)Math.Round(e.NewValue);
+            if (volume != _settings.Live.SoundVolume) _settings.Change(s => s.SoundVolume = volume);
+        };
 
         _settings.Changed += Refresh;
         Refresh();
     }
+
+    void SetSounds(bool on)
+    {
+        if (on != _settings.Live.SoundsEnabled) _settings.Change(s => s.SoundsEnabled = on);
+    }
+
+    static string ChimeName(Chime chime) => chime.ToString();
 
     void SetEnabled(bool on)
     {
@@ -97,6 +148,20 @@ public partial class TokenPage : Page
         SizeText.Text = $"{s.Size} px";
         PositionBox.SelectedIndex = PositionIndex(s);
         ResetButton.IsEnabled = !s.HasDefaultSizeAndPosition();
+
+        bool animations = SystemParameters.ClientAreaAnimation;
+        MotionBox.IsEnabled = animations;
+        MotionBox.SelectedIndex = (int)MotionProfile.Effective(s.Motion, animations);
+        MotionBox.ToolTip = animations ? null : "Animation effects are off in Windows, so the token stays still";
+
+        SoundsSwitch.IsChecked = s.SoundsEnabled;
+        SoundSettings.Visibility = s.SoundsEnabled ? Visibility.Visible : Visibility.Collapsed;
+        NeedsYouBox.SelectedIndex = Array.IndexOf(Chimes, s.NeedsYouSound);
+        DoneBox.SelectedIndex = Array.IndexOf(Chimes, s.DoneSound);
+        PlayNeedsYou.IsEnabled = s.NeedsYouSound != Chime.None && s.SoundVolume > 0;
+        PlayDone.IsEnabled = s.DoneSound != Chime.None && s.SoundVolume > 0;
+        VolumeSlider.Value = s.SoundVolume;
+        VolumeText.Text = $"{s.SoundVolume}%";
 
         Preview.Tool = IconCatalog.Tools[0];
         Preview.Show(s);

@@ -33,6 +33,15 @@ public interface IControlPanelHost
     /// ends the preview and shows the real ones again.</summary>
     void Preview(int? waitingAgents);
 
+    /// <summary>Plays <paramref name="chime"/> at the current volume (the Sounds play buttons).</summary>
+    void PlayChime(Chime chime);
+
+    /// <summary>Whether the token is on screen and, if not, why.</summary>
+    TokenVisibility TokenVisibility { get; }
+
+    /// <summary>Raised on the UI thread when <see cref="TokenVisibility"/> changes.</summary>
+    event Action? TokenVisibilityChanged;
+
     /// <summary>Exits so <paramref name="release"/> can be installed, then the new version starts.
     /// Throws, leaving everything running, if the updater can't be started.</summary>
     void RestartToUpdate(VelopackAsset release);

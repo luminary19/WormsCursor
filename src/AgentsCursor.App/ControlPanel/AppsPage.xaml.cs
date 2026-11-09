@@ -6,7 +6,9 @@ using AgentsCursor.Core;
 namespace AgentsCursor.App.ControlPanel;
 
 /// <summary>
-/// The apps that hide the token while they're in front (a game, say): the list with a Remove per row,
+/// At the top, whether the token shows during meetings and screen sharing (off by default: it hides),
+/// with what was detected while a meeting is hiding it (<see cref="TokenVisibility"/>). Then the apps
+/// that hide the token while they're in front (a game, say): the list with a Remove per row,
 /// an "Add an app" card that offers the apps open right now (with their window titles) or takes a
 /// typed exe name, and a way back to the default list. Each edit replaces
 /// <see cref="CursorSettings.SuppressedPrograms"/> through <see cref="LiveSettings.Change"/>, which
@@ -18,14 +20,21 @@ namespace AgentsCursor.App.ControlPanel;
 public partial class AppsPage : Page
 {
     readonly LiveSettings _settings;
+    readonly IControlPanelHost _host;
     // Exe name -> what its file says about itself, for the apps seen with a window open.
     readonly Dictionary<string, AppIdentity> _known = new(StringComparer.OrdinalIgnoreCase);
     IReadOnlyList<string>? _shown; // the program list the rows were built from
 
-    public AppsPage(LiveSettings settings)
+    public AppsPage(IControlPanelHost host)
     {
-        _settings = settings;
+        _host = host;
+        _settings = host.Settings;
         InitializeComponent();
+
+        MeetingsSwitch.Checked += (_, _) => SetShowDuringMeetings(true);
+        MeetingsSwitch.Unchecked += (_, _) => SetShowDuringMeetings(false);
+        _host.TokenVisibilityChanged += ShowMeeting;
+        ShowMeeting();
 
         AddExpander.Expanded += (_, _) => ShowOpenApps();
         RefreshButton.Click += (_, _) => ShowOpenApps();
@@ -40,10 +49,49 @@ public partial class AppsPage : Page
         Refresh();
     }
 
-    // Everything here follows the program list, which is replaced (never changed in place) on each
-    // edit, so other settings changes (a size drag on the Token page) leave the page alone.
+    void SetShowDuringMeetings(bool on)
+    {
+        if (on != _settings.Live.ShowDuringMeetings) _settings.Change(s => s.ShowDuringMeetings = on);
+    }
+
+    // While a meeting is hiding the token, the switch's second line says what was detected, so a
+    // device some app holds all the time can be found.
+    void ShowMeeting()
+    {
+        var visibility = _host.TokenVisibility;
+        MeetingsHeader.Description = visibility.Reason == HideReason.Meeting && visibility.Meeting is { } meeting
+            ? "Hidden now: " + Describe(meeting)
+            : "";
+    }
+
+    string Describe(Meeting meeting)
+    {
+        string app = meeting.App is null ? "" : AppName(meeting.App);
+        return meeting.Signal switch
+        {
+            MeetingSignal.Presenting => "presentation mode is on",
+            MeetingSignal.DisplayDuplicated => "your displays are duplicated",
+            MeetingSignal.ScreenShared => $"{app} is capturing the screen",
+            MeetingSignal.Camera => $"{app} is using the camera",
+            _ => $"{app} is using the microphone",
+        };
+    }
+
+    // An exe's own description ("Zoom Workplace") when it has one, else the short name.
+    string AppName(string app)
+    {
+        if (!MeetingDetection.IsExePath(app)) return MeetingDetection.AppName(app);
+        string program = Path.GetFileName(app);
+        if (!_known.TryGetValue(program, out var identity)) _known[program] = identity = AppIdentity.Read(app);
+        return identity.Description ?? MeetingDetection.AppName(app);
+    }
+
+    // The meetings switch follows its setting. The rest follows the program list, which is replaced
+    // (never changed in place) on each edit, so other settings changes (a size drag on the Sound and
+    // Display page) leave the list alone.
     void Refresh()
     {
+        MeetingsSwitch.IsChecked = _settings.Live.ShowDuringMeetings;
         var programs = _settings.Live.SuppressedPrograms;
         if (ReferenceEquals(programs, _shown)) return;
         ShowList();

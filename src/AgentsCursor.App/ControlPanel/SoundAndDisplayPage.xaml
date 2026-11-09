@@ -1,10 +1,10 @@
 <Page
-    x:Class="AgentsCursor.App.ControlPanel.TokenPage"
+    x:Class="AgentsCursor.App.ControlPanel.SoundAndDisplayPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="clr-namespace:AgentsCursor.App.ControlPanel"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-    Title="Token"
+    Title="Sound and Display"
     Foreground="{DynamicResource TextFillColorPrimaryBrush}">
 
     <Page.Resources>
@@ -12,7 +12,7 @@
     </Page.Resources>
 
     <StackPanel Margin="40,28,40,40">
-        <ui:TextBlock Style="{StaticResource PageTitle}" Text="Token" />
+        <ui:TextBlock Style="{StaticResource PageTitle}" Text="Sound and Display" />
 
         <!--  The live preview first, as in Windows' own personalisation pages, so every change below
               shows at once. Half dark, half light, with the pointer gliding across the seam: one
@@ -54,7 +54,7 @@
             <ui:ToggleSwitch x:Name="EnabledSwitch" AutomationProperties.Name="Show the token" />
         </ui:CardControl>
 
-        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Size and position" />
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Display" />
         <ui:CardControl Icon="{ui:SymbolIcon ResizeLarge24}">
             <ui:CardControl.Header>
                 <local:SettingHeader Title="Size" />
@@ -119,10 +119,106 @@
                 <ComboBoxItem Content="Bottom right corner" />
             </ComboBox>
         </ui:CardControl>
+        <!--  With Windows' animation effects off every style moves as Still: the box then shows Still,
+              disabled, and its tooltip says why.  -->
+        <ui:CardControl Icon="{ui:SymbolIcon ArrowBounce24}">
+            <ui:CardControl.Header>
+                <local:SettingHeader Title="Motion" />
+            </ui:CardControl.Header>
+            <ComboBox
+                x:Name="MotionBox"
+                MinWidth="220"
+                AutomationProperties.Name="Motion"
+                ToolTipService.ShowOnDisabled="True">
+                <ComboBoxItem Content="Bouncy" />
+                <ComboBoxItem Content="Calm" />
+                <ComboBoxItem Content="Still" />
+            </ComboBox>
+        </ui:CardControl>
         <ui:Button
             x:Name="ResetButton"
             Margin="0,12,0,0"
             Content="Reset size and position"
             Icon="{ui:SymbolIcon ArrowReset24}" />
+
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Sounds" />
+        <ui:CardControl Icon="{ui:SymbolIcon Alert24}">
+            <ui:CardControl.Header>
+                <local:SettingHeader Title="Play sounds" />
+            </ui:CardControl.Header>
+            <ui:ToggleSwitch x:Name="SoundsSwitch" AutomationProperties.Name="Play sounds" />
+        </ui:CardControl>
+        <!--  The sound settings show while sounds are on. Each chime has a play button to hear it.  -->
+        <StackPanel x:Name="SoundSettings">
+            <ui:CardControl Icon="{ui:SymbolIcon QuestionCircle24}">
+                <ui:CardControl.Header>
+                    <local:SettingHeader Title="Needs you" />
+                </ui:CardControl.Header>
+                <StackPanel Orientation="Horizontal">
+                    <ui:Button
+                        x:Name="PlayNeedsYou"
+                        Width="36"
+                        Height="36"
+                        Margin="0,0,8,0"
+                        Padding="0"
+                        Appearance="Transparent"
+                        AutomationProperties.Name="Play the Needs you sound"
+                        BorderThickness="0"
+                        Icon="{ui:SymbolIcon Play24}"
+                        ToolTip="Play" />
+                    <ComboBox
+                        x:Name="NeedsYouBox"
+                        MinWidth="220"
+                        AutomationProperties.Name="Needs you sound" />
+                </StackPanel>
+            </ui:CardControl>
+            <ui:CardControl Icon="{ui:SymbolIcon CheckmarkCircle24}">
+                <ui:CardControl.Header>
+                    <local:SettingHeader Title="Done" />
+                </ui:CardControl.Header>
+                <StackPanel Orientation="Horizontal">
+                    <ui:Button
+                        x:Name="PlayDone"
+                        Width="36"
+                        Height="36"
+                        Margin="0,0,8,0"
+                        Padding="0"
+                        Appearance="Transparent"
+                        AutomationProperties.Name="Play the Done sound"
+                        BorderThickness="0"
+                        Icon="{ui:SymbolIcon Play24}"
+                        ToolTip="Play" />
+                    <ComboBox
+                        x:Name="DoneBox"
+                        MinWidth="220"
+                        AutomationProperties.Name="Done sound" />
+                </StackPanel>
+            </ui:CardControl>
+            <ui:CardControl Icon="{ui:SymbolIcon Speaker224}">
+                <ui:CardControl.Header>
+                    <local:SettingHeader Title="Volume" />
+                </ui:CardControl.Header>
+                <StackPanel Orientation="Horizontal">
+                    <ui:TextBlock
+                        x:Name="VolumeText"
+                        Width="72"
+                        Margin="0,0,12,0"
+                        VerticalAlignment="Center"
+                        Style="{StaticResource Secondary}"
+                        TextAlignment="Right" />
+                    <Slider
+                        x:Name="VolumeSlider"
+                        Width="220"
+                        VerticalAlignment="Center"
+                        AutomationProperties.Name="Volume"
+                        IsSnapToTickEnabled="True"
+                        LargeChange="10"
+                        Maximum="100"
+                        Minimum="0"
+                        SmallChange="5"
+                        TickFrequency="5" />
+                </StackPanel>
+            </ui:CardControl>
+        </StackPanel>
     </StackPanel>
 </Page>

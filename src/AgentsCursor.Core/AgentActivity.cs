@@ -57,8 +57,10 @@ public enum WaitingState
     Blocked,
 }
 
-/// <summary>One session that currently needs the user: which tool's logo to show and why.</summary>
-public readonly record struct WaitingAgent(string Tool, WaitingState State);
+/// <summary>One session that currently needs the user: which tool's logo to show, why, and which
+/// session it is (<see cref="AgentActivity"/>'s key for it; empty for a made-up one, such as a
+/// preview).</summary>
+public readonly record struct WaitingAgent(string Tool, WaitingState State, string Session = "");
 
 /// <summary>
 /// Tracks which agent sessions currently <b>need the user's attention</b>, across every connected
@@ -265,8 +267,8 @@ public sealed class AgentActivity
     List<WaitingAgent> SnapshotLocked()
     {
         var list = new List<WaitingAgent>();
-        foreach (var e in _sessions.Values)
-            if (e.IsWaiting) list.Add(new WaitingAgent(e.Tool, e.State));
+        foreach (var (key, e) in _sessions)
+            if (e.IsWaiting) list.Add(new WaitingAgent(e.Tool, e.State, key));
         return list;
     }
 

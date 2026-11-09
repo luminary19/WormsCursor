@@ -7,7 +7,7 @@ using GdiImaging = System.Drawing.Imaging;
 namespace AgentsCursor.App.ControlPanel;
 
 /// <summary>A tool's icon as a WPF image, drawn by Core's renderer: the Agents page cards (always the
-/// original logo, since a card identifies the agent) and the Icons page's tiles.</summary>
+/// original logo, since a card identifies the agent) and the Customization page's tiles.</summary>
 static class ToolLogo
 {
     // The share of the well the renderer's box may take: its contrast rim reaches a little past it.

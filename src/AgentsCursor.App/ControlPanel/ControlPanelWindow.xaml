@@ -37,14 +37,13 @@
             Transition="FadeInWithSlide">
             <ui:NavigationView.MenuItems>
                 <ui:NavigationViewItem
-                    x:Name="TokenItem"
-                    Content="Token"
-                    Icon="{ui:SymbolIcon CursorHover24}"
-                    TargetPageType="{x:Type local:TokenPage}" />
+                    Content="Sound and Display"
+                    Icon="{ui:SymbolIcon DesktopSpeaker24}"
+                    TargetPageType="{x:Type local:SoundAndDisplayPage}" />
                 <ui:NavigationViewItem
-                    Content="Icons"
-                    Icon="{ui:SymbolIcon Emoji24}"
-                    TargetPageType="{x:Type local:IconsPage}" />
+                    Content="Customization"
+                    Icon="{ui:SymbolIcon PaintBrush24}"
+                    TargetPageType="{x:Type local:CustomizationPage}" />
                 <ui:NavigationViewItem
                     Content="Agents"
                     Icon="{ui:SymbolIcon Bot24}"

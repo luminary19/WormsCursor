@@ -20,7 +20,7 @@ namespace AgentsCursor.App.ControlPanel;
 /// The tiles are radio groups: Tab reaches the selected one, the arrow keys move the choice. The
 /// thumbnails are drawn by the panel's own renderer on the UI thread (<see cref="ToolLogo"/>).
 /// </summary>
-public partial class IconsPage : Page
+public partial class CustomizationPage : Page
 {
     readonly LiveSettings _settings;
     string _tool = IconCatalog.Tools[0];
@@ -32,7 +32,7 @@ public partial class IconsPage : Page
     RemovedIcon? _removed;    // the icon just removed, while its Undo is offered
     const double MinAgentTileWidth = 150; // DIPs; narrower and the agents go two to a row
 
-    public IconsPage(LiveSettings settings)
+    public CustomizationPage(LiveSettings settings)
     {
         _settings = settings;
         InitializeComponent();
@@ -74,7 +74,7 @@ public partial class IconsPage : Page
         ShowPreviews(s);
         FitSwatches();
         ResetButton.IsEnabled = s.Icons.Count > 0;
-        // Only an icon choice changes the tiles (a size drag on the Token page leaves them alone). The
+        // Only an icon choice changes the tiles (a size drag on the Sound and Display page leaves them alone). The
         // tiles update in place, so the keyboard focus stays where it is.
         if (ReferenceEquals(s.Icons, _shownChoices) || _agents.Length == 0) return;
         _shownChoices = s.Icons;
@@ -286,7 +286,7 @@ public partial class IconsPage : Page
     }
 }
 
-/// <summary>An agent on the Icons page: its name, its current icon, and whether it is being edited.</summary>
+/// <summary>An agent on the Customization page: its name, its current icon, and whether it is being edited.</summary>
 public sealed class AgentTile(string tool, string name, ImageSource image, bool selected) : INotifyPropertyChanged
 {
     public string Tool { get; } = tool;

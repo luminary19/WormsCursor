@@ -33,9 +33,14 @@ namespace AgentsCursor.App;
 /// the old cursor engine stayed smooth. The thread only spins while at least one agent is waiting; idle,
 /// it parks on an event and the token is painted away, so a quiet tray burns no CPU.
 ///
-/// While a program on <see cref="CursorSettings.SuppressedPrograms"/> owns the foreground window (a
-/// game, say), the token is treated exactly like "nothing waiting": hidden, with the thread parked. A
-/// <see cref="ForegroundWatcher"/> wakes it when focus moves on, and it reappears with its entrance.
+/// Whether the token shows is <see cref="TokenVisibility.Decide"/>'s call, the one model of why it is
+/// hidden: nothing waiting, turned off, a program on <see cref="CursorSettings.SuppressedPrograms"/>
+/// owning the foreground window (a game, say), or a meeting (<see cref="MeetingWatcher"/>, unless
+/// <see cref="CursorSettings.ShowDuringMeetings"/>). Hidden for any of them, the thread parks. A
+/// <see cref="ForegroundWatcher"/> reports focus changes (event-driven); the meeting watcher checks
+/// only while a token would otherwise show. When the reason goes away and something still waits, the
+/// token reappears with its entrance. How it moves is <see cref="CursorSettings.Motion"/>, as Still
+/// while Windows' animation effects are off.
 /// </summary>
 public sealed class NotifierOverlay : IDisposable
 {
@@ -50,9 +55,12 @@ public sealed class NotifierOverlay : IDisposable
     readonly Thread _thread;
     readonly ManualResetEventSlim _wake = new(false);
     readonly ForegroundWatcher _foreground = new();
-    readonly object _gate = new(); // Reevaluate runs on the UI thread and the foreground watcher's
+    readonly MeetingWatcher _meetings = new(AppLog.Write);
+    readonly object _gate = new(); // Reevaluate runs on the UI thread and the watchers' threads
     volatile bool _running = true;
     volatile bool _active;
+    volatile TokenVisibility _visibility = TokenVisibility.Idle;
+    volatile bool _animationEffects = true; // Windows' "Animation effects" (off = every style is Still)
     volatile TokenFace? _face;       // what the token shows; null = nothing waiting
     volatile bool _entrancePending;  // pop-in bounce when the token first appears
     volatile bool _resetPhysics;     // re-seed the motion on (re)appearance
@@ -82,7 +90,18 @@ public sealed class NotifierOverlay : IDisposable
         _thread = new Thread(Loop) { IsBackground = true, Name = "AgentsCursorNotifier" };
         _thread.Start();
         _foreground.Changed += Reevaluate;
+        _meetings.Changed += Reevaluate;
+        // Windows' animation effects switched on or off (WM_SETTINGCHANGE) re-reads them.
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+        Reevaluate();
     }
+
+    /// <summary>Whether the token is on screen and, if not, why. Safe to read from any thread.</summary>
+    public TokenVisibility Visibility => _visibility;
+
+    /// <summary>Raised when <see cref="Visibility"/> changes, on whichever thread changed it (the UI
+    /// thread, or a watcher's). Handlers must be thread-safe and quick.</summary>
+    public event Action? VisibilityChanged;
 
     /// <summary>Set which agent sessions currently await the user — one entry per waiting session
     /// (empty = none), each with its tool and whether it is blocked on you or finished. The token shows
@@ -96,21 +115,33 @@ public sealed class NotifierOverlay : IDisposable
     }
 
     /// <summary>Re-check whether the token should be showing after a settings change (the enable
-    /// toggle, the suppressed programs, size, or placement). Size/placement are read live each frame;
-    /// this flips the animation on/off when the enable toggle or the suppression outcome changed.</summary>
+    /// toggle, the suppressed programs, the meetings rule, size, placement or motion). Size, placement
+    /// and motion are read live each frame; this flips the animation on/off when the outcome
+    /// changed.</summary>
     public void RefreshSettings() => Reevaluate();
 
-    // Called from the UI thread (agents, settings) and the foreground watcher's thread (focus changes).
+    void OnUserPreferenceChanged(object? sender, Microsoft.Win32.UserPreferenceChangedEventArgs e) => Reevaluate();
+
+    // Called from the UI thread (agents, settings) and the watchers' threads (focus, meetings).
     void Reevaluate()
     {
+        bool changed;
         lock (_gate)
         {
-            bool suppressed = ProgramSuppression.Matches(_foreground.ForegroundProgram, _settings.SuppressedPrograms);
-            bool active = _face is not null && _settings.AgentNotifierEnabled && !suppressed;
+            _animationEffects = AnimationEffectsOn();
+            bool waiting = _face is not null, enabled = _settings.AgentNotifierEnabled;
+            bool appInFront = ProgramSuppression.Matches(_foreground.ForegroundProgram, _settings.SuppressedPrograms);
+            bool showDuringMeetings = _settings.ShowDuringMeetings;
+            _meetings.Watch(TokenVisibility.NeedsMeetingCheck(waiting, enabled, appInFront, showDuringMeetings));
+            var visibility = TokenVisibility.Decide(waiting, enabled, appInFront, showDuringMeetings, _meetings.Current);
+            changed = visibility != _visibility;
+            _visibility = visibility;
+            bool active = visibility.Shown;
             if (active && !_active) { _entrancePending = true; _resetPhysics = true; } // pop-in fresh
             _active = active;
             _wake.Set();
         }
+        if (changed) VisibilityChanged?.Invoke();
     }
 
     // The animation thread: a high-resolution loop that advances the physics by the real elapsed time
@@ -175,6 +206,7 @@ public sealed class NotifierOverlay : IDisposable
         if (face is null) return;
 
         var placement = _settings.Placement;
+        var motion = MotionProfile.For(_settings.Motion, _animationEffects);
         if (_resetPhysics || placement != _placement)
         {
             _tether = default; _flip = Flip.None; _t = 0f; _resetPhysics = false; _placement = placement;
@@ -197,7 +229,7 @@ public sealed class NotifierOverlay : IDisposable
                 ? wa.Left + margin + half : wa.Right - margin - half;
             int anchorY = _settings.Corner is ScreenCorner.TopLeft or ScreenCorner.TopRight
                 ? wa.Top + margin + half : wa.Bottom - margin - half;
-            var pose = TokenMotion.CornerBounce(_t, tokenPx);
+            var pose = TokenMotion.CornerBounce(_t, tokenPx, motion);
             (cx, cy, swing) = (anchorX + pose.OffsetX, anchorY + pose.OffsetY, pose.SwingDeg);
         }
         else
@@ -211,7 +243,7 @@ public sealed class NotifierOverlay : IDisposable
             var work = Screen.FromPoint(new Point(c.x, c.y)).WorkingArea;
             _flip = TokenMotion.Edges(_flip, new PointF(c.x, c.y), TokenMotion.RestFor(placement, tokenPx, dpi, Flip.None), tokenPx, work);
             var rest = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, tokenPx, dpi, _flip), new PointF(c.x, c.y), tokenPx, work);
-            var pose = TokenMotion.Step(ref _tether, c.x, c.y, rest, tokenPx, dt, _entrancePending, TokenMotion.MaxSwingFor(placement), work);
+            var pose = TokenMotion.Step(ref _tether, c.x, c.y, rest, tokenPx, dt, _entrancePending, motion, motion.MaxSwingFor(placement), work);
             _entrancePending = false;
             (cx, cy, swing) = (c.x + pose.OffsetX, c.y + pose.OffsetY, pose.SwingDeg);
         }
@@ -255,6 +287,10 @@ public sealed class NotifierOverlay : IDisposable
 
     void HideToken() => SetBitmap(_hwnd, _empty, -32000, -32000);
 
+    // Windows' "Animation effects" (Settings > Accessibility > Visual effects); on if it can't be read.
+    static bool AnimationEffectsOn()
+        => !SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, out bool on, 0) || on;
+
     // DPI scale (1.0 = 96 DPI) of the monitor under a screen point, so the token stays a consistent
     // physical size on mixed-DPI setups. Best-effort: falls back to 1.0 if the shell call fails.
     static float DpiScaleForPoint(int x, int y)
@@ -273,7 +309,9 @@ public sealed class NotifierOverlay : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _foreground.Dispose(); // first: its thread calls Reevaluate, which uses _wake
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        _foreground.Dispose(); // first: the watchers' threads call Reevaluate, which uses _wake
+        _meetings.Dispose();
         _running = false;
         _wake.Set();
         if (_thread.IsAlive) _thread.Join(500); // stop touching the window before we dispose it
@@ -365,6 +403,7 @@ public sealed class NotifierOverlay : IDisposable
     const int SW_SHOWNOACTIVATE = 4;
     const uint MONITOR_DEFAULTTONEAREST = 2;
     const int MDT_EFFECTIVE_DPI = 0;
+    const uint SPI_GETCLIENTAREAANIMATION = 0x1042;
     // Re-assert topmost on each token appearance (LayeredWindow.BringToTop): a z-order-only move.
     static readonly IntPtr HWND_TOPMOST = new(-1);
     const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010;
@@ -375,6 +414,7 @@ public sealed class NotifierOverlay : IDisposable
     struct BLENDFUNCTION { public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat; }
 
     [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, out bool value, uint winIni);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
     [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);

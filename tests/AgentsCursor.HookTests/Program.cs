@@ -62,6 +62,14 @@ var tests = new (string Name, Action Run)[]
     ("Every built-in icon is non-empty, solid, within its aspect limits and small", AppearanceTests.BuiltInMascots),
     ("At any swing, every icon with its badge and +9 stays inside the canvas", AppearanceTests.CanvasExtent),
     ("Every pointer placement settles at rest, stays on its string, hops in and flips at edges", AppearanceTests.Tether),
+    ("Bouncy, Calm and Still keep their motion bounds; animations off means Still", AppearanceTests.MotionPresets),
+    ("A chime plays once per new waiting session, only while the token shows, one per burst", SoundAndMeetingTests.SoundDecisions),
+    ("Sound settings default off, round-trip by name and clamp", SoundAndMeetingTests.SoundSettings),
+    ("Volume scales the samples, never anything else", SoundAndMeetingTests.ChimeVolume),
+    ("The built-in chimes are short, distinct, unclipped and start and end silent", SoundAndMeetingTests.BuiltInChimes),
+    ("Meetings: presenting, sharing, camera and a settled microphone hide the token; stale entries don't", SoundAndMeetingTests.MeetingDecisions),
+    ("The meeting watcher checks only while watching and treats a failing check as no meeting", SoundAndMeetingTests.MeetingWatching),
+    ("The live meeting signals read without throwing", SoundAndMeetingTests.MeetingSignalsSmoke),
 };
 foreach (var (name, run) in tests)
 {

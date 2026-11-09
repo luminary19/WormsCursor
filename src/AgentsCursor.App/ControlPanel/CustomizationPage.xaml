@@ -1,10 +1,10 @@
 <Page
-    x:Class="AgentsCursor.App.ControlPanel.IconsPage"
+    x:Class="AgentsCursor.App.ControlPanel.CustomizationPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="clr-namespace:AgentsCursor.App.ControlPanel"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-    Title="Icons"
+    Title="Customization"
     Foreground="{DynamicResource TextFillColorPrimaryBrush}">
 
     <Page.Resources>
@@ -114,7 +114,7 @@
     </Page.Resources>
 
     <StackPanel Margin="40,28,40,40">
-        <ui:TextBlock Style="{StaticResource PageTitle}" Text="Icons" />
+        <ui:TextBlock Style="{StaticResource PageTitle}" Text="Customization" />
 
         <!--  What the chosen icon looks like in both states, each over dark and over light, at its
               real size: side by side, or one above the other when the page is too narrow for four

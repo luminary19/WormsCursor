@@ -13,6 +13,60 @@ public enum Flip
     Y = 2,
 }
 
+/// <summary>How lively the token moves (<see cref="CursorSettings.Motion"/>).</summary>
+public enum MotionStyle
+{
+    /// <summary>A springy string: it swings as the pointer moves, hops in, bobs and bounces.</summary>
+    Bouncy,
+    /// <summary>A softer spring with a smaller swing, hop and bob.</summary>
+    Calm,
+    /// <summary>No swing, bounce, bob or entrance hop: the token simply follows the pointer, or sits in
+    /// its corner. What every style becomes while Windows' animation effects are off.</summary>
+    Still,
+}
+
+/// <summary>
+/// The numbers behind a <see cref="MotionStyle"/>. The spring pulls the token toward its rest point
+/// (<see cref="Stiffness"/>, <see cref="Damping"/>, per second); an infinite stiffness is a rigid rod,
+/// so the token sits exactly at its rest point. <see cref="SwingScale"/> scales the largest tilt a
+/// placement allows (<see cref="TokenMotion.MaxSwingFor"/>) and the corner's sway; the entrance starts
+/// the token back along its string at <see cref="EntranceSpeed"/> token sizes per second; the idle bob
+/// and the corner hop rise <see cref="BobHeight"/> and <see cref="HopHeight"/> token sizes, at
+/// <see cref="Tempo"/> times Bouncy's pace.
+/// </summary>
+public sealed record MotionProfile(float Stiffness, float Damping, float SwingScale, float EntranceSpeed,
+                                   float BobHeight, float HopHeight, float Tempo)
+{
+    /// <summary>The original motion: the old cursor pendulum's spring (lightly damped), a lively swing,
+    /// a hop in, a bob at rest and a ball bounce in a corner.</summary>
+    public static readonly MotionProfile Bouncy = new(130f, 3f, 1f, 3f, 0.05f, 0.22f, 1f);
+
+    /// <summary>A slower spring that barely overshoots, with half the swing, hop and bob, at a slower pace.</summary>
+    public static readonly MotionProfile Calm = new(60f, 9f, 0.5f, 1.5f, 0.025f, 0.10f, 0.7f);
+
+    /// <summary>Rigid and motionless: the token keeps its rest point and stays upright.</summary>
+    public static readonly MotionProfile Still = new(float.PositiveInfinity, 0f, 0f, 0f, 0f, 0f, 0f);
+
+    /// <summary>True when the token is held exactly at its rest point (no spring).</summary>
+    public bool IsRigid => float.IsPositiveInfinity(Stiffness);
+
+    /// <summary>The style that applies: <paramref name="style"/>, or <see cref="MotionStyle.Still"/>
+    /// while Windows' animation effects are off.</summary>
+    public static MotionStyle Effective(MotionStyle style, bool animationEffects)
+        => animationEffects ? style : MotionStyle.Still;
+
+    /// <summary>The profile for <paramref name="style"/> as it applies (see <see cref="Effective"/>).</summary>
+    public static MotionProfile For(MotionStyle style, bool animationEffects) => Effective(style, animationEffects) switch
+    {
+        MotionStyle.Calm => Calm,
+        MotionStyle.Still => Still,
+        _ => Bouncy,
+    };
+
+    /// <summary>The largest tilt the token takes, either way, in <paramref name="placement"/>.</summary>
+    public float MaxSwingFor(NotifierPlacement placement) => TokenMotion.MaxSwingFor(placement) * SwingScale;
+}
+
 /// <summary>Where a pointer-following token springs to, and how it is moving there. Owned by one
 /// animation (the overlay's thread, or one preview), never shared.</summary>
 public struct TetherState
@@ -35,6 +89,7 @@ public struct TetherState
 /// along the string. Near a screen edge the rest offset is mirrored per axis (<see cref="Edges"/>) and
 /// then slid along the edge if the token would still overhang (<see cref="KeepOnScreen"/>), and the
 /// spring carries the token over. The corner placement bounces in place (<see cref="CornerBounce"/>).
+/// How springy it is, how far it swings and how high it hops and bobs is the <see cref="MotionProfile"/>.
 /// </summary>
 public static class TokenMotion
 {
@@ -47,16 +102,13 @@ public static class TokenMotion
         public float Length => MathF.Sqrt(Dx * Dx + Dy * Dy);
     }
 
-    /// <summary>Spring stiffness and damping (per second): the old cursor pendulum's, for every placement.</summary>
-    public const float Stiffness = 130f, Damping = 3f;
-
     /// <summary>How far past its rest distance the string lets the token stretch, as a fraction of its size.</summary>
     public const float Slack = 0.30f;
 
-    /// <summary>The largest tilt a token beside the pointer takes, either way (a tooltip shouldn't spin).</summary>
+    /// <summary>The largest tilt a Bouncy token beside the pointer takes, either way (a tooltip shouldn't spin).</summary>
     public const float BesideMaxSwing = 35f;
 
-    /// <summary>The largest tilt a token hanging below or floating above the pointer takes, either way:
+    /// <summary>The largest tilt a Bouncy token hanging below or floating above the pointer takes, either way:
     /// a lively swing, but never upside down (the "?" stays upright; the logo would not).</summary>
     public const float HangingMaxSwing = 80f;
 
@@ -64,16 +116,12 @@ public static class TokenMotion
     /// Windows arrow is about 12 x 19 px, and the real pointer is always drawn on top of the token.</summary>
     public const float PointerClearance = 22f;
 
-    /// <summary>How far above its anchor the corner bounce can lift the token, as a fraction of its size.</summary>
-    public const float CornerHop = 0.22f;
+    /// <summary>The most the corner bounce of any style lifts the token above its anchor, as a fraction
+    /// of its size: the room a corner leaves for it.</summary>
+    public static float CornerHop => MotionProfile.Bouncy.HopHeight;
 
-    /// <summary>How far the idle bob moves the token along its string, as a fraction of its size.</summary>
-    public const float IdleBobHeight = 0.05f;
-
-    /// <summary>The entrance hop: the token's starting speed back along its string, in token sizes per second.</summary>
-    public const float EntranceSpeed = 3f;
-
-    /// <summary>The largest tilt the token takes, either way, in <paramref name="placement"/>.</summary>
+    /// <summary>The largest tilt a Bouncy token takes, either way, in <paramref name="placement"/>
+    /// (<see cref="MotionProfile.MaxSwingFor"/> scales it per style).</summary>
     public static float MaxSwingFor(NotifierPlacement placement)
         => placement == NotifierPlacement.BesidePointer ? BesideMaxSwing : HangingMaxSwing;
 
@@ -99,28 +147,40 @@ public static class TokenMotion
     }
 
     /// <summary>Advances the tether by <paramref name="dt"/> seconds toward the pointer at
-    /// (<paramref name="ax"/>, <paramref name="ay"/>) plus <paramref name="rest"/>, and returns the pose to
-    /// draw. The first call seeds the token at rest; with <paramref name="entrance"/> it starts with a hop
-    /// back along the string, which springs out again. <paramref name="maxSwing"/> limits the tilt
-    /// either way (<see cref="MaxSwingFor"/> the placement). With <paramref name="workArea"/>
+    /// (<paramref name="ax"/>, <paramref name="ay"/>) plus <paramref name="rest"/>, moving the way
+    /// <paramref name="motion"/> says, and returns the pose to draw. The first call seeds the token at
+    /// rest; with <paramref name="entrance"/> it starts with a hop back along the string, which springs
+    /// out again. A rigid profile (<see cref="MotionProfile.Still"/>) keeps the token at its rest point,
+    /// upright. <paramref name="maxSwing"/> limits the tilt either way
+    /// (<see cref="MotionProfile.MaxSwingFor"/> the placement). With <paramref name="workArea"/>
     /// the screen's edges are a wall: the token (with its badge, <see cref="RestHalfExtent"/>) stops at
     /// them and loses its speed into them, so an overshoot never carries it off screen. Use the same
     /// area as <see cref="KeepOnScreen"/>, so the rest point is always inside the wall.</summary>
     public static Pose Step(ref TetherState s, float ax, float ay, Rest rest, float tokenPx, float dt,
-                            bool entrance, float maxSwing = 180f, RectangleF? workArea = null)
+                            bool entrance, MotionProfile motion, float maxSwing = 180f, RectangleF? workArea = null)
     {
         float restLength = Math.Max(1e-3f, rest.Length);
         float ux = rest.Dx / restLength, uy = rest.Dy / restLength; // the string's rest direction
         if (!s.Seeded)
         {
             s = new TetherState { X = ax + rest.Dx, Y = ay + rest.Dy, Seeded = true };
-            if (entrance) { s.Vx = -ux * EntranceSpeed * tokenPx; s.Vy = -uy * EntranceSpeed * tokenPx; }
+            if (entrance) { s.Vx = -ux * motion.EntranceSpeed * tokenPx; s.Vy = -uy * motion.EntranceSpeed * tokenPx; }
         }
         s.T += dt;
 
+        if (motion.IsRigid)
+        {
+            // No spring: the token keeps its rest point (inside the work area, by KeepOnScreen), upright.
+            s.X = ax + rest.Dx;
+            s.Y = ay + rest.Dy;
+            s.Vx = s.Vy = 0f;
+            if (workArea is { } area) StopAtEdges(ref s, area, RestHalfExtent(tokenPx));
+            return new Pose(s.X - ax, s.Y - ay, 0f);
+        }
+
         // A spring toward the rest point; explicit Euler, as the old pendulum (dt is capped by the host).
-        s.Vx += ((ax + rest.Dx - s.X) * Stiffness - s.Vx * Damping) * dt;
-        s.Vy += ((ay + rest.Dy - s.Y) * Stiffness - s.Vy * Damping) * dt;
+        s.Vx += ((ax + rest.Dx - s.X) * motion.Stiffness - s.Vx * motion.Damping) * dt;
+        s.Vy += ((ay + rest.Dy - s.Y) * motion.Stiffness - s.Vy * motion.Damping) * dt;
         s.X += s.Vx * dt;
         s.Y += s.Vy * dt;
 
@@ -149,7 +209,7 @@ public static class TokenMotion
         else if (swing < -180f) swing += 360f;
         swing = Math.Clamp(swing, -maxSwing, maxSwing);
 
-        float bob = IdleBob(s.T, tokenPx); // negative: back along the string
+        float bob = IdleBob(s.T, tokenPx, motion); // negative: back along the string
         return new Pose(dx + ux * bob, dy + uy * bob, swing);
     }
 
@@ -214,15 +274,20 @@ public static class TokenMotion
 
     /// <summary>The corner token's continuous "ball" bounce at time <paramref name="t"/> seconds: |sin|
     /// hops it up from its anchor and back down, with a small sway and tilt so it reads as alive without
-    /// the cursor driving it.</summary>
-    public static Pose CornerBounce(float t, float tokenPx) => new(
-        tokenPx * 0.04f * MathF.Sin(t * 1.6f),
-        -tokenPx * CornerHop * MathF.Abs(MathF.Sin(t * 3.0f)),
-        3f * MathF.Sin(t * 1.6f));
+    /// the cursor driving it. Still sits at its anchor, upright.</summary>
+    public static Pose CornerBounce(float t, float tokenPx, MotionProfile motion)
+    {
+        float pace = t * motion.Tempo;
+        return new(
+            tokenPx * 0.04f * motion.SwingScale * MathF.Sin(pace * 1.6f),
+            -tokenPx * motion.HopHeight * MathF.Abs(MathF.Sin(pace * 3.0f)),
+            3f * motion.SwingScale * MathF.Sin(pace * 1.6f));
+    }
 
     /// <summary>How far (px, negative = back toward the pointer) the token bobs along its string at
-    /// rest, so it looks alive while the mouse is still.</summary>
-    public static float IdleBob(float t, float tokenPx) => -tokenPx * IdleBobHeight * MathF.Abs(MathF.Sin(t * 3.2f));
+    /// rest, so it looks alive while the mouse is still. Still doesn't bob.</summary>
+    public static float IdleBob(float t, float tokenPx, MotionProfile motion)
+        => -tokenPx * motion.BobHeight * MathF.Abs(MathF.Sin(t * motion.Tempo * 3.2f));
 }
 
 /// <summary>

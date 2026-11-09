@@ -8,7 +8,7 @@
 
     <FontFamily x:Key="PanelDisplayFont">Segoe UI Variable Display, Segoe UI</FontFamily>
 
-    <!--  Page title, e.g. "Token".  -->
+    <!--  Page title, e.g. "Apps".  -->
     <Style x:Key="PageTitle" TargetType="ui:TextBlock">
         <Setter Property="FontTypography" Value="Title" />
         <Setter Property="FontFamily" Value="{StaticResource PanelDisplayFont}" />
@@ -96,7 +96,7 @@
         </Setter>
     </Style>
 
-    <!--  A gallery tile: a radio choice drawn as a card (the Icons page's agents and icons). The
+    <!--  A gallery tile: a radio choice drawn as a card (the Customization page's agents and icons). The
           selected one is tinted with the accent and has an accent border and a check, so it stands
           out even with a grey accent colour; keyboard focus gets the system focus ring.  -->
     <Style x:Key="ChoiceTile" TargetType="RadioButton">

@@ -7,7 +7,22 @@ GitHub releases. The release workflow pulls the matching section into each relea
 ## Unreleased
 
 ### Added
-- **Pick each agent's look, mascots included.** The new **Icons** page lets every agent wear its own
+- **Hidden during meetings and screen sharing.** The token now stays out of sight while you present,
+  share your screen or are in a call, and comes back when that ends. It goes by what Windows itself
+  reports: presentation mode, duplicated displays (a projector), an app capturing the screen through
+  Windows' capture API, the camera, or the microphone in use for more than a few seconds (a quick
+  dictation doesn't count). While it is hiding the token, **Apps** says what it noticed (say, *Zoom is
+  using the microphone*). Turn on **Show during meetings and screen sharing** at the top of **Apps** to
+  keep the token anyway. The checks run only while a token would be on screen.
+- **Sounds, if you want them.** **Play sounds** on the **Sound and Display** page plays a short, soft
+  chime when an agent starts waiting on you: one for **Needs you**, another for **Done**, each picked
+  from four built-in chimes (or none), with a play button to hear it and its own **Volume** (the system
+  volume is left alone). Off by default. A burst of agents finishing together is one chime, and no
+  chime plays while the token is hidden.
+- **Calmer motion.** **Motion** on the **Sound and Display** page picks how the token moves:
+  **Bouncy** (as before), **Calm** (a softer spring, half the swing and hop) or **Still** (it just
+  follows the pointer, or sits in its corner). With Windows' animation effects off it is always Still.
+- **Pick each agent's look, mascots included.** The new **Customization** page lets every agent wear its own
   logo, one of three mascots drawn for it, or a picture of your own. Claude Code can wave, party or
   play peekaboo; Codex comes as a googly-eyed buddy, mid-spin or dozing off; OpenCode's mark gets a
   face, bracket arms or a stack of windows; Pi strolls, wears 8-bit shades or turns into a whole
@@ -19,7 +34,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
   hanging token you know), **Above the pointer** (floating like a balloon on a string) and **Beside
   the pointer** (trailing off the arrow like a tooltip), plus the four corners. Near the edge of a
   screen the token flips to the other side or slides along the edge, so it never leaves the screen,
-  and it never gets clipped however hard it swings. The **Token** page's preview now shows a pointer
+  and it never gets clipped however hard it swings. The **Sound and Display** page's preview now shows a pointer
   gliding about with the token following it the way you chose.
 - **Pi and OpenCode, in the same token.** The **Agents** page now connects **OpenCode** and **Pi**
   next to Claude Code and Codex, with the same card for all four. Their plugins ship with AgentsCursor
@@ -39,8 +54,8 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - **A new control panel.** **Preferences…** now opens one window in the style of Windows 11
   Settings: Mica, rounded cards, switches, and it follows your Windows light or dark mode as it
   changes, or stays light or dark if you pick that under **About → Theme**. A sidebar holds five pages:
-  **Token** (the on/off switch, size, position and a live animated preview), **Icons** (each agent's
-  look), **Agents** (Connect / Update / Disconnect for each tool with a clear status, how long the
+  **Sound and Display** (the on/off switch, size, position, motion, sounds and a live animated
+  preview), **Customization** (each agent's look), **Agents** (Connect / Update / Disconnect for each tool with a clear status, how long the
   token stays after an agent is done, and **Preview on screen**), **Apps** (the apps that hide the
   token, with their icons and names when they're open) and **About** (version, updates, *What's new*,
   the theme, *Start with Windows*, links).
@@ -68,7 +83,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
   machine.
 
 ### Changed
-- **Type an exact token size.** Double-click the size (for example "96 px") on the **Token** page to
+- **Type an exact token size.** Double-click the size (for example "96 px") on the **Sound and Display** page to
   type a number; Enter or clicking away applies it (kept within 48-192 px), Esc cancels.
 - **Double-click the tray icon to open the control panel.** It used to switch the token on and off;
   that stays one right-click away as **Enabled**.
@@ -96,7 +111,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
   enable any of the *Worms*-style cursors to see it. It's drawn by its own transparent, click-through
   overlay (true per-pixel alpha via `UpdateLayeredWindow`) that touches no system state — nothing to
   restore on exit, and it's invisible/zero-cost when no agent is waiting.
-- **The token bounces, and you choose where.** On the **Token** page pick a position next to the
+- **The token bounces, and you choose where.** On the **Sound and Display** page pick a position next to the
   pointer (it follows on a springy string, with a gentle idle bob) or a **screen corner** (it sits in
   the corner you choose and bounces in place). Plus a **size** slider and a live preview.
   **Reset size and position** puts those back. Settings saved by this version name the

@@ -62,6 +62,15 @@
     <StackPanel Margin="40,28,40,40">
         <ui:TextBlock Style="{StaticResource PageTitle}" Text="Apps" />
 
+        <!--  Off (the default), the token hides while you present, share your screen or are in a call.
+              While a meeting is hiding it, the second line says what was detected.  -->
+        <ui:CardControl Margin="0,16,0,4" Icon="{ui:SymbolIcon ShareScreenStart24}">
+            <ui:CardControl.Header>
+                <local:SettingHeader x:Name="MeetingsHeader" Title="Show during meetings and screen sharing" />
+            </ui:CardControl.Header>
+            <ui:ToggleSwitch x:Name="MeetingsSwitch" AutomationProperties.Name="Show during meetings and screen sharing" />
+        </ui:CardControl>
+
         <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Hide the token while using" />
 
         <!--  The list, or a friendly empty state.  -->

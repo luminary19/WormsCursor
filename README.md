@@ -35,7 +35,7 @@ overlay. It shows one tool logo, and a small **"+N"** pill when several sessions
   extension shows during a run, such as a permission or a question). If any waiting session is
   blocked, its logo is the one shown.
 
-Where it shows (set on the **Token** page of **Preferences…**):
+Where it shows (set on the **Sound and Display** page of **Preferences…**):
 
 - **Below the pointer** — the token hangs under the pointer on a springy string and follows it,
   swinging as you move and settling (with a gentle idle bob) when you stop.
@@ -46,9 +46,25 @@ Where it shows (set on the **Token** page of **Preferences…**):
 Near the edge of a screen a pointer position mirrors (beside flips to the left at the right edge,
 above drops below at the top) or slides along the edge, so the token never leaves the screen.
 
-### Icons
+How it moves (**Motion**, same page): **Bouncy** (the springy swing, hop-in and bounce above),
+**Calm** (a softer spring with half the swing, hop and bob) or **Still** (no swing, bounce or hop:
+it just follows the pointer, or sits in its corner). While Windows' **Animation effects** are off
+(Settings → Accessibility → Visual effects) the token is always Still, and the box says so.
 
-On the **Icons** page each agent gets its own look: its **original** logo, one of three mascots drawn
+### Sounds
+
+Off by default. Turn on **Play sounds** (Sound and Display page) for a short, soft chime when an agent
+starts waiting on you: one for **Needs you** (default *Rise*, two notes going up) and one for **Done**
+(default *Settle*, two notes coming to rest), each picked from *Bell*, *Rise*, *Settle*, *Glow* or
+*None*, with a play button to hear it, and one **Volume**. A chime plays once per session that starts
+waiting (or goes from done to blocked); several within a second play one chime; and none plays while
+the token is hidden (turned off, an app on the list in front, a meeting). The volume scales the sound
+itself; the system volume is never changed. The chimes are synthesised by `tools/generate-chimes.py`
+and built into the app.
+
+### Customization
+
+On the **Customization** page each agent gets its own look: its **original** logo, one of three mascots drawn
 for it (Claude Code: *Waving*, *Party*, *Peekaboo*; Codex: *Buddy*, *Spin*, *Sleepy*; OpenCode:
 *Buddy*, *Brackets*, *Stack*; Pi: *Walker*, *Shades*, *Pie*), or an **SVG of your own** (**Add SVG…**,
 up to 256 KB, 24 per agent). An added file is cleaned before it is kept: scripts, event handlers and
@@ -62,6 +78,32 @@ back.
 
 The overlay touches no system state, so there's nothing to restore on exit, and it costs nothing when
 nothing's waiting (the animation only runs while at least one agent needs you).
+
+### Stays out of your meetings
+
+Unless **Show during meetings and screen sharing** (top of the **Apps** page) is on, the token hides
+while you present, share your screen or are in a call, and comes back (with its entrance) when that
+ends. While a meeting is hiding it, the switch's second line says what was detected. What counts, from
+what Windows itself reports:
+
+- **Presentation mode** is on (`SHQueryUserNotificationState`), or your displays are **duplicated**
+  (Win+P "Duplicate", typical for a projector).
+- An app is **capturing the screen** or a window through Windows' capture API for at least a second:
+  "Share screen" in Discord or a browser, OBS window capture, any app that uses that API. A
+  screenshot holds it for milliseconds and doesn't count.
+- An app is using the **camera** for at least a second, or the **microphone** for at least 10 seconds
+  (a quick dictation isn't a call).
+
+The capture, camera and microphone signals are the ones behind Windows' privacy indicators (its
+capability consent store, which records when each app starts and stops using them). An entry that says
+"in use" only counts while a copy of that app runs that started before the use did, so one left
+behind by an app killed mid-call, or by a shutdown during one, is ignored. Limits: any app holding the
+microphone counts (a game's voice chat, a dictation tool kept open for more than 10 seconds, an
+always-on voice app), and the switch's second line names it; screen sharing through the older Desktop
+Duplication API isn't reported by Windows and isn't detected unless the call around it is; a
+full-screen slideshow on a single extended display isn't presentation mode (add PowerPoint to the
+list below if you want it covered). The signals are checked once a second, and only while a token
+would otherwise be on screen: a quiet tray never checks.
 
 ### Stays out of your games
 
@@ -77,7 +119,7 @@ checking repeatedly.
 
 Set it up on the **Agents** page of **Preferences…**: connect **Claude Code**, **Codex**,
 **OpenCode** or **Pi** there, and set how long the token stays after an agent is done (the master
-switch is on the **Token** page). Every card reads the same way: *Connected*, *Needs update*, *Not
+switch is on the **Sound and Display** page). Every card reads the same way: *Connected*, *Needs update*, *Not
 connected* or *Can't read its config*, with **Connect**, **Update**, **Disconnect** or **Show file**.
 For Claude Code and Codex, connecting writes AgentsCursor's
 `hook` command into the tool's config — `%CLAUDE_CONFIG_DIR%\settings.json` when that environment
@@ -232,11 +274,15 @@ AgentsCursor.sln
 │  │   ├─ SvgReferences.cs    Refuses an SVG whose references loop, nest too deep or draw too much
 │  │   ├─ TokenSprites.cs     Renders icons (SVG.NET) to cached sprites, fitted by visible pixels, with a contrast rim
 │  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe)
+│  │   ├─ SoundCues.cs        When a chime plays (new waiting sessions, token shown, one per burst); ChimeAudio.cs scales its volume
+│  │   ├─ TokenVisibility.cs  Why the token is hidden: nothing waiting, turned off, an app in front, a meeting
+│  │   ├─ MeetingDetection.cs Presenting / sharing / camera / microphone -> a meeting (pure); MeetingSignals.cs reads
+│  │   │                      them from Windows, MeetingWatcher.cs checks once a second while a token would show
 │  │   ├─ AgentEventMessage.cs The normalised wire format (one JSON line per event)
 │  │   ├─ CursorSettings.cs   Token size / placement / corner / icons / notifier settings / hidden-while-using programs (persisted as JSON)
 │  │   ├─ LiveSettings.cs     The one owner of the running settings: every edit is a small Change, saved at once
-│  │   ├─ TokenMotion.cs      The pointer tether (below / above / beside, edge flips), the corner bounce, the canvas size;
-│  │   │                      shared by the overlay and the panel preview
+│  │   ├─ TokenMotion.cs      The pointer tether (below / above / beside, edge flips), the corner bounce, the canvas size,
+│  │   │                      the Bouncy / Calm / Still profiles; shared by the overlay and the panel preview
 │  │   ├─ SettingsStore.cs    Load/save settings in %LocalAppData%\AgentsCursor\
 │  │   ├─ ProgramSuppression.cs Normalizes program names and matches them against the hidden-while-using list
 │  │   ├─ WindowPrograms.cs   Window/process → exe name; the open programs the "Add a program" picker lists
@@ -245,14 +291,15 @@ AgentsCursor.sln
 │      ├─ Program.cs                   Entry point (Velopack + single-instance guard; `hook` verb short-circuits first)
 │      ├─ NotifierOverlay.cs          The layered overlay window + animation (pointer positions / corner)
 │      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the overlay, pipe server, settings and control panel
-│      ├─ ControlPanel/               The WPF-UI control panel: one window, sidebar pages Token / Icons / Agents / Apps / About
+│      ├─ ControlPanel/               The WPF-UI control panel: one window, sidebar pages Sound and Display / Customization / Agents / Apps / About
 │      ├─ AgentPipeServer.cs          Named-pipe server: many connections at once, hooks and plugin leases
 │      ├─ AgentHookBridge.cs          The `hook` verb: normalises a tool's payload → one pipe line, fail-silent
 │      ├─ Services/AgentHookRegistrar.cs Connects each tool (backup + merge); HooksJson.cs (Claude, Codex),
 │      │                              OpenCodePlugins.cs + JsoncEdit.cs, PiExtensions.cs
 │      ├─ SingleInstance.cs           One instance only; a 2nd launch opens the control panel
 │      ├─ Autostart.cs                "Start with Windows" via HKCU\…\Run
-│      └─ Services/UpdateService.cs   Velopack check / download / apply updates, release notes
+│      ├─ Services/UpdateService.cs   Velopack check / download / apply updates, release notes
+│      └─ Services/ChimePlayer.cs     Plays the embedded chimes (Assets/Sounds) off the UI thread, volume-scaled
 ├─ integrations/            The Pi and OpenCode plugins (TypeScript), shipped next to the exe
 │  ├─ shared/                The tray connection and message format
 │  ├─ pi/, opencode/         The plugins
@@ -260,7 +307,8 @@ AgentsCursor.sln
 ├─ tests/
 │  └─ AgentsCursor.HookTests/ The C# tests (dotnet run --project tests/AgentsCursor.HookTests -c Release)
 └─ tools/
-   └─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the app/tray glyph
+   ├─ generate-icon.py       Builds Assets/Icon.ico (+icon.png) — the app/tray glyph
+   └─ generate-chimes.py     Synthesises the chimes into Assets/Sounds/*.wav
 ```
 
 The engine (`Core`) is deliberately UI-agnostic (GDI+ only): the WinForms overlay and the WPF control
@@ -285,13 +333,14 @@ control panel. Only one instance runs — launching it again just opens the cont
 Windows light or dark mode, or the theme you pick under **About**. Every change applies the moment you
 make it. Its sidebar has five pages:
 
-- **Token** — the master switch, the size, where it shows (below, above or beside the pointer, or a
-  screen corner), and a live preview of a pointer gliding over dark and light with the token following it.
-- **Icons** — each agent's icon: its original logo, a mascot, or an SVG you add, with a preview of
+- **Sound and Display** — the master switch, the size, where it shows (below, above or beside the
+  pointer, or a screen corner), how it moves (Bouncy, Calm, Still), a live preview of a pointer
+  gliding over dark and light with the token following it, and the sounds.
+- **Customization** — each agent's icon: its original logo, a mascot, or an SVG you add, with a preview of
   both looks (the green check for "done", and the yellow "?" with a "+N" for "needs you").
 - **Agents** — connect, update or disconnect Claude Code, Codex, OpenCode and Pi, how long the token
   stays after an agent is done, and **Preview on screen**, which shows pretend agents on the real token.
-- **Apps** — the **Hide the token while using** list.
+- **Apps** — **Show during meetings and screen sharing**, and the **Hide the token while using** list.
 - **About** — the version, **Check for updates**, **What's new**, the panel's **Theme** (System,
   Light or Dark), **Start with Windows**, and links.
 

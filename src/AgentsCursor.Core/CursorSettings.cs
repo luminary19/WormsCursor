@@ -74,6 +74,32 @@ public sealed class CursorSettings
     /// <see cref="NotifierPlacement.Corner"/>. Defaults to the bottom-right.</summary>
     public ScreenCorner Corner { get; set; } = ScreenCorner.BottomRight;
 
+    /// <summary>How lively the token moves. Defaults to <see cref="MotionStyle.Bouncy"/>; while Windows'
+    /// animation effects are off every style moves as <see cref="MotionStyle.Still"/>
+    /// (<see cref="MotionProfile.Effective"/>), whatever is saved here.</summary>
+    public MotionStyle Motion { get; set; } = MotionStyle.Bouncy;
+
+    // ---------- sounds (preferences UI) ----------
+
+    /// <summary>Play a chime when a session starts waiting on you. Off by default.</summary>
+    public bool SoundsEnabled { get; set; }
+
+    /// <summary>The chime for a session that newly needs your answer (blocked).</summary>
+    public Chime NeedsYouSound { get; set; } = Chime.Rise;
+
+    /// <summary>The chime for a session that just finished its turn.</summary>
+    public Chime DoneSound { get; set; } = Chime.Settle;
+
+    /// <summary>The range <see cref="SoundVolume"/> is clamped to.</summary>
+    public const int MinVolume = 0, MaxVolume = 100;
+
+    /// <summary>How loud the chimes play, 0-100, relative to the system volume (which is never changed).</summary>
+    public int SoundVolume { get; set; } = 60;
+
+    /// <summary>Keep showing the token while you present, share your screen or are in a call
+    /// (<see cref="MeetingDetection"/>). Off by default: the token hides then.</summary>
+    public bool ShowDuringMeetings { get; set; }
+
     /// <summary>Programs (exe file names, e.g. "dota2.exe") that hide the token while one of their
     /// windows is in the foreground, in any window mode. Agents keep being tracked meanwhile; the token
     /// comes back when focus moves elsewhere and something is still waiting. Every assignment is
@@ -124,11 +150,15 @@ public sealed class CursorSettings
         if (!Enum.IsDefined(Theme)) Theme = ThemePreference.System; // a hand-edited number out of range
         if (!Enum.IsDefined(Placement)) Placement = NotifierPlacement.BelowPointer;
         if (!Enum.IsDefined(Corner)) Corner = ScreenCorner.BottomRight;
+        if (!Enum.IsDefined(Motion)) Motion = MotionStyle.Bouncy;
+        if (!Enum.IsDefined(NeedsYouSound)) NeedsYouSound = Chime.Rise;
+        if (!Enum.IsDefined(DoneSound)) DoneSound = Chime.Settle;
+        SoundVolume = Math.Clamp(SoundVolume, MinVolume, MaxVolume);
         Version = CurrentVersion; // a loaded older file has been migrated by now
     }
 
     /// <summary>Puts the token's size and where it shows (placement and corner) back to the defaults:
-    /// what the Token page edits. Each agent's icon has its own reset on the Icons page, and the
+    /// what the Sound and Display page resets. Each agent's icon has its own reset on the Customization page, and the
     /// notifier switch, the linger timeout, the outline colour and the hidden-while-using list are
     /// left alone.</summary>
     public void ResetSizeAndPosition()

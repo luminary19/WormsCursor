@@ -24,6 +24,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
     readonly Icon _appIcon;
     readonly RegistryAutostart _autostart = new();
     readonly UpdateService _updates = new();
+    readonly ChimePlayer _chimes = new();
+    readonly SoundCues _cues = new();
     readonly ToolStripMenuItem _enabledItem;
 
     // A hidden, handle-backed control bound to the UI thread. Cross-process signals
@@ -36,6 +38,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
     // into the overlay, and reflects the count in the tray tooltip. The pipe server + sweep timer live
     // here so they survive a settings change.
     readonly AgentActivity _agents = new();
+    IReadOnlyList<WaitingAgent> _waiting = Array.Empty<WaitingAgent>(); // the set the overlay shows
     AgentPipeServer? _agentPipe;
     System.Windows.Forms.Timer? _agentSweep;
 
@@ -65,6 +68,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
         try { SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0); } catch { /* best effort */ }
 
         _overlay = new NotifierOverlay(_settings.Live);
+        _overlay.VisibilityChanged += () => Post(() => TokenVisibilityChanged?.Invoke());
         _appIcon = LoadAppIcon();
 
         _enabledItem = new ToolStripMenuItem("Enabled", null, OnToggleEnabled)
@@ -123,13 +127,17 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
         _refreshErrors.Remove(toolId);
     }
 
+    public void PlayChime(Chime chime) => _chimes.Play(chime, _settings.Live.SoundVolume);
+    public TokenVisibility TokenVisibility => _overlay.Visibility;
+    public event Action? TokenVisibilityChanged;
+
     // Drives the live token for the panel's "Preview on screen": a non-null value fakes that many
     // waiting agents (one logo + "+N"); null ends the preview and restores the real set (so a real
     // agent event arriving mid-preview, or just hiding the panel, leaves the genuine token on screen).
     static readonly WaitingAgent PreviewAgent = new("claude-code", WaitingState.Blocked);
     public void Preview(int? waitingAgents)
     {
-        if (waitingAgents is not int n) { _overlay.SetWaitingAgents(_agents.Waiting); return; }
+        if (waitingAgents is not int n) { _overlay.SetWaitingAgents(_waiting); return; }
         _overlay.SetWaitingAgents(Enumerable.Repeat(PreviewAgent, Math.Max(0, n)).ToArray());
     }
 
@@ -220,9 +228,15 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
             : $"Updated {string.Join(", ", tools.Select(t => t.DisplayName))}. Click to see the step each one needs.";
     }
 
+    // A new waiting set: show it, and chime when a session newly waits on you and the token is on
+    // screen to see (SoundCues decides; the overlay has decided visibility by the time it returns).
     void OnWaitingChanged(int count)
     {
-        _overlay.SetWaitingAgents(_agents.Waiting);
+        var before = _waiting;
+        _waiting = _agents.Waiting;
+        _overlay.SetWaitingAgents(_waiting);
+        var chime = _cues.Next(before, _waiting, _overlay.Visibility.Shown, _settings.Live, DateTime.UtcNow);
+        _chimes.Play(chime, _settings.Live.SoundVolume);
         _tray.Text = count > 0
             ? $"AgentsCursor — {count} agent{(count == 1 ? "" : "s")} waiting"
             : "AgentsCursor";
@@ -244,7 +258,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
 
     // ---------- the control panel ----------
 
-    /// <summary>Shows the control panel where it was left (the Token page the first time), or brings
+    /// <summary>Shows the control panel where it was left (the Sound and Display page the first time), or brings
     /// it to the front. Safe to call from any thread (e.g. the single-instance signal handler): it
     /// marshals onto the UI thread, where both the WinForms tray and the WPF panel live.</summary>
     public void OpenPreferences() => OpenPanel(null);
@@ -330,6 +344,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
         _agentSweep?.Dispose();
         _agentPipe?.Dispose();
         _overlay.Dispose();
+        _chimes.Dispose();
     }
 
     // Loads the monochrome arrow built by tools/generate-icon.py, copied next to
@@ -350,6 +365,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
             _agentPipe?.Dispose();
             _tray.Dispose();
             _overlay.Dispose();
+            _chimes.Dispose();
             _appIcon.Dispose();
             _marshal.Dispose();
         }

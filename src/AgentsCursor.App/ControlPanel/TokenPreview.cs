@@ -12,12 +12,12 @@ namespace AgentsCursor.App.ControlPanel;
 /// <summary>
 /// A live, animated picture of the token, drawn by Core's <see cref="NotifierRenderer"/> (so it is
 /// exactly what the overlay draws, badge, "+N" and chosen icon included) at its real size, moving with
-/// Core's <see cref="TokenMotion"/>. Transparent around the token: the page puts the backdrop behind it.
+/// Core's <see cref="TokenMotion"/> in the chosen <see cref="CursorSettings.Motion"/>. Transparent around the token: the page puts the backdrop behind it.
 ///
 /// Two modes. By default the token stays in place and only does its idle motion (a bob along its
-/// string, or the corner hop): the Icons page uses this. With <see cref="Roam"/> a small drawn pointer
+/// string, or the corner hop): the Customization page uses this. With <see cref="Roam"/> a small drawn pointer
 /// glides along a slow loop and the token follows it the way the chosen placement does (below, above,
-/// beside, mirrored at the preview's edges), or waits in that corner of the preview: the Token page uses
+/// beside, mirrored at the preview's edges), or waits in that corner of the preview: the Sound and Display page uses
 /// this to show where the token goes.
 ///
 /// The renderer is this control's own and lives on the UI thread from Loaded to Unloaded, never
@@ -141,12 +141,13 @@ public sealed class TokenPreview : FrameworkElement
         _last = now;
         float t = _animating ? (float)now : 0f;
         float tokenPx = (float)(_look.Size * dpi.DpiScaleX), scale = (float)dpi.DpiScaleX;
+        var motion = MotionProfile.For(_look.Motion, SystemParameters.ClientAreaAnimation);
 
         using (var g = Gdi.Graphics.FromImage(_buffer!))
         {
             g.Clear(Gdi.Color.Transparent);
             g.SmoothingMode = GdiDrawing2D.SmoothingMode.AntiAlias;
-            var (cx, cy, swing, pointer) = Roam ? RoamPose(w, h, t, dt, tokenPx, scale) : IdlePose(w, h, t, tokenPx, scale);
+            var (cx, cy, swing, pointer) = Roam ? RoamPose(w, h, t, dt, tokenPx, scale, motion) : IdlePose(w, h, t, tokenPx, scale, motion);
             _renderer.DrawToken(g, _look, new TokenFace(Tool, Blocked, Others), cx, cy, tokenPx, swing, scale);
             if (pointer is { } p) DrawPointer(g, p, scale); // the real pointer is always on top too
         }
@@ -160,23 +161,23 @@ public sealed class TokenPreview : FrameworkElement
     }
 
     // In place: the corner hop, or a bob along the placement's string (from an imaginary pointer).
-    (float X, float Y, float Swing, Gdi.PointF? Pointer) IdlePose(int w, int h, float t, float tokenPx, float scale)
+    (float X, float Y, float Swing, Gdi.PointF? Pointer) IdlePose(int w, int h, float t, float tokenPx, float scale, MotionProfile motion)
     {
         float badge = tokenPx * StatusBadge.Overhang;
         if (_look.Placement == NotifierPlacement.Corner)
         {
-            var pose = TokenMotion.CornerBounce(t, tokenPx);
-            float hop = tokenPx * TokenMotion.CornerHop;
+            var pose = TokenMotion.CornerBounce(t, tokenPx, motion);
+            float hop = tokenPx * motion.HopHeight;
             return (w / 2f + pose.OffsetX, h / 2f + (hop + badge) / 2f + pose.OffsetY, pose.SwingDeg, null);
         }
         var rest = TokenMotion.RestFor(_look.Placement, tokenPx, scale, Flip.None);
-        float bob = TokenMotion.IdleBob(t, tokenPx), len = Math.Max(1e-3f, rest.Length);
-        float travel = tokenPx * TokenMotion.IdleBobHeight;
+        float bob = TokenMotion.IdleBob(t, tokenPx, motion), len = Math.Max(1e-3f, rest.Length);
+        float travel = tokenPx * motion.BobHeight;
         return (w / 2f + rest.Dx / len * (bob + travel / 2f), h / 2f + badge / 2f + rest.Dy / len * (bob + travel / 2f), 0f, null);
     }
 
     // Following a pointer that glides along a slow loop through the preview.
-    (float X, float Y, float Swing, Gdi.PointF? Pointer) RoamPose(int w, int h, float t, float dt, float tokenPx, float scale)
+    (float X, float Y, float Swing, Gdi.PointF? Pointer) RoamPose(int w, int h, float t, float dt, float tokenPx, float scale, MotionProfile motion)
     {
         var placement = _look.Placement;
         if (placement != _motionFor) { _tether = default; _flip = Flip.None; _motionFor = placement; }
@@ -198,7 +199,7 @@ public sealed class TokenPreview : FrameworkElement
 
         if (placement == NotifierPlacement.Corner)
         {
-            var pose = TokenMotion.CornerBounce(t, tokenPx);
+            var pose = TokenMotion.CornerBounce(t, tokenPx, motion);
             float inset = tokenPx * (0.5f + StatusBadge.Overhang) + 8f * scale;
             float x = _look.Corner is ScreenCorner.TopLeft or ScreenCorner.BottomLeft ? inset : w - inset;
             float y = _look.Corner is ScreenCorner.TopLeft or ScreenCorner.TopRight
@@ -209,7 +210,7 @@ public sealed class TokenPreview : FrameworkElement
         var area = new Gdi.RectangleF(0, 0, w, h);
         _flip = TokenMotion.Edges(_flip, pointer, plain, tokenPx, area);
         var rest = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, tokenPx, scale, _flip), pointer, tokenPx, area);
-        var step = TokenMotion.Step(ref _tether, ax, ay, rest, tokenPx, dt, entrance: false, TokenMotion.MaxSwingFor(placement), area);
+        var step = TokenMotion.Step(ref _tether, ax, ay, rest, tokenPx, dt, entrance: false, motion, motion.MaxSwingFor(placement), area);
         return (ax + step.OffsetX, ay + step.OffsetY, step.SwingDeg, pointer);
     }
 
