@@ -42,6 +42,10 @@ public interface IControlPanelHost
     /// <summary>Raised on the UI thread when <see cref="TokenVisibility"/> changes.</summary>
     event Action? TokenVisibilityChanged;
 
+    /// <summary>The waits recorded so far (the Analytics page reads it; its <see
+    /// cref="WaitHistory.Recorded"/> fires on the writer's thread).</summary>
+    WaitHistory History { get; }
+
     /// <summary>Exits so <paramref name="release"/> can be installed, then the new version starts.
     /// Throws, leaving everything running, if the updater can't be started.</summary>
     void RestartToUpdate(VelopackAsset release);

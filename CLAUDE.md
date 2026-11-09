@@ -89,6 +89,28 @@ synthesised by `tools/generate-chimes.py` (16-bit mono 44.1 kHz, under 1 s, -3 d
 touched, and `ChimePlayer` plays it with `PlaySound(SND_MEMORY | SND_ASYNC)` from a thread-pool thread
 (never the UI or animation thread), keeping the buffer alive until the next chime replaces it.
 
+**Analytics history.** A **wait** is a session waiting in one state, from when it starts until it stops
+or switches between blocked and finished. `AgentActivity` raises `WaitEnded(WaitRecord)` once per
+ended wait (outside its lock, on the reporting thread): blocked ends `Answered` (any event that clears
+it: the call going ahead or denied, an answer, a new prompt, the turn ending) unless the session ended;
+finished ends `Resumed`, or `Expired` when swept; `SessionEnded`, `Release` and `EndAll` (the tray
+stopping, in `StopEverything`) end it `Ended`. The tray hands each record to `WaitHistory`, which only
+queues it; one background task appends `{"tool","kind","start","end","outcome"}` lines to
+`%LocalAppData%\AgentsCursor\history\yyyy-MM.jsonl` (by UTC start month), ending a torn last line
+before appending; `Load` parses line by line (a bad line is skipped and logged once), keeps the current
+month + `RetainedMonths` (12) before it, and the writer deletes older month files. Nothing else is
+stored (no session id, project, path or prompt); previews never touch `AgentActivity`, so they aren't
+recorded. `ActivityStats` (pure) turns the records into the page's numbers, by **local calendar day of
+the start** (`TimeZoneInfo` per instant, so DST never moves a wait): daily counts (all waits);
+current streak (consecutive active days up to today, or up to yesterday while today has none yet);
+longest streak (latest on a tie); **average response time** = the mean `Duration` (end - start) of the
+`Blocked` waits that ended `Answered` and started in the last 30 days (today + 29), i.e. from the
+moment the session started needing you (its token appeared, or would have while hidden) to the event
+that answered it, excluding done waits and blocked waits that ended `Ended`; formatted "42 s",
+"3 m 10 s", "1 h 5 m"; per-agent counts of all waits in the same 30 days, in `IconCatalog.Tools`
+order then other tools by name; heat levels by quartile of the shown active days (the busiest is
+always 4); `Percentages` by largest remainder (sum 100).
+
 Codex desktop and CLI use `%CODEX_HOME%/hooks.json` through the same shared engine hooks.
 Codex runs Windows hooks through PowerShell (`<shell> -NoProfile -Command <commandWindows>`), so the
 registered `commandWindows` is `& '<exe>' hook --tool codex` — a bare quoted path is a PowerShell
@@ -182,6 +204,9 @@ tests.
   approval/question/elicitation is pending, `Finished` when the turn just ended) and `WaitingCount`,
   raises `WaitingChanged`, and sweeps finished sessions after a TTL (blocked ones are never swept).
   A session reported over a plugin connection records it as its owner; `Release(owner)` drops them.
+  Raises `WaitEnded` per ended wait; `EndAll` ends everything (see "Analytics history").
+- `WaitRecord.cs` (`WaitRecord`, `WaitEnd`), `WaitHistory.cs` (the store), `ActivityStats.cs` (the
+  metrics) — the Analytics history, described above.
 - `AgentEventMessage.cs` — the normalised wire format (one JSON line per event) + the
   raw-event → `AgentEventKind` mapping.
 - `CursorSettings.cs` — the persisted, tunable settings: token `Size`, `Placement`
@@ -248,7 +273,9 @@ tests.
   `NotifierOverlay`, the pipe server + sweep timer, the `LiveSettings`, and the one control panel
   window (created on first use, kept for the app's lifetime; it is the panel's `IControlPanelHost`).
   Every settings change lands in `OnSettingsChanged` (linger TTL, menu check, overlay refresh).
-  Owns the `ChimePlayer` and `SoundCues` (chimes on new waiting sessions, see "Sounds").
+  Owns the `ChimePlayer` and `SoundCues` (chimes on new waiting sessions, see "Sounds"), and the
+  `WaitHistory` (fed by `AgentActivity.WaitEnded`; `StopEverything` ends the open waits with
+  `EndAll` and then disposes it, which writes what is queued).
   The "Enabled" item is the master on/off. On startup it moves WormsCursor's Start with Windows entry
   over, then (posted, after the pipe is up) runs `AgentHookRegistrar.RefreshConnected`: every
   connection that is ours but Outdated is re-registered in place, nothing else is touched, and one
@@ -260,14 +287,30 @@ tests.
   - `WpfHost.cs` — creates the one `System.Windows.Application` (`OnExplicitShutdown`, no `Run`) with
     WPF-UI's `ThemesDictionary` + `ControlsDictionary`; the WinForms loop pumps WPF too.
   - `ControlPanelWindow.xaml` — `FluentWindow` (Mica) with its `TitleBar` in its own row above a
-    `NavigationView` sidebar (Sound and Display, Customization, Agents, Apps, About; `PanelSection`
-    names them, and the panel opens on Sound and Display) fed prebuilt pages through an
+    `NavigationView` sidebar (Analytics, Sound and Display, Customization, Agents, Apps, and About in
+    the footer; `PanelSection` names them; Analytics is the home page: the panel first opens on it, and
+    the tray's double-click, Preferences… and a second launch open it there) fed prebuilt pages through an
     `INavigationViewPageProvider`. The title bar is deliberately not handed to the NavigationView
     (that indents it for a back button and pushes the page down); its padding lines the app icon and
     name up with the sidebar items' icons and labels. The theme follows `CursorSettings.Theme`:
     System uses `SystemThemeWatcher` (live), Light/Dark apply directly; both go through
     `ApplicationThemeManager`, so WpfHost's opaque text brushes are re-derived. Closing hides it;
     the sidebar folds to icons below 860 DIPs; each page opens scrolled to the top.
+  - `AnalyticsPage` — three stat tiles (Current streak / Longest streak with their dates, Average
+    response "Last 30 days"; the number large, the unit small; each tile's automation name reads it
+    all), "Activity" (`ActivityHeatmap`) and "Agents" (`AgentDonut` with the 30-day total in the hole,
+    and a legend row per agent: colour, logo, name, count, share). It loads + summarises on a
+    background task when shown and when `WaitHistory.Recorded` fires while shown; empty: "Nothing yet.
+    Agents show up here once one needs you." (or "No agent needed you in the last 30 days.").
+    `ActivityHeatmap` is an owner-drawn `FrameworkElement`: a column per week (the culture's first day
+    on top, today in the last column), 26 to 53 weeks to fill the width at ~24 DIPs a column, pitch,
+    gap and origin snapped to device pixels; month names over the week holding the 1st, Mon/Wed/Fri,
+    "Less … More"; hover or keyboard focus (arrows: a week left/right, a day up/down, Home/End) shows
+    "12 tokens on Sat, Nov 8" as a tooltip and as its UIA name. `AgentDonut` draws the ring (2 DIP gaps,
+    a hovered segment lifts, tooltip "Codex: 52 (24%)"). `ChartColors`: per theme, a GitHub green ramp
+    for the heatmap; agents in Claude's and Pi's brand hues, Codex blue and OpenCode aqua (their marks
+    are monochrome, which can't carry identity); ring-adjacent pairs pass a colour-blind check in both
+    themes. Charts repaint on `ApplicationThemeManager.Changed`.
   - `SoundAndDisplayPage` — first a preview (260 DIPs high, half dark, half light) where a drawn pointer
     glides across both and the token follows it the chosen way, kept inside the preview
     (`TokenPreview` with `Roam`: Core renderer + `TokenMotion` → WPF bitmap on the UI thread, its own

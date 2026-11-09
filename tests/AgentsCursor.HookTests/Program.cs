@@ -70,6 +70,15 @@ var tests = new (string Name, Action Run)[]
     ("Meetings: presenting, sharing, camera and a settled microphone hide the token; stale entries don't", SoundAndMeetingTests.MeetingDecisions),
     ("The meeting watcher checks only while watching and treats a failing check as no meeting", SoundAndMeetingTests.MeetingWatching),
     ("The live meeting signals read without throwing", SoundAndMeetingTests.MeetingSignalsSmoke),
+    ("Each wait ends once, answered, resumed, expired or ended, timed from when it began", AnalyticsTests.ActivityWaits),
+    ("The history round-trips one compact line per wait, a file per month, appending", AnalyticsTests.HistoryRoundTrip),
+    ("A torn or corrupt history line costs only itself and is logged once", AnalyticsTests.HistoryCorruption),
+    ("History keeps the current month and the 12 before it, and only touches its own files", AnalyticsTests.HistoryRetention),
+    ("Streaks count local days in a row, today not breaking them until it is over", AnalyticsTests.Streaks),
+    ("Average response is the mean answered needs-you wait of the last 30 days, formatted compactly", AnalyticsTests.AverageResponse),
+    ("Agents are counted over 30 days in their fixed order; shares add to 100; heat levels by quartile", AnalyticsTests.AgentCounts),
+    ("Days are local calendar days across daylight saving, and the calendar starts on a week boundary", AnalyticsTests.DaylightSaving),
+    ("Activity to history to summary keeps no project, path or session id", AnalyticsTests.EndToEnd),
 };
 foreach (var (name, run) in tests)
 {

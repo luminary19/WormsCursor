@@ -10,10 +10,11 @@ using Wpf.Ui.Controls;
 namespace AgentsCursor.App.ControlPanel;
 
 /// <summary>The control panel's sidebar sections.</summary>
-public enum PanelSection { SoundAndDisplay, Customization, Agents, Apps, About, WhatsNew }
+public enum PanelSection { Analytics, SoundAndDisplay, Customization, Agents, Apps, About, WhatsNew }
 
 /// <summary>
-/// The one control panel window: a Windows 11 Settings-style sidebar (Sound and Display, Customization, Agents, Apps, About).
+/// The one control panel window: a Windows 11 Settings-style sidebar (Analytics, the home page, then
+/// Sound and Display, Customization, Agents, Apps, and About at the foot).
 /// Every change applies the moment it is made; there is no OK / Cancel.
 ///
 /// The tray creates it once and keeps it for the app's lifetime: closing only hides it, so it keeps
@@ -27,7 +28,7 @@ public partial class ControlPanelWindow : FluentWindow
     readonly AboutPage _about;
     bool _shuttingDown;
     const double WidePaneMinWidth = 860; // DIPs; narrower and the sidebar shows icons only
-    PanelSection _firstSection = PanelSection.SoundAndDisplay; // shown when the window first loads
+    PanelSection _firstSection = PanelSection.Analytics; // shown when the window first loads
     ThemePreference? _theme;      // the preference last applied
     bool _followingSystem;        // SystemThemeWatcher is watching this window
 
@@ -48,6 +49,7 @@ public partial class ControlPanelWindow : FluentWindow
         _about = new AboutPage(host);
         Navigation.SetPageProviderService(new PageProvider(new Dictionary<Type, object>
         {
+            [typeof(AnalyticsPage)] = new AnalyticsPage(host),
             [typeof(SoundAndDisplayPage)] = new SoundAndDisplayPage(host),
             [typeof(CustomizationPage)] = new CustomizationPage(host.Settings),
             [typeof(AgentsPage)] = _agents,
@@ -66,7 +68,7 @@ public partial class ControlPanelWindow : FluentWindow
     }
 
     /// <summary>Shows the panel, or brings it to the front, on <paramref name="section"/> — or, with
-    /// null, where it was left (the Sound and Display page the first time).</summary>
+    /// null, where it was left (Analytics the first time).</summary>
     public void Open(PanelSection? section = null)
     {
         if (section is { } target)
@@ -112,11 +114,12 @@ public partial class ControlPanelWindow : FluentWindow
     {
         Type page = section switch
         {
+            PanelSection.SoundAndDisplay => typeof(SoundAndDisplayPage),
             PanelSection.Customization => typeof(CustomizationPage),
             PanelSection.Agents => typeof(AgentsPage),
             PanelSection.Apps => typeof(AppsPage),
             PanelSection.About or PanelSection.WhatsNew => typeof(AboutPage),
-            _ => typeof(SoundAndDisplayPage),
+            _ => typeof(AnalyticsPage),
         };
         Navigation.Navigate(page);
         if (section == PanelSection.WhatsNew) _about.ShowWhatsNew();

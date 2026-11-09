@@ -7,6 +7,14 @@ GitHub releases. The release workflow pulls the matching section into each relea
 ## Unreleased
 
 ### Added
+- **Analytics, the control panel's new home page.** See your **current** and **longest streak**
+  (days in a row an agent needed you), your **average response** time over the last 30 days (from the
+  yellow "?" appearing to your answer), a GitHub-style **activity** calendar of the last six months
+  (hover a day for "12 tokens on Sat, Nov 8"), and a ring of **which agents needed you** in the last 30 days.
+  The tray's double-click, **Preferences…** and a second launch all open it. It reads a small local
+  history kept in `%LocalAppData%\AgentsCursor\history\`: one line per token with the agent, needs you
+  or done, when it came and went and how it ended. No prompts, projects, paths or session ids, and
+  nothing older than a year.
 - **Hidden during meetings and screen sharing.** The token now stays out of sight while you present,
   share your screen or are in a call, and comes back when that ends. It goes by what Windows itself
   reports: presentation mode, duplicated displays (a projector), an app capturing the screen through

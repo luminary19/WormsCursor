@@ -94,6 +94,10 @@ public readonly record struct WaitingAgent(string Tool, WaitingState State, stri
 /// killed Pi or OpenCode host clears at once. Hook-reported sessions (Claude Code, Codex) have no owner.
 /// (Trade-off for them: a hard-killed hook agent that was blocked leaves its logo up until you clear or
 /// disable it, since no closing event ever arrives.)
+///
+/// Each <b>wait</b> (a session waiting in one state, from the moment it starts waiting until it stops
+/// or switches between blocked and finished) is reported once, when it ends, through
+/// <see cref="WaitEnded"/>: the analytics history is built from these.
 /// </summary>
 public sealed class AgentActivity
 {
@@ -101,6 +105,7 @@ public sealed class AgentActivity
     {
         public bool Finished;          // the timed finished-turn / error notice
         public DateTime LastUtc;
+        public DateTime WaitSinceUtc;  // when the current wait (in State) began; meaningful while IsWaiting
         public string Tool = "";
         public string? Owner;          // the plugin connection that reported it; null for hooks
         // (agent, call): agent "" is the main agent, call "" a prompt whose call the tool didn't name.
@@ -131,6 +136,13 @@ public sealed class AgentActivity
     /// waiting, or moves between finished and blocked), with the current count.</summary>
     public event Action<int>? WaitingChanged;
 
+    /// <summary>Raised outside the lock, on the reporting thread, once per wait that ends: a session
+    /// stops waiting, moves between finished and blocked (ending one wait and starting the next), is
+    /// swept, released or ended. A blocked wait ends <see cref="WaitEnd.Answered"/> unless the
+    /// session itself ended; a finished one ends <see cref="WaitEnd.Resumed"/>, or
+    /// <see cref="WaitEnd.Expired"/> when swept.</summary>
+    public event Action<WaitRecord>? WaitEnded;
+
     /// <summary>How many distinct agent sessions currently need the user.</summary>
     public int WaitingCount { get { lock (_gate) return SnapshotLocked().Count; } }
 
@@ -154,26 +166,47 @@ public sealed class AgentActivity
         if (string.IsNullOrEmpty(tool)) tool = "unknown";
         int after;
         bool changed;
+        var ended = new List<WaitRecord>();
         var key = Key(tool, sessionId, project);
         lock (_gate)
         {
             var before = SnapshotLocked();
-            SweepLocked(nowUtc);
+            SweepLocked(nowUtc, ended);
             if (kind == AgentEventKind.SessionEnded)
-                _sessions.Remove(key); // the session is gone — forget it, don't wait on it
+            {
+                // The session is gone — forget it, don't wait on it.
+                if (_sessions.Remove(key, out var gone)) EndWait(gone, nowUtc, WaitEnd.Ended, ended);
+            }
             else
             {
                 if (!_sessions.TryGetValue(key, out var e)) { e = new Entry(); _sessions[key] = e; }
+                bool wasWaiting = e.IsWaiting;
+                var wasState = e.State;
                 e.Tool = tool;
                 e.Owner = owner;
                 e.LastUtc = nowUtc;
                 Apply(e, kind, itemIds ?? Array.Empty<string>(), agentId ?? "", callIds ?? Array.Empty<string>());
+                if (wasWaiting && (!e.IsWaiting || e.State != wasState))
+                    ended.Add(new WaitRecord(e.Tool, wasState, e.WaitSinceUtc, nowUtc,
+                        wasState == WaitingState.Blocked ? WaitEnd.Answered : WaitEnd.Resumed));
+                if (e.IsWaiting && (!wasWaiting || e.State != wasState)) e.WaitSinceUtc = nowUtc;
             }
             var now = SnapshotLocked();
             after = now.Count;
             changed = !before.SequenceEqual(now);
         }
+        Raise(ended);
         if (changed) WaitingChanged?.Invoke(after);
+    }
+
+    static void EndWait(Entry e, DateTime nowUtc, WaitEnd outcome, List<WaitRecord> ended)
+    {
+        if (e.IsWaiting) ended.Add(new WaitRecord(e.Tool, e.State, e.WaitSinceUtc, nowUtc, outcome));
+    }
+
+    void Raise(List<WaitRecord> ended)
+    {
+        foreach (var record in ended) WaitEnded?.Invoke(record);
     }
 
     static void Apply(Entry e, AgentEventKind kind, IReadOnlyList<string> items, string agent, IReadOnlyList<string> calls)
@@ -220,19 +253,30 @@ public sealed class AgentActivity
     /// because that connection closed: the plugin host that reported them is gone (quit, reloaded or
     /// killed), so nothing it owned can still be waiting on you. Sessions with another owner, or none
     /// (hooks), are untouched. Raises <see cref="WaitingChanged"/> once if the waiting set changed.</summary>
-    public void Release(string owner)
+    public void Release(string owner, DateTime? nowUtc = null) => Drop(e => e.Owner == owner, nowUtc ?? DateTime.UtcNow);
+
+    /// <summary>Drops every session because tracking stops (the tray is exiting): each open wait ends
+    /// <see cref="WaitEnd.Ended"/> at <paramref name="nowUtc"/>, so it still reaches the history.</summary>
+    public void EndAll(DateTime nowUtc) => Drop(_ => true, nowUtc);
+
+    void Drop(Func<Entry, bool> which, DateTime nowUtc)
     {
         int after;
         bool changed;
+        var ended = new List<WaitRecord>();
         lock (_gate)
         {
             var before = SnapshotLocked();
-            foreach (var key in _sessions.Where(kv => kv.Value.Owner == owner).Select(kv => kv.Key).ToArray())
+            foreach (var key in _sessions.Where(kv => which(kv.Value)).Select(kv => kv.Key).ToArray())
+            {
+                EndWait(_sessions[key], nowUtc, WaitEnd.Ended, ended);
                 _sessions.Remove(key);
+            }
             var now = SnapshotLocked();
             after = now.Count;
             changed = !before.SequenceEqual(now);
         }
+        Raise(ended);
         if (changed) WaitingChanged?.Invoke(after);
     }
 
@@ -243,25 +287,31 @@ public sealed class AgentActivity
     {
         int after;
         bool changed;
+        var ended = new List<WaitRecord>();
         lock (_gate)
         {
             var before = SnapshotLocked();
-            SweepLocked(nowUtc);
+            SweepLocked(nowUtc, ended);
             var now = SnapshotLocked();
             after = now.Count;
             changed = !before.SequenceEqual(now);
         }
+        Raise(ended);
         if (changed) WaitingChanged?.Invoke(after);
     }
 
-    void SweepLocked(DateTime nowUtc)
+    void SweepLocked(DateTime nowUtc, List<WaitRecord> ended)
     {
         List<string>? dead = null;
         foreach (var kv in _sessions)
             if (!kv.Value.IsBlocked && nowUtc - kv.Value.LastUtc > _ttl)
                 (dead ??= new()).Add(kv.Key);
-        if (dead is not null)
-            foreach (var k in dead) _sessions.Remove(k);
+        if (dead is null) return;
+        foreach (var k in dead)
+        {
+            EndWait(_sessions[k], nowUtc, WaitEnd.Expired, ended);
+            _sessions.Remove(k);
+        }
     }
 
     List<WaitingAgent> SnapshotLocked()

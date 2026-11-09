@@ -1,0 +1,149 @@
+<Page
+    x:Class="AgentsCursor.App.ControlPanel.AnalyticsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:AgentsCursor.App.ControlPanel"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="Analytics"
+    Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/AgentsCursor;component/ControlPanel/PanelStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!--  A stat tile: a small label with its icon, the number, and one line of detail. Every
+                  line keeps its height when empty, so the tiles never jump as the numbers arrive.  -->
+            <Style x:Key="StatLabel" TargetType="ui:TextBlock">
+                <Setter Property="Margin" Value="8,0,0,0" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+            <Style x:Key="StatIcon" TargetType="ui:SymbolIcon">
+                <Setter Property="FontSize" Value="16" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Style>
+            <Style x:Key="StatValue" TargetType="ui:TextBlock">
+                <Setter Property="Margin" Value="0,10,0,0" />
+                <Setter Property="MinHeight" Value="36" />
+                <Setter Property="FontFamily" Value="{StaticResource PanelDisplayFont}" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+            <Style x:Key="StatDetail" TargetType="ui:TextBlock">
+                <Setter Property="MinHeight" Value="16" />
+                <Setter Property="FontTypography" Value="Caption" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+        </ResourceDictionary>
+    </Page.Resources>
+
+    <StackPanel Margin="40,28,40,40">
+        <ui:TextBlock Style="{StaticResource PageTitle}" Text="Analytics" />
+
+        <!--  The headline numbers.  -->
+        <Grid Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Border
+                x:Name="CurrentTile"
+                Padding="16,14,16,14"
+                Style="{StaticResource Surface}">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Style="{StaticResource StatIcon}" Symbol="Fire24" />
+                        <ui:TextBlock Style="{StaticResource StatLabel}" Text="Current streak" />
+                    </StackPanel>
+                    <ui:TextBlock x:Name="CurrentValue" Style="{StaticResource StatValue}" />
+                    <ui:TextBlock x:Name="CurrentDetail" Style="{StaticResource StatDetail}" />
+                </StackPanel>
+            </Border>
+            <Border
+                x:Name="LongestTile"
+                Grid.Column="2"
+                Padding="16,14,16,14"
+                Style="{StaticResource Surface}">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Style="{StaticResource StatIcon}" Symbol="Trophy24" />
+                        <ui:TextBlock Style="{StaticResource StatLabel}" Text="Longest streak" />
+                    </StackPanel>
+                    <ui:TextBlock x:Name="LongestValue" Style="{StaticResource StatValue}" />
+                    <ui:TextBlock x:Name="LongestDetail" Style="{StaticResource StatDetail}" />
+                </StackPanel>
+            </Border>
+            <Border
+                x:Name="ResponseTile"
+                Grid.Column="4"
+                Padding="16,14,16,14"
+                Style="{StaticResource Surface}">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Style="{StaticResource StatIcon}" Symbol="Timer24" />
+                        <ui:TextBlock Style="{StaticResource StatLabel}" Text="Average response" />
+                    </StackPanel>
+                    <ui:TextBlock x:Name="ResponseValue" Style="{StaticResource StatValue}" />
+                    <ui:TextBlock
+                        x:Name="ResponseDetail"
+                        Style="{StaticResource StatDetail}"
+                        Text="Last 30 days" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Activity" />
+        <Border Padding="20,16,20,16" Style="{StaticResource Surface}">
+            <local:ActivityHeatmap x:Name="Heatmap" />
+        </Border>
+
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Agents" />
+        <Border Padding="24,20,24,20" Style="{StaticResource Surface}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid Width="156" Height="156">
+                    <local:AgentDonut x:Name="Donut" AutomationProperties.Name="Agents in the last 30 days" />
+                    <StackPanel
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        IsHitTestVisible="False">
+                        <ui:TextBlock
+                            x:Name="TotalText"
+                            HorizontalAlignment="Center"
+                            FontFamily="{StaticResource PanelDisplayFont}"
+                            FontTypography="Subtitle" />
+                        <ui:TextBlock
+                            HorizontalAlignment="Center"
+                            FontTypography="Caption"
+                            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                            Text="last 30 days" />
+                    </StackPanel>
+                </Grid>
+                <StackPanel
+                    x:Name="Legend"
+                    Grid.Column="1"
+                    MaxWidth="440"
+                    Margin="32,0,0,0"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center" />
+                <ui:TextBlock
+                    x:Name="EmptyText"
+                    Grid.Column="1"
+                    Margin="32,0,0,0"
+                    VerticalAlignment="Center"
+                    Style="{StaticResource Secondary}"
+                    Visibility="Collapsed" />
+            </Grid>
+        </Border>
+    </StackPanel>
+</Page>

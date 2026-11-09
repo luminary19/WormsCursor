@@ -38,6 +38,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
     // into the overlay, and reflects the count in the tray tooltip. The pipe server + sweep timer live
     // here so they survive a settings change.
     readonly AgentActivity _agents = new();
+    // Every ended wait, appended off the UI thread to %LocalAppData%\AgentsCursor\history (Analytics).
+    readonly WaitHistory _history = new(WaitHistory.DefaultDirectory, log: AppLog.Write);
     IReadOnlyList<WaitingAgent> _waiting = Array.Empty<WaitingAgent>(); // the set the overlay shows
     AgentPipeServer? _agentPipe;
     System.Windows.Forms.Timer? _agentSweep;
@@ -129,6 +131,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
 
     public void PlayChime(Chime chime) => _chimes.Play(chime, _settings.Live.SoundVolume);
     public TokenVisibility TokenVisibility => _overlay.Visibility;
+    public WaitHistory History => _history;
     public event Action? TokenVisibilityChanged;
 
     // Drives the live token for the panel's "Preview on screen": a non-null value fakes that many
@@ -158,6 +161,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
     void StartAgentNotifier()
     {
         _agents.WaitingChanged += OnWaitingChanged;
+        _agents.WaitEnded += _history.Record;
         _agents.Ttl = TimeSpan.FromSeconds(_settings.Live.AgentNotifierTimeoutSeconds);
 
         // The pipe fires on its own threads; hop to the UI thread so AgentActivity's events (which
@@ -258,10 +262,10 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
 
     // ---------- the control panel ----------
 
-    /// <summary>Shows the control panel where it was left (the Sound and Display page the first time), or brings
-    /// it to the front. Safe to call from any thread (e.g. the single-instance signal handler): it
-    /// marshals onto the UI thread, where both the WinForms tray and the WPF panel live.</summary>
-    public void OpenPreferences() => OpenPanel(null);
+    /// <summary>Shows the control panel on its home page (Analytics), or brings it to the front there.
+    /// Safe to call from any thread (e.g. the single-instance signal handler): it marshals onto the UI
+    /// thread, where both the WinForms tray and the WPF panel live.</summary>
+    public void OpenPreferences() => OpenPanel(PanelSection.Analytics);
 
     void OpenPanel(PanelSection? section)
     {
@@ -335,7 +339,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
     }
 
     // Takes down everything visible and every background listener: the panel, the tray icon, the
-    // pipe, the sweep and the overlay. Used on Exit and before restarting into an update.
+    // pipe, the sweep and the overlay. Used on Exit and before restarting into an update. The waits
+    // still open end here (Ended), so they reach the history before its writer finishes.
     void StopEverything()
     {
         _panel?.Shutdown();
@@ -343,8 +348,10 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
         _tray.Visible = false;
         _agentSweep?.Dispose();
         _agentPipe?.Dispose();
+        _agents.EndAll(DateTime.UtcNow);
         _overlay.Dispose();
         _chimes.Dispose();
+        _history.Dispose();
     }
 
     // Loads the monochrome arrow built by tools/generate-icon.py, copied next to
@@ -366,6 +373,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
             _tray.Dispose();
             _overlay.Dispose();
             _chimes.Dispose();
+            _history.Dispose();
             _appIcon.Dispose();
             _marshal.Dispose();
         }

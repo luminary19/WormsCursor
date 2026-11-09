@@ -115,6 +115,24 @@ are still tracked meanwhile. When you switch away and one is still waiting, the 
 While hidden, the token costs no CPU: AgentsCursor learns about focus changes from Windows instead of
 checking repeatedly.
 
+### Analytics
+
+The control panel opens on **Analytics**, a look back at how you and your agents get on:
+
+- **Current streak** and **Longest streak**: days in a row on which an agent needed you (today counts
+  once it has one; a streak breaks only when a whole day passes with none).
+- **Average response**: over the last 30 days, the mean time from a session starting to need you
+  (the yellow "?") to your answer. Done tokens, and waits that ended without an answer (the agent quit
+  or AgentsCursor closed), don't count.
+- **Activity**: a calendar of the last six months or so, one square per day, greener the more tokens
+  appeared; hover a day (or focus the calendar and use the arrow keys) to see "12 tokens on Sat, Nov 8".
+- **Agents**: which agents needed you in the last 30 days, as a ring with each agent's share and count.
+
+It's built from a small local history: one line per token (which agent, needs you or done, when it
+appeared and went, and how it ended), nothing else — no prompts, projects, paths or session ids. It
+lives in `%LocalAppData%\AgentsCursor\history\` as a file per month, and months older than a year are
+deleted.
+
 ## How the notifier works
 
 Set it up on the **Agents** page of **Preferences…**: connect **Claude Code**, **Codex**,
@@ -273,7 +291,10 @@ AgentsCursor.sln
 │  │   ├─ SvgSanitizer.cs     Makes an untrusted SVG safe to keep and draw (no scripts, no outside references)
 │  │   ├─ SvgReferences.cs    Refuses an SVG whose references loop, nest too deep or draw too much
 │  │   ├─ TokenSprites.cs     Renders icons (SVG.NET) to cached sprites, fitted by visible pixels, with a contrast rim
-│  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe)
+│  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe); reports each ended wait
+│   ├─ WaitRecord.cs       One ended wait (agent, needs you / done, start, end, how it ended)
+│   ├─ WaitHistory.cs      The Analytics history: a JSON line per wait, a file per month, appended off the UI thread
+│   ├─ ActivityStats.cs    Streaks, average response, per-agent counts, the calendar's days (pure)
 │  │   ├─ SoundCues.cs        When a chime plays (new waiting sessions, token shown, one per burst); ChimeAudio.cs scales its volume
 │  │   ├─ TokenVisibility.cs  Why the token is hidden: nothing waiting, turned off, an app in front, a meeting
 │  │   ├─ MeetingDetection.cs Presenting / sharing / camera / microphone -> a meeting (pure); MeetingSignals.cs reads
@@ -291,7 +312,7 @@ AgentsCursor.sln
 │      ├─ Program.cs                   Entry point (Velopack + single-instance guard; `hook` verb short-circuits first)
 │      ├─ NotifierOverlay.cs          The layered overlay window + animation (pointer positions / corner)
 │      ├─ TrayApplicationContext.cs   NotifyIcon + menu, owns the overlay, pipe server, settings and control panel
-│      ├─ ControlPanel/               The WPF-UI control panel: one window, sidebar pages Sound and Display / Customization / Agents / Apps / About
+│      ├─ ControlPanel/               The WPF-UI control panel: one window, sidebar pages Analytics / Sound and Display / Customization / Agents / Apps / About
 │      ├─ AgentPipeServer.cs          Named-pipe server: many connections at once, hooks and plugin leases
 │      ├─ AgentHookBridge.cs          The `hook` verb: normalises a tool's payload → one pipe line, fail-silent
 │      ├─ Services/AgentHookRegistrar.cs Connects each tool (backup + merge); HooksJson.cs (Claude, Codex),
@@ -331,8 +352,10 @@ control panel. Only one instance runs — launching it again just opens the cont
 
 **Preferences…** opens the control panel, a Windows 11 Settings-style window that follows your
 Windows light or dark mode, or the theme you pick under **About**. Every change applies the moment you
-make it. Its sidebar has five pages:
+make it. Its sidebar has six pages, opening on **Analytics**:
 
+- **Analytics** — streaks, average response time, the activity calendar and the agents that needed
+  you (see [Analytics](#analytics)).
 - **Sound and Display** — the master switch, the size, where it shows (below, above or beside the
   pointer, or a screen corner), how it moves (Bouncy, Calm, Still), a live preview of a pointer
   gliding over dark and light with the token following it, and the sounds.

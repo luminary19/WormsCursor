@@ -37,6 +37,10 @@
             Transition="FadeInWithSlide">
             <ui:NavigationView.MenuItems>
                 <ui:NavigationViewItem
+                    Content="Analytics"
+                    Icon="{ui:SymbolIcon DataTrending24}"
+                    TargetPageType="{x:Type local:AnalyticsPage}" />
+                <ui:NavigationViewItem
                     Content="Sound and Display"
                     Icon="{ui:SymbolIcon DesktopSpeaker24}"
                     TargetPageType="{x:Type local:SoundAndDisplayPage}" />
