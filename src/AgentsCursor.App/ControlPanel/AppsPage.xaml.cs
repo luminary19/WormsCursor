@@ -72,8 +72,7 @@ public partial class AppsPage : Page
             MeetingSignal.Presenting => "presentation mode is on",
             MeetingSignal.DisplayDuplicated => "your displays are duplicated",
             MeetingSignal.ScreenShared => $"{app} is capturing the screen",
-            MeetingSignal.Camera => $"{app} is using the camera",
-            _ => $"{app} is using the microphone",
+            _ => $"{app} is using the camera",
         };
     }
 

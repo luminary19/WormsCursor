@@ -12,9 +12,9 @@ namespace AgentsCursor.App.ControlPanel;
 
 /// <summary>
 /// The panel's home page: how you and your agents have been getting on, from the local history
-/// (<see cref="WaitHistory"/>). Three tiles (current streak, longest streak, average response time),
-/// the activity calendar (<see cref="ActivityHeatmap"/>), and which agents needed you in the last 30
-/// days (<see cref="AgentDonut"/> + a legend). The numbers are <see cref="ActivityStats"/>'s.
+/// (<see cref="WaitHistory"/>). Three tiles (current streak, longest streak, typical response time),
+/// the activity calendar (<see cref="ActivityHeatmap"/>), and who needed you in the last 30 days
+/// (<see cref="AgentDonut"/> + a legend). The numbers are <see cref="ActivityStats"/>'s.
 ///
 /// The history is read and summarised on a background task whenever the page is shown and whenever a
 /// wait is recorded while it is; the controls keep their size until the numbers arrive, so nothing
@@ -34,7 +34,7 @@ public partial class AnalyticsPage : Page
         _host.History.Recorded += () => Dispatcher.BeginInvoke(() => { _stale = true; ReloadIfShown(); });
         IsVisibleChanged += (_, _) => { _stale = true; ReloadIfShown(); };
         Loaded += (_, _) => ReloadIfShown();
-        // The legend's swatches and logos are drawn for one theme and one scale.
+        // The legend's swatches are drawn for one theme.
         Wpf.Ui.Appearance.ApplicationThemeManager.Changed += (_, _) => { if (_shown is not null) Show(_shown); };
     }
 
@@ -72,12 +72,12 @@ public partial class AnalyticsPage : Page
             CurrentSince(summary.CurrentStreak, summary.Today, culture), culture);
         ShowDays(LongestTile, LongestValue, LongestDetail, "Longest streak", summary.LongestStreak,
             Span(summary.LongestStreak, summary.Today, culture), culture);
-        string response = summary.AverageResponse is { } average ? ActivityStats.FormatDuration(average) : "—";
+        string response = summary.TypicalResponse is { } typical ? ActivityStats.FormatDuration(typical) : "—";
         ResponseValue.Inlines.Clear();
         // "3 m 10 s": the numbers large, the units small, as on the streak tiles.
         foreach (var (part, i) in response.Split(' ').Select((p, i) => (p, i)))
             ResponseValue.Inlines.Add(part.Any(char.IsDigit) || part == "—" ? Number((i > 0 ? " " : "") + part) : Unit(" " + part));
-        AutomationProperties.SetName(ResponseTile, $"Average response: {(summary.AverageResponse is null ? "none yet" : response)}, {ResponseDetail.Text}");
+        AutomationProperties.SetName(ResponseTile, $"Typical response: {(summary.TypicalResponse is null ? "none yet" : response)}, {ResponseDetail.Text}");
 
         Heatmap.Show(summary.Daily, summary.Today);
 
@@ -90,7 +90,7 @@ public partial class AnalyticsPage : Page
         Legend.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
         EmptyText.Visibility = any ? Visibility.Collapsed : Visibility.Visible;
         EmptyText.Text = summary.IsEmpty
-            ? "Nothing yet. Agents show up here once one needs you."
+            ? "No agent has needed you yet."
             : "No agent needed you in the last 30 days.";
     }
 
@@ -132,11 +132,10 @@ public partial class AnalyticsPage : Page
     static string Date(DateOnly day, DateOnly today, CultureInfo culture, bool withYear = true)
         => day.ToString(withYear && day.Year != today.Year ? "MMM d, yyyy" : "MMM d", culture);
 
-    // One row per agent: its colour, logo and name, then the count and its share.
+    // One row per agent: its colour (the ring's key) and name, then the count and its share.
     void BuildLegend(IReadOnlyList<AgentCount> agents, IReadOnlyList<int> percents)
     {
         Legend.Children.Clear();
-        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         var culture = CultureInfo.CurrentCulture;
         for (int i = 0; i < agents.Count; i++)
         {
@@ -145,7 +144,7 @@ public partial class AnalyticsPage : Page
             if (i > 0) Legend.Children.Add(new Border { Style = (Style)FindResource("RowDivider") });
 
             var row = new Grid { Height = 36 };
-            foreach (var width in new[] { 10.0, 10, 20, 10 })
+            foreach (var width in new[] { 10.0, 12 })
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -157,12 +156,6 @@ public partial class AnalyticsPage : Page
                 Width = 10, Height = 10, CornerRadius = new CornerRadius(3),
                 Background = ChartColors.Agent(agent.Tool), VerticalAlignment = VerticalAlignment.Center,
             };
-            var logo = new System.Windows.Controls.Image
-            {
-                Source = ToolLogo.Render(agent.Tool, 20, dpi), Width = 20, Height = 20,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            RenderOptions.SetBitmapScalingMode(logo, BitmapScalingMode.HighQuality);
             var label = new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
             var count = new TextBlock
             {
@@ -176,11 +169,10 @@ public partial class AnalyticsPage : Page
             share.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
 
             Grid.SetColumn(swatch, 0);
-            Grid.SetColumn(logo, 2);
-            Grid.SetColumn(label, 4);
-            Grid.SetColumn(count, 5);
-            Grid.SetColumn(share, 6);
-            foreach (UIElement child in new UIElement[] { swatch, logo, label, count, share }) row.Children.Add(child);
+            Grid.SetColumn(label, 2);
+            Grid.SetColumn(count, 3);
+            Grid.SetColumn(share, 4);
+            foreach (UIElement child in new UIElement[] { swatch, label, count, share }) row.Children.Add(child);
             Legend.Children.Add(row);
         }
     }

@@ -88,7 +88,7 @@
                 <StackPanel>
                     <StackPanel Orientation="Horizontal">
                         <ui:SymbolIcon Style="{StaticResource StatIcon}" Symbol="Timer24" />
-                        <ui:TextBlock Style="{StaticResource StatLabel}" Text="Average response" />
+                        <ui:TextBlock Style="{StaticResource StatLabel}" Text="Typical response" />
                     </StackPanel>
                     <ui:TextBlock x:Name="ResponseValue" Style="{StaticResource StatValue}" />
                     <ui:TextBlock
@@ -104,7 +104,7 @@
             <local:ActivityHeatmap x:Name="Heatmap" />
         </Border>
 
-        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Agents" />
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Who needed you" />
         <Border Padding="24,20,24,20" Style="{StaticResource Surface}">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -112,7 +112,7 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Grid Width="156" Height="156">
-                    <local:AgentDonut x:Name="Donut" AutomationProperties.Name="Agents in the last 30 days" />
+                    <local:AgentDonut x:Name="Donut" AutomationProperties.Name="Who needed you in the last 30 days" />
                     <StackPanel
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
@@ -126,7 +126,7 @@
                             HorizontalAlignment="Center"
                             FontTypography="Caption"
                             Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                            Text="last 30 days" />
+                            Text="times, last 30 days" />
                     </StackPanel>
                 </Grid>
                 <StackPanel

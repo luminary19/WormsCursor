@@ -49,7 +49,7 @@
 
         <ui:CardControl Margin="0,28,0,4" Icon="{ui:SymbolIcon Power24}">
             <ui:CardControl.Header>
-                <local:SettingHeader Title="Show the token" Description="When it's off, agents are still tracked but nothing appears." />
+                <local:SettingHeader Title="Show the token" />
             </ui:CardControl.Header>
             <ui:ToggleSwitch x:Name="EnabledSwitch" AutomationProperties.Name="Show the token" />
         </ui:CardControl>
@@ -138,10 +138,10 @@
         <ui:Button
             x:Name="ResetButton"
             Margin="0,12,0,0"
-            Content="Reset size and position"
+            Content="Reset display"
             Icon="{ui:SymbolIcon ArrowReset24}" />
 
-        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Sounds" />
+        <ui:TextBlock Style="{StaticResource SectionHeader}" Text="Sound" />
         <ui:CardControl Icon="{ui:SymbolIcon Alert24}">
             <ui:CardControl.Header>
                 <local:SettingHeader Title="Play sounds" />

@@ -114,10 +114,10 @@ static class AppearanceTests
         Equal("codex=codex.sleepy", Show(SettingsStore.Load(path).Icons), "hand-edited unknown built-in dropped");
 
         // The Sound and Display page's reset leaves the icons alone: they have their own, on the Customization page.
-        Equal(true, s.HasDefaultSizeAndPosition(), "icons aren't size or position");
+        Equal(true, s.HasDefaultDisplay(), "icons aren't part of the display group");
         s.Size = 150;
-        s.ResetSizeAndPosition();
-        Equal(true, s.HasDefaultSizeAndPosition(), "after reset");
+        s.ResetDisplay();
+        Equal(true, s.HasDefaultDisplay(), "after reset");
         Equal("codex=" + custom + "|pi=pi.shades", Show(s.Icons), "reset keeps the icons");
     });
 
@@ -697,8 +697,9 @@ static class AppearanceTests
             File.WriteAllText(path, "{\"Size\": 120}");
             Equal(MotionStyle.Bouncy, SettingsStore.Load(path).Motion, "a file from before the setting");
             var reset = new CursorSettings { Motion = MotionStyle.Still, Size = 150 };
-            reset.ResetSizeAndPosition();
-            Equal(MotionStyle.Still, reset.Motion, "Reset size and position keeps the motion");
+            reset.ResetDisplay();
+            Equal(MotionStyle.Bouncy, reset.Motion, "Reset display puts the motion back too");
+            Equal(true, reset.HasDefaultDisplay(), "and the whole Display group is default");
         });
     }
 }

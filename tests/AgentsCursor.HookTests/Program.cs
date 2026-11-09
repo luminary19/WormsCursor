@@ -73,18 +73,20 @@ var tests = new (string Name, Action Run)[]
     ("Sound settings default off, round-trip by name and clamp", SoundAndMeetingTests.SoundSettings),
     ("Volume scales the samples, never anything else", SoundAndMeetingTests.ChimeVolume),
     ("The built-in chimes are short, distinct, unclipped and start and end silent", SoundAndMeetingTests.BuiltInChimes),
-    ("Meetings: presenting, sharing, camera and a settled microphone hide the token; stale entries don't", SoundAndMeetingTests.MeetingDecisions),
+    ("Meetings: presenting, duplicated displays, sharing and the camera hide the token; the microphone and stale entries don't", SoundAndMeetingTests.MeetingDecisions),
+    ("The meeting reader looks up only the apps whose uses can still count", SoundAndMeetingTests.MeetingSignalsCache),
     ("The meeting watcher checks only while watching and treats a failing check as no meeting", SoundAndMeetingTests.MeetingWatching),
     ("The live meeting signals read without throwing", SoundAndMeetingTests.MeetingSignalsSmoke),
-    ("Each wait ends once, answered, resumed, expired or ended, timed from when it began", AnalyticsTests.ActivityWaits),
+    ("Each wait ends once: answered at your answer, proceeded untimed, resumed, expired or ended", AnalyticsTests.ActivityWaits),
     ("The history round-trips one compact line per wait, a file per month, appending", AnalyticsTests.HistoryRoundTrip),
     ("A torn or corrupt history line costs only itself and is logged once", AnalyticsTests.HistoryCorruption),
     ("History keeps the current month and the 12 before it, and only touches its own files", AnalyticsTests.HistoryRetention),
     ("Streaks count local days in a row, today not breaking them until it is over", AnalyticsTests.Streaks),
-    ("Average response is the mean answered needs-you wait of the last 30 days, formatted compactly", AnalyticsTests.AverageResponse),
+    ("Typical response is the median answered needs-you wait of the last 30 days, formatted compactly", AnalyticsTests.TypicalResponse),
     ("Agents are counted over 30 days in their fixed order; shares add to 100; heat levels by quartile", AnalyticsTests.AgentCounts),
     ("Days are local calendar days across daylight saving, and the calendar starts on a week boundary", AnalyticsTests.DaylightSaving),
     ("Activity to history to summary keeps no project, path or session id", AnalyticsTests.EndToEnd),
+    ("Claude Code approvals time to the call's start (duration_ms), questions to their finish; Codex approvals are untimed", AnalyticsTests.ApprovalTiming),
 };
 foreach (var (name, run) in tests)
 {
@@ -952,12 +954,12 @@ static void LiveSettingsEdits()
     Equal(CursorSettings.MaxSize, saves[^1].Size);
     Equal(CursorSettings.MinTimeoutSeconds, live.Live.AgentNotifierTimeoutSeconds);
 
-    // Resetting size and position leaves the switch, the timeout, the program list and the icons alone.
+    // Resetting the display leaves the switch, the timeout, the program list and the icons alone.
     live.Change(s => { s.Placement = NotifierPlacement.Corner; s.Corner = ScreenCorner.TopLeft; s.SuppressedPrograms = new[] { "cs2.exe" }; });
     live.Change(s => s.Icons = IconChoices.With(s.Icons, "pi", "pi.shades"));
-    Equal(false, live.Live.HasDefaultSizeAndPosition());
-    live.Change(s => s.ResetSizeAndPosition());
-    Equal(true, live.Live.HasDefaultSizeAndPosition());
+    Equal(false, live.Live.HasDefaultDisplay());
+    live.Change(s => s.ResetDisplay());
+    Equal(true, live.Live.HasDefaultDisplay());
     Equal(NotifierPlacement.BelowPointer, live.Live.Placement);
     Equal("pi.shades", live.Live.IconFor("pi"));
     Equal(false, live.Live.AgentNotifierEnabled);
@@ -1154,9 +1156,9 @@ static void ThemeSetting() => WithHome(home =>
 
     // Resetting the token's look leaves the panel's theme alone.
     var settings = new CursorSettings { Theme = ThemePreference.Light, Size = 150 };
-    settings.ResetSizeAndPosition();
+    settings.ResetDisplay();
     Equal(ThemePreference.Light, settings.Theme);
-    Equal(true, settings.HasDefaultSizeAndPosition());
+    Equal(true, settings.HasDefaultDisplay());
 });
 
 static string Joined(IEnumerable<string> names) => string.Join('|', names);

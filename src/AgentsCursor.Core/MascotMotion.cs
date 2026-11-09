@@ -204,25 +204,24 @@ public static class MascotLoops
         ["pi.pie"] = Pie(),
     };
 
-    // Claude Code waving: the hand flaps at the wrist, three times, the forearm rocking with it about the
-    // elbow, and the motion ticks flick on each swing in.
+    // Claude Code waving: the hand flaps out and in three times in pixel pose swaps (a whole pixel
+    // either side, each held, as pixel art moves; a smooth turn would blur its hard edges), and the
+    // motion ticks flick on each swing in.
     static MascotLoop Waving()
     {
-        float[] swings = { 1.0f, 1.25f, 1.5f, 1.75f, 2.0f };
-        MascotPart Rock(string id, float px, float py, float outward, float inward)
+        var keys = new List<MascotKey> { K(0f, R) };
+        foreach (float at in new[] { 0.8f, 1.3f, 1.8f })
         {
-            var keys = new List<MascotKey> { K(0f, R), K(0.8f, R) };
-            for (int i = 0; i < swings.Length; i++) keys.Add(K(swings[i], P(turn: i % 2 == 0 ? -outward : inward)));
-            keys.Add(K(2.3f, R));
-            return new MascotPart(id, px, py, keys);
+            keys.Add(K(at, P(dx: -1.5f), Ease.Step));
+            keys.Add(K(at + 0.25f, P(dx: 1.5f), Ease.Step));
         }
+        keys.Add(K(2.3f, R, Ease.Step));
         return new(4f, 15, new[]
         {
-            Rock("arm", 0f, 11f, 7f, 2f),
-            Rock("hand", 0f, 3.5f, 24f, 8f),
+            new MascotPart("hand", 0f, 0f, keys),
             Part("ticks", 0f, 0f,
-                K(0f, R), K(0.8f, R), K(0.95f, Hidden, Ease.Step), K(1.2f, R, Ease.Step), K(1.45f, Hidden, Ease.Step),
-                K(1.7f, R, Ease.Step), K(1.95f, Hidden, Ease.Step), K(2.3f, R, Ease.Step)),
+                K(0f, R), K(0.8f, Hidden, Ease.Step), K(1.05f, R, Ease.Step), K(1.3f, Hidden, Ease.Step),
+                K(1.55f, R, Ease.Step), K(1.8f, Hidden, Ease.Step), K(2.05f, R, Ease.Step)),
         });
     }
 
@@ -246,10 +245,11 @@ public static class MascotLoops
         Part("pupils", 0f, 0f, K(0f, R), K(2.45f, R), K(2.5f, P(dx: -3f), Ease.Step), K(2.85f, P(dx: -3f)), K(2.9f, R, Ease.Step)),
     });
 
-    // Codex buddy: a double blink, then the googly pupils roll round.
+    // Codex buddy: a double blink (closed eyes drawn over the open ones, so the white eyes never
+    // uncover the dark face behind them), then the googly pupils roll round.
     static MascotLoop CodexBuddy() => new(4.5f, 20, new[]
     {
-        Part("eyes", 256.5f, 234f, K(0f, R), K(0.9f, R), K(0.98f, P(sy: 0.08f)), K(1.08f, R), K(1.2f, R), K(1.28f, P(sy: 0.08f)), K(1.38f, R)),
+        Flash("lids", 0.1f, 0.95f, 1.25f),
         Part("pupils", 0f, 0f, K(0f, R), K(2.3f, R), K(2.5f, P(dx: -22f, dy: -14f)), K(2.75f, P(dx: 6f, dy: -26f)),
             K(3.0f, P(dx: 14f, dy: -8f)), K(3.3f, R)),
     });
@@ -273,10 +273,10 @@ public static class MascotLoops
             K(4f, R, Ease.Linear)),
     });
 
-    // OpenCode buddy: the block-cursor eyes blink like a caret, then a foot taps twice.
+    // OpenCode buddy: the block-cursor eyes blink twice, quick, like a caret, then a foot taps twice.
     static MascotLoop OpenCodeBuddy() => new(4f, 12, new[]
     {
-        Blink("eyes", 0.33f, 0.9f, 1.58f),
+        Blink("eyes", 0.17f, 0.9f, 1.15f),
         Part("footR", 0f, 0f, K(0f, R), K(2.6f, R), K(2.67f, P(dy: -6f), Ease.Step), K(2.83f, R, Ease.Step),
             K(3.0f, P(dy: -6f), Ease.Step), K(3.17f, R, Ease.Step)),
     });
@@ -298,11 +298,12 @@ public static class MascotLoops
         Blink("eyes", 0.3f, 2.2f),
     });
 
-    // Pi walker: four marching steps, each leg lifting in turn and the bar dipping as each foot lands.
+    // Pi walker: four marching steps, each leg lifting two pixels in turn and the bar dipping a pixel as
+    // each foot lands (one pixel is 5 units), big enough to read at token size.
     static MascotLoop Walker()
     {
-        var up = P(dy: -5f);
-        var dip = P(dy: 2f);
+        var up = P(dy: -10f);
+        var dip = P(dy: 5f);
         MascotPart Steps(string id, params float[] lifts)
         {
             var keys = new List<MascotKey> { K(0f, R) };

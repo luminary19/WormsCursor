@@ -204,12 +204,9 @@ static class SoundAndMeetingTests
         const string zoom = @"C:\Users\me\AppData\Roaming\Zoom\bin\Zoom.exe";
 
         Equal<Meeting?>(null, MeetingDetection.Detect(false, false, Array.Empty<DeviceUse>(), now), "nothing");
-        Equal(new Meeting(MeetingSignal.Presenting, null), MeetingDetection.Detect(true, true, new[] { Use(MeetingSignal.Microphone, zoom, 60, longAgo) }, now), "presentation mode first");
+        Equal(new Meeting(MeetingSignal.Presenting, null), MeetingDetection.Detect(true, true, new[] { Use(MeetingSignal.Camera, zoom, 60, longAgo) }, now), "presentation mode first");
         Equal(new Meeting(MeetingSignal.DisplayDuplicated, null), MeetingDetection.Detect(false, true, Array.Empty<DeviceUse>(), now), "duplicated displays");
 
-        // The microphone counts once it has been in use for the settle time (dictation is shorter).
-        Equal<Meeting?>(null, MeetingDetection.Detect(false, false, new[] { Use(MeetingSignal.Microphone, zoom, 4, longAgo) }, now), "dictating");
-        Equal(new Meeting(MeetingSignal.Microphone, zoom), MeetingDetection.Detect(false, false, new[] { Use(MeetingSignal.Microphone, zoom, 15, longAgo) }, now), "in a call");
         // The camera and screen capture count after a moment (a screenshot holds the capture for ms).
         Equal<Meeting?>(null, MeetingDetection.Detect(false, false, new[] { Use(MeetingSignal.ScreenShared, "Microsoft.ScreenSketch_8wekyb3d8bbwe", 0.03, longAgo) }, now), "a screenshot");
         Equal(new Meeting(MeetingSignal.ScreenShared, zoom), MeetingDetection.Detect(false, false, new[] { Use(MeetingSignal.ScreenShared, zoom, 2, longAgo) }, now), "sharing");
@@ -217,18 +214,21 @@ static class SoundAndMeetingTests
 
         // An entry left "in use" by a copy that's gone never counts: the app isn't running, or what
         // runs now started after the use began (the old copy was killed mid-call, or the PC shut down).
-        Equal<Meeting?>(null, MeetingDetection.Detect(false, false, new[] { Use(MeetingSignal.Microphone, zoom, 3600, null) }, now), "app not running");
-        Equal<Meeting?>(null, MeetingDetection.Detect(false, false, new[] { Use(MeetingSignal.Microphone, zoom, 3600, now.AddMinutes(-5)) }, now), "a newer copy runs");
+        Equal<Meeting?>(null, MeetingDetection.Detect(false, false, new[] { Use(MeetingSignal.Camera, zoom, 3600, null) }, now), "app not running");
+        Equal<Meeting?>(null, MeetingDetection.Detect(false, false, new[] { Use(MeetingSignal.Camera, zoom, 3600, now.AddMinutes(-5)) }, now), "a newer copy runs");
+        Equal(true, MeetingDetection.IsLeftBehind(Use(MeetingSignal.Camera, zoom, 3600, now.AddMinutes(-5))), "left behind");
+        Equal(false, MeetingDetection.IsLeftBehind(Use(MeetingSignal.Camera, zoom, 3600, now.AddHours(-2))), "held by a running copy");
+        // The microphone alone is no signal at all (dictation, voice chat and audio mixers hold it for
+        // hours): there is nothing to report it as.
+        Equal(false, Enum.GetNames<MeetingSignal>().Any(n => n.Contains("Micro")), "no microphone signal");
 
-        // The strongest signal wins: sharing, then the camera, then the microphone.
+        // The strongest signal wins: sharing, then the camera.
         var all = new[]
         {
-            Use(MeetingSignal.Microphone, zoom, 60, longAgo),
             Use(MeetingSignal.Camera, "chrome", 60, longAgo),
             Use(MeetingSignal.ScreenShared, @"C:\Program Files\obs-studio\bin\64bit\obs64.exe", 60, longAgo),
         };
-        Equal(MeetingSignal.ScreenShared, MeetingDetection.Detect(false, false, all, now)!.Signal, "sharing outranks");
-        Equal(MeetingSignal.Camera, MeetingDetection.Detect(false, false, all.Take(2), now)!.Signal, "camera outranks the microphone");
+        Equal(MeetingSignal.ScreenShared, MeetingDetection.Detect(false, false, all, now)!.Signal, "sharing outranks the camera");
 
         Equal("Zoom", MeetingDetection.AppName(zoom), "exe name");
         Equal("MSTeams", MeetingDetection.AppName("MSTeams_8wekyb3d8bbwe"), "package");
@@ -237,7 +237,7 @@ static class SoundAndMeetingTests
         Equal(false, MeetingDetection.IsExePath("MSTeams_8wekyb3d8bbwe"), "package family");
 
         // Why the token is hidden: one decision, in order.
-        var call = new Meeting(MeetingSignal.Microphone, zoom);
+        var call = new Meeting(MeetingSignal.Camera, zoom);
         Equal(TokenVisibility.Idle, TokenVisibility.Decide(false, false, true, false, call), "nothing waiting comes first");
         Equal(HideReason.TurnedOff, TokenVisibility.Decide(true, false, true, false, call).Reason, "turned off");
         Equal(HideReason.AppInFront, TokenVisibility.Decide(true, true, true, false, call).Reason, "an app in front");
@@ -280,7 +280,7 @@ static class SoundAndMeetingTests
             int stopped = Volatile.Read(ref probes);
             Thread.Sleep(120);
             Equal(stopped, Volatile.Read(ref probes), "no checks while not watching");
-            reported = new Meeting(MeetingSignal.Microphone, "app");
+            reported = new Meeting(MeetingSignal.ScreenShared, "app");
             Equal<Meeting?>(null, watcher.Current, "not watching: no meeting");
             watcher.Watch(true);
             Equal(reported, watcher.Current, "watching again checks again");
@@ -298,18 +298,60 @@ static class SoundAndMeetingTests
         Equal(1, logs.Count, "the failure is logged once");
     }
 
+    // The reader looks an app up only while one of its uses could still count: a use found left
+    // behind is remembered (it can never count again) until the store stops listing it.
+    public static void MeetingSignalsCache()
+    {
+        var now = DateTime.UtcNow;
+        var stale = new HeldDevice(MeetingSignal.ScreenShared, @"C:\Apps\Discord\Discord.exe", now.AddDays(-16));
+        var live = new HeldDevice(MeetingSignal.Camera, "MSTeams_8wekyb3d8bbwe", now.AddMinutes(-3));
+        var held = new List<HeldDevice> { stale };
+        var running = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase)
+        {
+            [stale.App] = now.AddHours(-1),   // a copy started after the use: that use was left behind
+            [live.App] = now.AddHours(-1),    // started before the use: it holds the camera
+        };
+        var lookedUp = new List<string>();
+        var reader = new MeetingSignals(() => held.ToArray(), apps => { lookedUp.AddRange(apps); return running; });
+
+        Equal(0, reader.DevicesInUse().Count, "only a stale entry: nothing in use");
+        Equal("Discord.exe", string.Join(",", lookedUp.Select(Path.GetFileName)), "looked up once");
+        lookedUp.Clear();
+        for (int i = 0; i < 5; i++) Equal(0, reader.DevicesInUse().Count, "still nothing");
+        Equal(0, lookedUp.Count, "a known stale entry is never looked up again");
+
+        held.Add(live);
+        var uses = reader.DevicesInUse();
+        Equal(1, uses.Count, "the camera in use");
+        Equal(live.App, uses[0].App, "it is the live one");
+        Equal("MSTeams_8wekyb3d8bbwe", string.Join(",", lookedUp), "only the live entry's app is looked up");
+        lookedUp.Clear();
+        Equal(1, reader.DevicesInUse().Count, "still in use");
+        Equal(1, lookedUp.Count, "a use that counts is checked each time (its app may quit)");
+
+        // The stale entry goes, then comes back with the same start: forgotten, so looked up afresh.
+        held.Remove(stale); held.Remove(live);
+        reader.DevicesInUse();
+        lookedUp.Clear();
+        held.Add(stale);
+        reader.DevicesInUse();
+        Equal(1, lookedUp.Count, "forgotten once the store stopped listing it");
+    }
+
     // The live signals read without throwing on this machine (read-only; whatever they say).
     public static void MeetingSignalsSmoke()
     {
         MeetingSignals.PresentationMode();
         MeetingSignals.DisplaysDuplicated();
-        foreach (var use in MeetingSignals.DevicesInUse())
+        var reader = new MeetingSignals();
+        foreach (var use in reader.DevicesInUse())
         {
             True(use.App.Length > 0 && use.StartUtc.Kind == DateTimeKind.Utc, "a device use names its app: " + use);
             // An app that isn't running has no start time at all (never a default date, which would
             // read as "running since forever" and make a stale entry count).
             True(use.RunningSinceUtc is null || use.RunningSinceUtc.Value.Year > 2000, "a real start time or none: " + use);
+            True(!MeetingDetection.IsLeftBehind(use), "a reader returns only uses that can count: " + use);
         }
-        MeetingSignals.Read();
+        reader.Read();
     }
 }

@@ -138,9 +138,17 @@ public sealed class AgentActivity
 
     /// <summary>Raised outside the lock, on the reporting thread, once per wait that ends: a session
     /// stops waiting, moves between finished and blocked (ending one wait and starting the next), is
-    /// swept, released or ended. A blocked wait ends <see cref="WaitEnd.Answered"/> unless the
-    /// session itself ended; a finished one ends <see cref="WaitEnd.Resumed"/>, or
-    /// <see cref="WaitEnd.Expired"/> when swept.</summary>
+    /// swept, released or ended. A finished one ends <see cref="WaitEnd.Resumed"/>, or
+    /// <see cref="WaitEnd.Expired"/> when swept. A blocked one ends at the moment you answered where an
+    /// event marks it (<see cref="WaitEnd.Answered"/>): you sent a prompt
+    /// (<see cref="AgentEventKind.ThinkingStarted"/>), answered an item
+    /// (<see cref="AgentEventKind.InputAnswered"/>), or the prompt's own call finished saying how long it
+    /// ran after you answered (<see cref="Report"/>'s <c>callRan</c>: the wait ends when the call
+    /// started). When the agent just carries on (a call finishing without a run time, a prompt that
+    /// named no call answered by the agent's next tool event, its batch of calls resolving, the turn
+    /// ending) you answered at some unknown moment before, so it ends <see cref="WaitEnd.Proceeded"/>,
+    /// untimed. The session ending, or the turn failing under it, ends it
+    /// <see cref="WaitEnd.Ended"/>.</summary>
     public event Action<WaitRecord>? WaitEnded;
 
     /// <summary>How many distinct agent sessions currently need the user.</summary>
@@ -157,11 +165,14 @@ public sealed class AgentActivity
     /// event opens or answers. <paramref name="callIds"/> name the tool call an agent prompt blocks
     /// (<see cref="AgentEventKind.AwaitingUser"/>), or the call that just finished
     /// (<see cref="AgentEventKind.ToolUse"/>). <paramref name="owner"/> is the persistent connection the
-    /// event came over (see <see cref="Release"/>), null for a hook. <paramref name="nowUtc"/> is injected
-    /// so callers/tests stay deterministic. Safe to call from any thread.</summary>
+    /// event came over (see <see cref="Release"/>), null for a hook. <paramref name="callRan"/> is, on
+    /// <see cref="AgentEventKind.ToolUse"/>, how long the finished call ran after you answered its
+    /// prompt (<see cref="AgentEventMessage.RanMs"/>): an approved call's run time, zero for a question
+    /// tool; null when the agent doesn't say. <paramref name="nowUtc"/> is injected so callers/tests
+    /// stay deterministic. Safe to call from any thread.</summary>
     public void Report(string tool, string? sessionId, string? project, AgentEventKind kind, DateTime nowUtc,
         IReadOnlyList<string>? itemIds = null, string? agentId = null, IReadOnlyList<string>? callIds = null,
-        string? owner = null)
+        string? owner = null, TimeSpan? callRan = null)
     {
         if (string.IsNullOrEmpty(tool)) tool = "unknown";
         int after;
@@ -182,13 +193,19 @@ public sealed class AgentActivity
                 if (!_sessions.TryGetValue(key, out var e)) { e = new Entry(); _sessions[key] = e; }
                 bool wasWaiting = e.IsWaiting;
                 var wasState = e.State;
+                // A prompt that named no call is answered by any tool event, which says nothing of when.
+                bool unnamedPrompt = e.BlockedCalls.Contains((agentId ?? "", ""));
                 e.Tool = tool;
                 e.Owner = owner;
                 e.LastUtc = nowUtc;
                 Apply(e, kind, itemIds ?? Array.Empty<string>(), agentId ?? "", callIds ?? Array.Empty<string>());
                 if (wasWaiting && (!e.IsWaiting || e.State != wasState))
-                    ended.Add(new WaitRecord(e.Tool, wasState, e.WaitSinceUtc, nowUtc,
-                        wasState == WaitingState.Blocked ? WaitEnd.Answered : WaitEnd.Resumed));
+                {
+                    var (endUtc, outcome) = wasState == WaitingState.Finished
+                        ? (nowUtc, WaitEnd.Resumed)
+                        : BlockedEnd(e.WaitSinceUtc, kind, nowUtc, unnamedPrompt ? null : callRan);
+                    ended.Add(new WaitRecord(e.Tool, wasState, e.WaitSinceUtc, endUtc, outcome));
+                }
                 if (e.IsWaiting && (!wasWaiting || e.State != wasState)) e.WaitSinceUtc = nowUtc;
             }
             var now = SnapshotLocked();
@@ -197,6 +214,25 @@ public sealed class AgentActivity
         }
         Raise(ended);
         if (changed) WaitingChanged?.Invoke(after);
+    }
+
+    // How a needs-you wait ends on this event, and when: at your answer where the event marks it,
+    // else untimed (the agent carried on) or ended (the turn failed). An approved call's answer is when
+    // it started running, never before the wait began.
+    static (DateTime End, WaitEnd Outcome) BlockedEnd(DateTime since, AgentEventKind kind, DateTime nowUtc, TimeSpan? callRan)
+    {
+        switch (kind)
+        {
+            case AgentEventKind.ThinkingStarted or AgentEventKind.InputAnswered:
+                return (nowUtc, WaitEnd.Answered);
+            case AgentEventKind.ToolUse when callRan is { } ran && ran >= TimeSpan.Zero:
+                var started = nowUtc - ran;
+                return (started > since ? started : since, WaitEnd.Answered);
+            case AgentEventKind.Error:
+                return (nowUtc, WaitEnd.Ended);
+            default:
+                return (nowUtc, WaitEnd.Proceeded);
+        }
     }
 
     static void EndWait(Entry e, DateTime nowUtc, WaitEnd outcome, List<WaitRecord> ended)

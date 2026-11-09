@@ -100,7 +100,7 @@ public sealed class CursorSettings
     /// <summary>How loud the chimes play, 0-100, relative to the system volume (which is never changed).</summary>
     public int SoundVolume { get; set; } = 60;
 
-    /// <summary>Keep showing the token while you present, share your screen or are in a call
+    /// <summary>Keep showing the token while you present, share your screen or are on camera
     /// (<see cref="MeetingDetection"/>). Off by default: the token hides then.</summary>
     public bool ShowDuringMeetings { get; set; }
 
@@ -161,24 +161,26 @@ public sealed class CursorSettings
         Version = CurrentVersion; // a loaded older file has been migrated by now
     }
 
-    /// <summary>Puts the token's size and where it shows (placement and corner) back to the defaults:
-    /// what the Sound and Display page resets. Each agent's icon has its own reset on the Customization page, and the
-    /// notifier switch, the linger timeout, the outline colour and the hidden-while-using list are
-    /// left alone.</summary>
-    public void ResetSizeAndPosition()
+    /// <summary>Puts the Display group of the Sound and Display page back to the defaults: the token's
+    /// size, where it shows (placement and corner) and how it moves (<see cref="Motion"/>). Each
+    /// agent's icon has its own reset on the Customization page, and the notifier switch, the sounds,
+    /// the linger timeout, the outline colour and the hidden-while-using list are left alone.</summary>
+    public void ResetDisplay()
     {
         var defaults = new CursorSettings();
         Size = defaults.Size;
         Placement = defaults.Placement;
         Corner = defaults.Corner;
+        Motion = defaults.Motion;
     }
 
-    /// <summary>True when what <see cref="ResetSizeAndPosition"/> resets is already the default. (A
-    /// method, not a property, so it stays out of the saved JSON.)</summary>
-    public bool HasDefaultSizeAndPosition()
+    /// <summary>True when what <see cref="ResetDisplay"/> resets is already the default. (A method, not
+    /// a property, so it stays out of the saved JSON.)</summary>
+    public bool HasDefaultDisplay()
     {
         var defaults = new CursorSettings();
-        return Size == defaults.Size && Placement == defaults.Placement && Corner == defaults.Corner;
+        return Size == defaults.Size && Placement == defaults.Placement && Corner == defaults.Corner
+            && Motion == defaults.Motion;
     }
 
     /// <summary>An independent copy. Every field is a value type, an immutable string, or a read-only

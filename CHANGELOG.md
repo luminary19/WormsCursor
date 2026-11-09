@@ -16,20 +16,23 @@ GitHub releases. The release workflow pulls the matching section into each relea
   **Customization** page turns them off; the previews and the gallery show them moving. Logos and your
   own icons don't move.
 - **Analytics, the control panel's new home page.** See your **current** and **longest streak**
-  (days in a row an agent needed you), your **average response** time over the last 30 days (from the
-  yellow "?" appearing to your answer), a GitHub-style **activity** calendar of the last six months
-  (hover a day for "12 tokens on Sat, Nov 8"), and a ring of **which agents needed you** in the last 30 days.
+  (days in a row an agent needed you), your **typical response** time over the last 30 days (the
+  median time from the yellow "?" appearing to the moment you answered; an approved call's own run
+  time never counts, and where an agent doesn't say when you answered, as with a Codex approval, the
+  wait isn't timed), a GitHub-style **activity** calendar of up to a year (hover a day for "Needed you
+  12 times on Sat, Nov 8"), and a ring of **who needed you** in the last 30 days.
   The tray's double-click, **Preferences…** and a second launch all open it. It reads a small local
   history kept in `%LocalAppData%\AgentsCursor\history\`: one line per token with the agent, needs you
   or done, when it came and went and how it ended. No prompts, projects, paths or session ids, and
   nothing older than a year.
 - **Hidden during meetings and screen sharing.** The token now stays out of sight while you present,
-  share your screen or are in a call, and comes back when that ends. It goes by what Windows itself
+  share your screen or are on camera, and comes back when that ends. It goes by what Windows itself
   reports: presentation mode, duplicated displays (a projector), an app capturing the screen through
-  Windows' capture API, the camera, or the microphone in use for more than a few seconds (a quick
-  dictation doesn't count). While it is hiding the token, **Apps** says what it noticed (say, *Zoom is
-  using the microphone*). Turn on **Show during meetings and screen sharing** at the top of **Apps** to
-  keep the token anyway. The checks run only while a token would be on screen.
+  Windows' capture API, or the camera. The microphone alone doesn't count, so Discord, game voice chat
+  or dictation holding it for hours never hides the token. While it is hiding the token, **Apps** says
+  what it noticed (say, *Zoom is using the camera*). Turn on **Show during meetings and screen
+  sharing** at the top of **Apps** to keep the token anyway. The checks run only while a token would be
+  on screen, and cost next to nothing.
 - **Sounds, if you want them.** **Play sounds** on the **Sound and Display** page plays a short, soft
   chime when an agent starts waiting on you: one for **Needs you**, another for **Done**, each picked
   from four built-in chimes (or none), with a play button to hear it and its own **Volume** (the system
@@ -38,6 +41,8 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - **Calmer motion.** **Motion** on the **Sound and Display** page picks how the token moves:
   **Bouncy** (as before), **Calm** (a softer spring, half the swing and hop) or **Still** (it just
   follows the pointer, or sits in its corner). With Windows' animation effects off it is always Still.
+  A token that isn't moving isn't redrawn, and a Still token in a corner uses no CPU at all.
+  **Reset display** (was *Reset size and position*) now puts the motion back too.
 - **Pick each agent's look, mascots included.** The new **Customization** page lets every agent wear its own
   logo, one of three mascots drawn for it, or a picture of your own. Claude Code can wave, party or
   play peekaboo; Codex comes as a googly-eyed buddy, mid-spin or dozing off; OpenCode's mark gets a
@@ -69,8 +74,8 @@ GitHub releases. The release workflow pulls the matching section into each relea
   Codex hooks under `/hooks` (also in Codex sessions Orca starts).
 - **A new control panel.** **Preferences…** now opens one window in the style of Windows 11
   Settings: Mica, rounded cards, switches, and it follows your Windows light or dark mode as it
-  changes, or stays light or dark if you pick that under **About → Theme**. A sidebar holds five pages:
-  **Sound and Display** (the on/off switch, size, position, motion, sounds and a live animated
+  changes, or stays light or dark if you pick that under **About → Theme**. A sidebar holds six pages:
+  **Analytics** (the home page, above), **Sound and Display** (the on/off switch, size, position, motion, sounds and a live animated
   preview), **Customization** (each agent's look), **Agents** (Connect / Update / Disconnect for each tool with a clear status, how long the
   token stays after an agent is done, and **Preview on screen**), **Apps** (the apps that hide the
   token, with their icons and names when they're open) and **About** (version, updates, *What's new*,
@@ -130,7 +135,7 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - **The token bounces, and you choose where.** On the **Sound and Display** page pick a position next to the
   pointer (it follows on a springy string, with a gentle idle bob) or a **screen corner** (it sits in
   the corner you choose and bounces in place). Plus a **size** slider and a live preview.
-  **Reset size and position** puts those back. Settings saved by this version name the
+  **Reset display** puts those back. Settings saved by this version name the
   position differently, so an older AgentsCursor reading them starts from its defaults. The DPI of the monitor it's shown on is honoured, so the token keeps a
   consistent size across mixed-DPI setups — which also retires the old mixed-DPI cursor flicker.
 - **The bounce is fluid.** The token animates on a dedicated high-resolution thread

@@ -15,18 +15,19 @@ namespace AgentsCursor.App.ControlPanel;
 /// <summary>
 /// A GitHub-style activity calendar: one column per week (the current one last), one row per weekday
 /// (the culture's first day on top), each day a rounded square in one of five greens by how many
-/// tokens appeared that day (<see cref="ActivityStats.HeatLevel"/>, relative to the days shown). Month
-/// names run along the top, Mon / Wed / Fri down the side, "Less … More" underneath.
+/// times agents needed you that day (<see cref="ActivityStats.HeatLevel"/>, relative to the days
+/// shown). Month names run along the top, Mon / Wed / Fri down the side, "Less … More" underneath.
 ///
-/// It fills its width: about 26 weeks at the panel's usual widths, more (up to a year) on a wide
-/// window, with every square snapped to whole device pixels so it stays crisp at any scale. Hovering a
-/// day shows "12 tokens on Sat, Nov 8"; with keyboard focus the arrow keys move between days (left and
-/// right by week, up and down by day, Home and End) and screen readers hear the same line.
+/// It fills its width with GitHub-sized squares: about ten months at the panel's usual width, a year
+/// on a wide window, never less than half a year, with every square snapped to whole device pixels so
+/// it stays crisp at any scale. Hovering a day shows "Needed you 12 times on Sat, Nov 8"; with keyboard
+/// focus the arrow keys move between days (left and right by week, up and down by day, Home and End)
+/// and screen readers hear the same line.
 /// </summary>
 public sealed class ActivityHeatmap : FrameworkElement
 {
     const int MinWeeks = 26, MaxWeeks = 53;
-    const double TargetPitch = 24;   // DIPs per week column, before fitting to the width
+    const double TargetPitch = 13;   // DIPs per week column, before fitting to the width (GitHub's 10 + 3)
     const double LabelColumn = 34;   // the weekday names
     const double MonthRow = 22;      // the month names
     const double GapDip = 3;
@@ -81,7 +82,7 @@ public sealed class ActivityHeatmap : FrameworkElement
 
     protected override Size MeasureOverride(Size available)
     {
-        double width = double.IsInfinity(available.Width) ? LabelColumn + MinWeeks * 18 : available.Width;
+        double width = double.IsInfinity(available.Width) ? LabelColumn + MinWeeks * TargetPitch : available.Width;
         double scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
         double grid = Math.Max(0, width - LabelColumn);
         _weeks = Math.Clamp((int)Math.Round(grid / TargetPitch), MinWeeks, MaxWeeks);
@@ -221,9 +222,9 @@ public sealed class ActivityHeatmap : FrameworkElement
         string date = ActivityStats.ShortDate(day, CultureInfo.CurrentCulture);
         return count switch
         {
-            0 => $"No tokens on {date}",
-            1 => $"1 token on {date}",
-            _ => $"{count:N0} tokens on {date}",
+            0 => $"No agent needed you on {date}",
+            1 => $"Needed you once on {date}",
+            _ => $"Needed you {count:N0} times on {date}",
         };
     }
 
@@ -317,7 +318,7 @@ public sealed class ActivityHeatmap : FrameworkElement
     {
         if (_focus is { } day && IsKeyboardFocused) return DayText(day);
         int total = VisibleDays().Sum(d => _daily.GetValueOrDefault(d));
-        return $"Activity: {total:N0} {(total == 1 ? "token" : "tokens")} in the last {_weeks} weeks";
+        return $"Activity: agents needed you {(total == 1 ? "once" : $"{total:N0} times")} in the last {_weeks} weeks";
     }
 
     protected override AutomationPeer OnCreateAutomationPeer() => new Peer(this);

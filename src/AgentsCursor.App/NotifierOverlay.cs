@@ -42,6 +42,11 @@ namespace AgentsCursor.App;
 /// token reappears with its entrance. How it moves is <see cref="CursorSettings.Motion"/>, as Still
 /// while Windows' animation effects are off; a mascot plays its idle loop on the same clock unless
 /// <see cref="MascotLoops.Animate"/> says no.
+///
+/// A frame is painted only when it differs from the last one (<see cref="Frame"/>), so a token that
+/// isn't moving costs no drawing: Still beside a resting pointer just polls the pointer. Still in a
+/// corner (with no mascot playing) can't change on its own at all, so the thread parks until
+/// something wakes it: an agent, a setting, focus, a meeting, or a display or work-area change.
 /// </summary>
 public sealed class NotifierOverlay : IDisposable
 {
@@ -65,6 +70,7 @@ public sealed class NotifierOverlay : IDisposable
     volatile TokenFace? _face;       // what the token shows; null = nothing waiting
     volatile bool _entrancePending;  // pop-in bounce when the token first appears
     volatile bool _resetPhysics;     // re-seed the motion on (re)appearance
+    int _changes;                    // bumped on every re-evaluation: what's drawn may have changed
     bool _disposed;
 
     // --- animation state (touched only by the animation thread) ---
@@ -76,6 +82,7 @@ public sealed class NotifierOverlay : IDisposable
     TetherState _tether;      // the pointer placements' spring (seeded on first use)
     Flip _flip;               // which axes the rest offset is mirrored on, near screen edges
     NotifierPlacement _placement; // the placement the motion state belongs to
+    Frame? _painted;          // what is on screen now; null after hiding or a failed frame
 
     const int SleepMs = 6;    // ~150 Hz loop cap; real elapsed dt keeps the motion time-correct
     const float MaxDt = 0.05f;// clamp a scheduling hiccup so the explicit-Euler spring can't blow up
@@ -92,8 +99,10 @@ public sealed class NotifierOverlay : IDisposable
         _thread.Start();
         _foreground.Changed += Reevaluate;
         _meetings.Changed += Reevaluate;
-        // Windows' animation effects switched on or off (WM_SETTINGCHANGE) re-reads them.
+        // Windows' animation effects switched on or off, or the work area changed (WM_SETTINGCHANGE),
+        // or the displays changed: re-read them, and redraw a parked token.
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
         Reevaluate();
     }
 
@@ -123,6 +132,8 @@ public sealed class NotifierOverlay : IDisposable
 
     void OnUserPreferenceChanged(object? sender, Microsoft.Win32.UserPreferenceChangedEventArgs e) => Reevaluate();
 
+    void OnDisplaySettingsChanged(object? sender, EventArgs e) => Reevaluate();
+
     // Called from the UI thread (agents, settings) and the watchers' threads (focus, meetings).
     void Reevaluate()
     {
@@ -140,13 +151,15 @@ public sealed class NotifierOverlay : IDisposable
             bool active = visibility.Shown;
             if (active && !_active) { _entrancePending = true; _resetPhysics = true; } // pop-in fresh
             _active = active;
+            Interlocked.Increment(ref _changes);
             _wake.Set();
         }
         if (changed) VisibilityChanged?.Invoke();
     }
 
     // The animation thread: a high-resolution loop that advances the physics by the real elapsed time
-    // and repaints. Parks on _wake (zero CPU) whenever nothing is waiting.
+    // and repaints. Parks on _wake (zero CPU) whenever nothing is waiting, or the token can't change
+    // until something wakes it.
     void Loop()
     {
         timeBeginPeriod(1);
@@ -159,6 +172,8 @@ public sealed class NotifierOverlay : IDisposable
             {
                 if (_active)
                 {
+                    _wake.Reset(); // a wake from here on means: something changed, look again
+                    bool still = false;
                     // One frame is the failure boundary: an exception here must never escape this
                     // background thread, which would terminate the whole tray process. A failed frame
                     // is logged (once), the token is hidden, and the loop backs off and tries again.
@@ -174,7 +189,7 @@ public sealed class NotifierOverlay : IDisposable
                         float dt = (float)(now - last);
                         last = now;
                         if (dt > MaxDt) dt = MaxDt;
-                        if (dt > 0f) Tick(dt);
+                        if (dt > 0f) still = Tick(dt);
                     }
                     catch (Exception ex)
                     {
@@ -182,13 +197,19 @@ public sealed class NotifierOverlay : IDisposable
                         hidden = true;                  // re-raise on the next good frame
                         last = sw.Elapsed.TotalSeconds; // no giant dt after the back-off
                     }
-                    Thread.Sleep(SleepMs);
+                    if (still)
+                    {
+                        _wake.Wait();                   // until an agent, setting, focus or display change
+                        last = sw.Elapsed.TotalSeconds;
+                    }
+                    else Thread.Sleep(SleepMs);
                 }
                 else
                 {
                     if (!hidden)
                     {
                         hidden = true;
+                        _painted = null;
                         try { HideToken(); } catch (Exception ex) { FrameFailed(ex); }
                     }
                     _wake.Wait();
@@ -201,10 +222,13 @@ public sealed class NotifierOverlay : IDisposable
         finally { timeEndPeriod(1); }
     }
 
-    void Tick(float dt)
+    // One frame: advances the motion and paints it, unless it is the frame already on screen. True when
+    // the token can't change until something wakes the thread (Still in a corner, no mascot playing).
+    bool Tick(float dt)
     {
         var face = _face;
-        if (face is null) return;
+        if (face is null) return false;
+        int changes = Volatile.Read(ref _changes);
 
         var placement = _settings.Placement;
         var motion = MotionProfile.For(_settings.Motion, _animationEffects);
@@ -251,22 +275,33 @@ public sealed class NotifierOverlay : IDisposable
 
         // The canvas is centred on the token, sized for any tilt plus the badges, so nothing clips.
         int canvas = TokenCanvas.Side(tokenPx);
-        EnsureBuffer(canvas);
         int left = (int)MathF.Round(cx) - canvas / 2, top = (int)MathF.Round(cy) - canvas / 2;
+        // A mascot plays its idle loop on the same clock (from its appearance, so it starts at rest).
+        double? mascotClock = MascotLoops.Animate(_settings, _animationEffects) ? _t : null;
+        bool still = placement == NotifierPlacement.Corner && motion.IsRigid && mascotClock is null;
 
+        var frame = new Frame(face, changes, left, top, cx - left, cy - top, tokenPx, swing, dpi, mascotClock);
+        if (frame == _painted) return still;
+
+        EnsureBuffer(canvas);
         using (var g = Graphics.FromImage(_buffer!))
         {
             g.Clear(Color.Transparent);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             // The sub-pixel remainder keeps slow motion smooth while the window moves in whole pixels.
-            // A mascot plays its idle loop on the same clock (from its appearance, so it starts at rest).
-            double? mascotClock = MascotLoops.Animate(_settings, _animationEffects) ? _t : null;
-            _renderer.DrawToken(g, _settings, face, cx - left, cy - top, tokenPx, swing, dpi, mascotClock);
+            _renderer.DrawToken(g, _settings, face, frame.X, frame.Y, tokenPx, swing, dpi, mascotClock);
         }
 
         SetBitmap(_hwnd, _buffer!, left, top);
+        _painted = frame;
+        return still;
     }
+
+    /// <summary>Everything a painted frame depends on: what it shows, the settings (as of the
+    /// <see cref="_changes"/> count it was drawn at), where, and the pose. Equal frames draw the same.</summary>
+    readonly record struct Frame(TokenFace Face, int Changes, int Left, int Top, float X, float Y,
+        float TokenPx, float Swing, float Dpi, double? MascotClock);
 
     // A frame threw: log the first failure, park the token off-screen, and pause before retrying.
     void FrameFailed(Exception ex)
@@ -276,6 +311,7 @@ public sealed class NotifierOverlay : IDisposable
             _frameFailureLogged = true;
             AppLog.Write("overlay frame failed (token hidden, retrying): " + ex);
         }
+        _painted = null;
         try { HideToken(); } catch { /* best-effort; the next good frame repaints anyway */ }
         Thread.Sleep(FailureBackoffMs);
     }
@@ -313,6 +349,7 @@ public sealed class NotifierOverlay : IDisposable
         if (_disposed) return;
         _disposed = true;
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         _foreground.Dispose(); // first: the watchers' threads call Reevaluate, which uses _wake
         _meetings.Dispose();
         _running = false;

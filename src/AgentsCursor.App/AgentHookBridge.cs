@@ -72,6 +72,7 @@ static class AgentHookBridge
                 Message = Str(root, "message"),
                 InputIds = itemIds,
                 CallIds = callIds,
+                RanMs = rawEvent is "PostToolUse" or "PostToolUseFailure" ? RunTime(root) : null,
                 Ts = DateTime.UtcNow.ToString("o"),
             };
         }
@@ -137,6 +138,9 @@ static class AgentHookBridge
                     "tool_use" when rawEvent == "PostToolUse" => FinishedCall(root),
                     _ => null,
                 },
+                // A question tool finishes as you answer it. Codex reports no run time for any other
+                // call, so an approval's answer moment is unknown (AgentActivity leaves it untimed).
+                RanMs = rawEvent == "PostToolUse" && toolName is "request_user_input" or "request_permissions" ? 0 : null,
                 Ts = DateTime.UtcNow.ToString("o"),
             };
         }
@@ -236,6 +240,16 @@ static class AgentHookBridge
         "StopFailure" => ("error", null),
         _ => (null, null),
     };
+
+    // How long a finished call ran after you answered its prompt (AgentEventMessage.RanMs): for
+    // AskUserQuestion, whose run is the question, none (it finished as you answered); for any other
+    // call, PostToolUse / PostToolUseFailure's optional duration_ms, which leaves out the time its
+    // permission prompt was open, so an approval is dated when the call started, not when it finished.
+    static long? RunTime(JsonElement root)
+        => Str(root, "tool_name") == "AskUserQuestion" ? 0
+         : root.TryGetProperty("duration_ms", out var ms) && ms.ValueKind == JsonValueKind.Number
+           && ms.TryGetInt64(out long value) && value >= 0
+            ? value : null;
 
     // Elicitation and ElicitationResult both carry the MCP server name; elicitation_id is present only
     // for URL-mode requests. The pair names one prompt on both sides.

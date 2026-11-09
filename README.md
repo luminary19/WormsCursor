@@ -91,7 +91,7 @@ nothing's waiting (the animation only runs while at least one agent needs you).
 ### Stays out of your meetings
 
 Unless **Show during meetings and screen sharing** (top of the **Apps** page) is on, the token hides
-while you present, share your screen or are in a call, and comes back (with its entrance) when that
+while you present, share your screen or are on camera, and comes back (with its entrance) when that
 ends. While a meeting is hiding it, the switch's second line says what was detected. What counts, from
 what Windows itself reports:
 
@@ -100,19 +100,23 @@ what Windows itself reports:
 - An app is **capturing the screen** or a window through Windows' capture API for at least a second:
   "Share screen" in Discord or a browser, OBS window capture, any app that uses that API. A
   screenshot holds it for milliseconds and doesn't count.
-- An app is using the **camera** for at least a second, or the **microphone** for at least 10 seconds
-  (a quick dictation isn't a call).
+- An app is using the **camera** for at least a second.
 
-The capture, camera and microphone signals are the ones behind Windows' privacy indicators (its
-capability consent store, which records when each app starts and stops using them). An entry that says
-"in use" only counts while a copy of that app runs that started before the use did, so one left
-behind by an app killed mid-call, or by a shutdown during one, is ignored. Limits: any app holding the
-microphone counts (a game's voice chat, a dictation tool kept open for more than 10 seconds, an
-always-on voice app), and the switch's second line names it; screen sharing through the older Desktop
-Duplication API isn't reported by Windows and isn't detected unless the call around it is; a
-full-screen slideshow on a single extended display isn't presentation mode (add PowerPoint to the
-list below if you want it covered). The signals are checked once a second, and only while a token
-would otherwise be on screen: a quiet tray never checks.
+The **microphone alone doesn't count**, on purpose: nobody sees your screen in a voice call, and apps
+like Discord, game voice chat, dictation tools or audio mixers hold the microphone for hours, which
+would hide the token without you noticing. Share your screen or turn the camera on in that call and the
+token hides.
+
+The capture and camera signals are the ones behind Windows' privacy indicators (its capability consent
+store, which records when each app starts and stops using them). An entry that says "in use" only
+counts while a copy of that app runs that started before the use did, so one left behind by an app
+killed mid-call, or by a shutdown during one, is ignored. Limits: an app that keeps the camera or a
+screen capture open the whole time it runs (a virtual-camera app, OBS with a display source) hides the
+token while it runs, and the switch's second line names it; screen sharing through the older Desktop
+Duplication API isn't reported by Windows and isn't detected; a full-screen slideshow on a single
+extended display isn't presentation mode (add PowerPoint to the list below if you want it covered). The
+signals are checked once a second, and only while a token would otherwise be on screen: a quiet tray
+never checks.
 
 ### Stays out of your games
 
@@ -130,12 +134,19 @@ The control panel opens on **Analytics**, a look back at how you and your agents
 
 - **Current streak** and **Longest streak**: days in a row on which an agent needed you (today counts
   once it has one; a streak breaks only when a whole day passes with none).
-- **Average response**: over the last 30 days, the mean time from a session starting to need you
-  (the yellow "?") to your answer. Done tokens, and waits that ended without an answer (the agent quit
-  or AgentsCursor closed), don't count.
-- **Activity**: a calendar of the last six months or so, one square per day, greener the more tokens
-  appeared; hover a day (or focus the calendar and use the arrow keys) to see "12 tokens on Sat, Nov 8".
-- **Agents**: which agents needed you in the last 30 days, as a ring with each agent's share and count.
+- **Typical response**: over the last 30 days, the median time from a session starting to need you
+  (the yellow "?") to the moment you answered: you sent a prompt, answered a question or form, or
+  approved a call (Claude Code reports how long the approved call then ran, and that run isn't
+  counted). Where the agent doesn't say when you answered, the wait isn't timed rather than padded with
+  the agent's own work: a Codex approval (Codex reports no run time), a Claude Code denial, a turn that
+  ended under the prompt. Done tokens and waits nobody answered (the agent quit or failed, AgentsCursor
+  closed) don't count either. The median, so one prompt left open overnight doesn't outweigh a month of
+  quick answers.
+- **Activity**: a calendar of the last ten months or so (a year on a wide window), one square per day,
+  greener the more often an agent needed you; hover a day (or focus the calendar and use the arrow
+  keys) to see "Needed you 12 times on Sat, Nov 8".
+- **Who needed you**: which agents needed you in the last 30 days, as a ring with each agent's share
+  and count.
 
 It's built from a small local history: one line per token (which agent, needs you or done, when it
 appeared and went, and how it ended), nothing else — no prompts, projects, paths or session ids. It
@@ -305,10 +316,10 @@ AgentsCursor.sln
 │  │   ├─ AgentActivity.cs    Tracks which agent sessions need you (UI-free, thread-safe); reports each ended wait
 │   ├─ WaitRecord.cs       One ended wait (agent, needs you / done, start, end, how it ended)
 │   ├─ WaitHistory.cs      The Analytics history: a JSON line per wait, a file per month, appended off the UI thread
-│   ├─ ActivityStats.cs    Streaks, average response, per-agent counts, the calendar's days (pure)
+│   ├─ ActivityStats.cs    Streaks, typical response, per-agent counts, the calendar's days (pure)
 │  │   ├─ SoundCues.cs        When a chime plays (new waiting sessions, token shown, one per burst); ChimeAudio.cs scales its volume
 │  │   ├─ TokenVisibility.cs  Why the token is hidden: nothing waiting, turned off, an app in front, a meeting
-│  │   ├─ MeetingDetection.cs Presenting / sharing / camera / microphone -> a meeting (pure); MeetingSignals.cs reads
+│  │   ├─ MeetingDetection.cs Presenting / sharing / camera -> a meeting (pure); MeetingSignals.cs reads
 │  │   │                      them from Windows, MeetingWatcher.cs checks once a second while a token would show
 │  │   ├─ AgentEventMessage.cs The normalised wire format (one JSON line per event)
 │  │   ├─ CursorSettings.cs   Token size / placement / corner / icons / notifier settings / hidden-while-using programs (persisted as JSON)
@@ -365,7 +376,7 @@ control panel. Only one instance runs — launching it again just opens the cont
 Windows light or dark mode, or the theme you pick under **About**. Every change applies the moment you
 make it. Its sidebar has six pages, opening on **Analytics**:
 
-- **Analytics** — streaks, average response time, the activity calendar and the agents that needed
+- **Analytics** — streaks, typical response time, the activity calendar and the agents that needed
   you (see [Analytics](#analytics)).
 - **Sound and Display** — the master switch, the size, where it shows (below, above or beside the
   pointer, or a screen corner), how it moves (Bouncy, Calm, Still), a live preview of a pointer

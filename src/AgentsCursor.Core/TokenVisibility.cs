@@ -11,7 +11,7 @@ public enum HideReason
     TurnedOff,
     /// <summary>An app on the hide-while-using list is in front.</summary>
     AppInFront,
-    /// <summary>You're presenting, sharing your screen or in a call, and the token isn't set to show then.</summary>
+    /// <summary>You're presenting, sharing your screen or on camera, and the token isn't set to show then.</summary>
     Meeting,
 }
 

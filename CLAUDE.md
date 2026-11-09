@@ -62,21 +62,30 @@ Add a new reason there, never as a separate check somewhere else.
 meeting hides the token. `MeetingSignals` (Core, Win32, read-only) reads: `SHQueryUserNotificationState`
 = `QUNS_PRESENTATION_MODE`; `QueryDisplayConfig(QDC_DATABASE_CURRENT)` topology = clone (Win+P
 Duplicate); and the capability consent store
-(`HKCU\...\CapabilityAccessManager\ConsentStore\{microphone,webcam,graphicsCaptureProgrammatic,graphicsCaptureWithoutBorder}`,
+(`HKCU\...\CapabilityAccessManager\ConsentStore\{webcam,graphicsCaptureProgrammatic,graphicsCaptureWithoutBorder}`,
 a key per package family, and per exe under `NonPackaged` with `#` for `\`), where
 `LastUsedTimeStop` = 0 means in use (the data behind Windows' privacy indicators; Windows 11 records
 Windows.Graphics.Capture use there too). `MeetingDetection.Detect` (pure) decides: presenting, then
-duplicated, then screen capture, camera, microphone; capture and camera count after
-`DeviceSettle` (1 s, so a screenshot's milliseconds-long capture never does), the microphone after
-`MicrophoneSettle` (10 s, so a short dictation doesn't). A "stop = 0" entry only counts while a copy
-of that app runs that started before the use did: entries left by an app killed mid-call or by a
-shutdown during one stay "in use" forever (the dev machine had four, the oldest ten months old), and
-counting them would hide the token for good. Limits: any app holding the microphone counts (game voice
-chat, an always-on voice app); Desktop Duplication capture isn't recorded by Windows; a full-screen
-slideshow on one extended display isn't presentation mode. `MeetingWatcher` only runs while
-`TokenVisibility.NeedsMeetingCheck` (something waits, on, no listed app in front, rule on): it checks
-once on `Watch(true)` (on the caller's thread, about 13 ms) and then every second on a timer; off, it
-runs nothing. A failing check counts as no meeting and is logged once.
+duplicated, then screen capture, then camera; capture and camera count after `DeviceSettle` (1 s, so a
+screenshot's milliseconds-long capture never does). **The microphone is deliberately not a signal**
+(precision over recall): nobody sees your screen in a voice call, and the apps that hold it for hours
+(Discord or game voice chat, dictation, audio mixers such as VoiceMeeter) would hide the token by
+accident; a call counts once you share your screen or turn the camera on. A "stop = 0" entry only
+counts while a copy of that app runs that started before the use did (`MeetingDetection.IsLeftBehind`):
+entries left by an app killed mid-call or by a shutdown during one stay "in use" forever (the dev
+machine had four, Discord's, up to two years old), and counting them would hide the token for good.
+`MeetingSignals` is an instance (one per watcher, not thread-safe) that remembers each use it found
+left behind, keyed by (app, start): that verdict can never change, so a check with only stale entries
+is a registry read (about 1 ms of CPU) and the process snapshot (`RunningSince`, about 15 ms) runs only
+for entries that could still count. Limits (the trade-off): an app that keeps the camera or a screen
+capture open for its whole run (a virtual-camera app, OBS with a display source) hides the token while
+it runs, and a multi-process app whose oldest copy outlived a crashed one still counts; Desktop
+Duplication capture isn't recorded by Windows; a full-screen slideshow on one extended display isn't
+presentation mode. The way out is the one switch, and the Apps page names the app while it hides the
+token. `MeetingWatcher` only runs while `TokenVisibility.NeedsMeetingCheck` (something waits, on, no
+listed app in front, rule on): it checks once on `Watch(true)` (on the caller's thread, so the token
+never flashes up during a meeting) and then every second on a timer; off, it runs nothing. A failing
+check counts as no meeting and is logged once.
 
 **Sounds.** Off by default (`SoundsEnabled`). `SoundCues` (Core, pure) picks the chime when the
 waiting set changes: `Arrivals` are sessions (`WaitingAgent.Session`, `AgentActivity`'s key) that
@@ -91,10 +100,21 @@ touched, and `ChimePlayer` plays it with `PlaySound(SND_MEMORY | SND_ASYNC)` fro
 
 **Analytics history.** A **wait** is a session waiting in one state, from when it starts until it stops
 or switches between blocked and finished. `AgentActivity` raises `WaitEnded(WaitRecord)` once per
-ended wait (outside its lock, on the reporting thread): blocked ends `Answered` (any event that clears
-it: the call going ahead or denied, an answer, a new prompt, the turn ending) unless the session ended;
-finished ends `Resumed`, or `Expired` when swept; `SessionEnded`, `Release` and `EndAll` (the tray
-stopping, in `StopEverything`) end it `Ended`. The tray hands each record to `WaitHistory`, which only
+ended wait (outside its lock, on the reporting thread). A blocked wait ends **at the moment you
+answered** wherever an event marks it, `Answered`: you sent a prompt (`ThinkingStarted`), answered an
+item (`InputAnswered`: an elicitation, an async question, an OpenCode permission or form, a Pi dialog),
+or the prompt's own call finished with `callRan` (`AgentEventMessage.RanMs`, how long it ran after the
+answer): Claude Code's PostToolUse / PostToolUseFailure `duration_ms` (documented to leave out the
+permission prompt) for an approved call, so the wait ends when the call started; 0 for a question tool
+(AskUserQuestion, Codex `request_user_input` / `request_permissions`), whose run is the question. Where
+no event marks the answer it ends `Proceeded`, untimed, rather than at the agent's next event (which
+would add the approved call's run time or the model's turn): a Codex approval (its PermissionRequest
+names no call and Codex reports no run time; Codex runs PreToolUse before the approval, so nothing fires
+between your answer and the call finishing), a Claude Code denial (no hook fires on a manual denial;
+`PostToolBatch` waits for the batch), a call finishing without `duration_ms`, the turn ending under a
+prompt. The turn failing (`Error`) ends it `Ended`, as do `SessionEnded`, `Release` and `EndAll` (the
+tray stopping, in `StopEverything`). A finished wait ends `Resumed`, or `Expired` when swept. The token
+itself still stays up until the call clears it; only the record's end is the answer moment. The tray hands each record to `WaitHistory`, which only
 queues it; one background task appends `{"tool","kind","start","end","outcome"}` lines to
 `%LocalAppData%\AgentsCursor\history\yyyy-MM.jsonl` (by UTC start month), ending a torn last line
 before appending; `Load` parses line by line (a bad line is skipped and logged once), keeps the current
@@ -103,10 +123,11 @@ stored (no session id, project, path or prompt); previews never touch `AgentActi
 recorded. `ActivityStats` (pure) turns the records into the page's numbers, by **local calendar day of
 the start** (`TimeZoneInfo` per instant, so DST never moves a wait): daily counts (all waits);
 current streak (consecutive active days up to today, or up to yesterday while today has none yet);
-longest streak (latest on a tie); **average response time** = the mean `Duration` (end - start) of the
-`Blocked` waits that ended `Answered` and started in the last 30 days (today + 29), i.e. from the
-moment the session started needing you (its token appeared, or would have while hidden) to the event
-that answered it, excluding done waits and blocked waits that ended `Ended`; formatted "42 s",
+longest streak (latest on a tie); **typical response time** = the median `Duration` (end - start)
+of the `Blocked` waits that ended `Answered` and started in the last 30 days (today + 29), i.e. from
+the moment the session started needing you (its token appeared, or would have while hidden) to your
+answer; the median so one prompt left open overnight can't swamp a month of quick answers (needs-you
+waits never expire); `Proceeded`, `Ended` and done waits are left out; formatted "42 s",
 "3 m 10 s", "1 h 5 m"; per-agent counts of all waits in the same 30 days, in `IconCatalog.Tools`
 order then other tools by name; heat levels by quartile of the shown active days (the busiest is
 always 4); `Percentages` by largest remainder (sum 100).
@@ -196,7 +217,9 @@ tests.
   picture per pose. `MascotLoops.Animate(settings, animationEffects)` = `AnimateMascots` unless the
   effective motion is Still. Hosts pass a `mascotClock` (null = rest) to `DrawToken`/`DrawIcon`: the
   overlay its own `_t` (from the token's appearance, on the animation thread; nothing new runs while
-  nothing waits), `TokenPreview` its frame clock, the Customization page's tiles a clock of their own.
+  nothing waits), `TokenPreview` its frame clock (it subscribes to `CompositionTarget.Rendering` only while something
+  in it moves: under Still, in place, it draws one frame and redraws only when the look changes), the
+  Customization page's tiles a clock of their own.
   `TokenSprites` keeps a strip of sprites per icon and size, a frame built the first time it is drawn,
   every frame fitted by the **union** of the loop's visible bounds (measured once per process), so the
   size and `Sprite.Visual`, which the badge and "+N" anchor to, never change between frames (or with the
@@ -226,7 +249,8 @@ tests.
 - `WaitRecord.cs` (`WaitRecord`, `WaitEnd`), `WaitHistory.cs` (the store), `ActivityStats.cs` (the
   metrics) — the Analytics history, described above.
 - `AgentEventMessage.cs` — the normalised wire format (one JSON line per event) + the
-  raw-event → `AgentEventKind` mapping.
+  raw-event → `AgentEventKind` mapping. `ranMs` (on `tool_use`): how long a finished call ran after
+  you answered its prompt (see "Analytics history").
 - `CursorSettings.cs` — the persisted, tunable settings: token `Size`, `Placement`
   (`BelowPointer`/`Corner`/`AbovePointer`/`BesidePointer`, explicit values so the old numbers keep
   their meaning), `Corner`, `Icons` (tool -> icon id, read-only and replaced on edit; `IconFor`), the
@@ -286,7 +310,11 @@ tests.
   Owns a `ForegroundWatcher` and a `MeetingWatcher`, decides with `TokenVisibility.Decide` and stays
   hidden + parked unless it says shown; publishes `Visibility`. Each frame moves with
   `MotionProfile.For(Motion, animation effects)`; the Windows setting is re-read on every re-evaluation
-  and on `SystemEvents.UserPreferenceChanged`.
+  and on `SystemEvents.UserPreferenceChanged`. A frame is painted only when it differs from the one on
+  screen (`Frame`: face, re-evaluation count, position, pose, size, DPI, mascot clock), so a token that
+  isn't moving costs no GDI+ or `UpdateLayeredWindow`; Still in a corner with no mascot playing can't
+  change on its own, so the thread parks on `_wake` until a re-evaluation (agents, settings, focus,
+  meetings, `UserPreferenceChanged`, `DisplaySettingsChanged`). Still beside the pointer only polls it.
 - `TrayApplicationContext.cs` — owns the tray icon (Enabled / Preferences… / Exit), the
   `NotifierOverlay`, the pipe server + sweep timer, the `LiveSettings`, and the one control panel
   window (created on first use, kept for the app's lifetime; it is the panel's `IControlPanelHost`).
@@ -314,28 +342,31 @@ tests.
     System uses `SystemThemeWatcher` (live), Light/Dark apply directly; both go through
     `ApplicationThemeManager`, so WpfHost's opaque text brushes are re-derived. Closing hides it;
     the sidebar folds to icons below 860 DIPs; each page opens scrolled to the top.
-  - `AnalyticsPage` — three stat tiles (Current streak / Longest streak with their dates, Average
+  - `AnalyticsPage` — three stat tiles (Current streak / Longest streak with their dates, Typical
     response "Last 30 days"; the number large, the unit small; each tile's automation name reads it
-    all), "Activity" (`ActivityHeatmap`) and "Agents" (`AgentDonut` with the 30-day total in the hole,
-    and a legend row per agent: colour, logo, name, count, share). It loads + summarises on a
-    background task when shown and when `WaitHistory.Recorded` fires while shown; empty: "Nothing yet.
-    Agents show up here once one needs you." (or "No agent needed you in the last 30 days.").
+    all), "Activity" (`ActivityHeatmap`) and "Who needed you" (`AgentDonut` with the 30-day total and
+    "times, last 30 days" in the hole, and a legend row per agent: colour swatch, name, count, share).
+    It loads + summarises on a background task when shown and when `WaitHistory.Recorded` fires while
+    shown; empty: "No agent has needed you yet." (or "No agent needed you in the last 30 days.").
+    The unit everywhere is a time an agent needed you, never "tokens" (which reads as LLM tokens).
     `ActivityHeatmap` is an owner-drawn `FrameworkElement`: a column per week (the culture's first day
-    on top, today in the last column), 26 to 53 weeks to fill the width at ~24 DIPs a column, pitch,
+    on top, today in the last column), 26 to 53 weeks to fill the width at ~13 DIPs a column (GitHub's
+    10 + 3: about 45 weeks at the panel's usual width, a year when wide), pitch,
     gap and origin snapped to device pixels; month names over the week holding the 1st, Mon/Wed/Fri,
     "Less … More"; hover or keyboard focus (arrows: a week left/right, a day up/down, Home/End) shows
-    "12 tokens on Sat, Nov 8" as a tooltip and as its UIA name. `AgentDonut` draws the ring (2 DIP gaps,
+    "Needed you 12 times on Sat, Nov 8" as a tooltip and as its UIA name. `AgentDonut` draws the ring (2 DIP gaps,
     a hovered segment lifts, tooltip "Codex: 52 (24%)"). `ChartColors`: per theme, a GitHub green ramp
-    for the heatmap; agents in Claude's and Pi's brand hues, Codex blue and OpenCode aqua (their marks
+    for the heatmap (dark: empty just above the card, then each level about 1.5:1 lighter than the one
+    before, so the quietest day differs by lightness, not hue alone); agents in Claude's and Pi's brand hues, Codex blue and OpenCode aqua (their marks
     are monochrome, which can't carry identity); ring-adjacent pairs pass a colour-blind check in both
     themes. Charts repaint on `ApplicationThemeManager.Changed`.
-  - `SoundAndDisplayPage` — first a preview (260 DIPs high, half dark, half light) where a drawn pointer
+  - `SoundAndDisplayPage` (title + control per setting, no description lines) — first a preview (260 DIPs high, half dark, half light) where a drawn pointer
     glides across both and the token follows it the chosen way, kept inside the preview
     (`TokenPreview` with `Roam`: Core renderer + `TokenMotion` → WPF bitmap on the UI thread, its own
     renderer); then the master switch, size, position (below / above / beside the pointer, a
     separator, the four corners; picking a pointer position keeps the last corner), Motion (Bouncy /
     Calm / Still; disabled showing Still, with a tooltip, while Windows' animation effects are off),
-    and "Reset size and position" (`ResetSizeAndPosition`; icons keep their own reset). Then Sounds:
+    and "Reset display" (`ResetDisplay`: size, position and motion; icons keep their own reset). Then Sound:
     "Play sounds", and only while it is on, "Needs you" and "Done" (a play button + the chime box,
     `IControlPanelHost.PlayChime`) and Volume.
   - `CustomizationPage` — a preview of the selected agent's icon ("Done", and "Needs you" with the "?" and a
@@ -345,7 +376,7 @@ tests.
     store on a background task with a ProgressRing; dimmed with a tooltip when the agent has 24), and
     "Reset all icons to the originals". A refusal ("That file couldn't be used" + the reason +
     "<Agent> keeps its current icon.") and Undo show inline under "Your icons", in place of the hint.
-    Under the preview, "Animate mascots" (off, disabled, with a tooltip while Motion is Still or
+    Under the gallery (by the mascot tiles it animates), "Animate mascots" (off, disabled, with a tooltip while Motion is Still or
     Windows' animation effects are off); while it applies and the page is visible, the mascot tiles
     step through their loops from `CompositionTarget.Rendering`, each frame drawn once by the page's own
     renderer (`ToolLogo.Render` with a clock) and kept by its `IconTile`.

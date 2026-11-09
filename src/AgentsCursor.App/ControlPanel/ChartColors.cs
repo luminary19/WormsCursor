@@ -10,8 +10,10 @@ namespace AgentsCursor.App.ControlPanel;
 /// grey), which can't carry identity in a chart (they read as grey, match each other and vanish on
 /// the dark theme), so they take the blue and aqua of the reference chart palette. In the ring's fixed
 /// order (Claude Code, Codex, OpenCode, Pi, round to Claude Code) every neighbouring pair passes the
-/// colour-blind separation check in both themes; the legend names each one beside its logo, so colour
-/// is never the only cue.
+/// colour-blind separation check in both themes; the legend names each one beside its swatch, so
+/// colour is never the only cue. In the dark ramp an empty day sits just above the card (about 1.2:1,
+/// as in GitHub's light ramp) and every level is about 1.5:1 lighter than the one before, so the
+/// quietest active day stands out by lightness, not by hue alone.
 /// </summary>
 static class ChartColors
 {
@@ -21,7 +23,7 @@ static class ChartColors
     public static bool IsDark => ApplicationThemeManager.GetAppTheme() == ApplicationTheme.Dark;
 
     static readonly Brush[] LightRamp = Brushes("#EBEDF0", "#9BE9A8", "#40C463", "#30A14E", "#216E39");
-    static readonly Brush[] DarkRamp = Brushes("#383838", "#0E4429", "#006D32", "#26A641", "#39D353");
+    static readonly Brush[] DarkRamp = Brushes("#3E3E3E", "#1D7139", "#1A9144", "#27B24D", "#3DD85B");
 
     /// <summary>The heatmap fill for a level, 0 (no activity) to 4 (busiest).</summary>
     public static Brush Heat(int level) => (IsDark ? DarkRamp : LightRamp)[Math.Clamp(level, 0, 4)];

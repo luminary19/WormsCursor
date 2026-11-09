@@ -52,7 +52,7 @@ public partial class SoundAndDisplayPage : Page
             else if (index > PointerPositions.Length)
                 _settings.Change(s => { s.Placement = NotifierPlacement.Corner; s.Corner = (ScreenCorner)(index - FirstCorner); });
         };
-        ResetButton.Click += (_, _) => _settings.Change(s => s.ResetSizeAndPosition());
+        ResetButton.Click += (_, _) => _settings.Change(s => s.ResetDisplay());
         MotionBox.SelectionChanged += (_, _) =>
         {
             // Disabled while Windows' animation effects are off, so a choice here is always the user's.
@@ -147,7 +147,7 @@ public partial class SoundAndDisplayPage : Page
         SizeSlider.Value = s.Size;
         SizeText.Text = $"{s.Size} px";
         PositionBox.SelectedIndex = PositionIndex(s);
-        ResetButton.IsEnabled = !s.HasDefaultSizeAndPosition();
+        ResetButton.IsEnabled = !s.HasDefaultDisplay();
 
         bool animations = SystemParameters.ClientAreaAnimation;
         MotionBox.IsEnabled = animations;

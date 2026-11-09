@@ -18,7 +18,7 @@ public sealed record ActivitySummary(
     IReadOnlyDictionary<DateOnly, int> Daily,
     Streak CurrentStreak,
     Streak LongestStreak,
-    TimeSpan? AverageResponse,
+    TimeSpan? TypicalResponse,
     int Responses,
     IReadOnlyList<AgentCount> RecentAgents,
     int RecentTotal)
@@ -37,11 +37,16 @@ public sealed record ActivitySummary(
 /// <item><b>Current streak</b>: the active days in a row up to today, or up to yesterday while
 /// today has none yet (today isn't over); it breaks once a whole day passes with none.</item>
 /// <item><b>Longest streak</b>: the longest such run in the history (the latest on a tie).</item>
-/// <item><b>Average response time</b>: the mean <see cref="WaitRecord.Duration"/> of the needs-you
+/// <item><b>Typical response time</b>: the median <see cref="WaitRecord.Duration"/> of the needs-you
 /// waits (<see cref="WaitingState.Blocked"/>) that ended <see cref="WaitEnd.Answered"/> and started in
 /// the last <see cref="RecentDays"/> days: from the moment the session started needing you (its
-/// token appeared, or would have while hidden) to the event that answered it. Done waits and waits
-/// that ended without an answer (session ended, host closed, app stopped) are left out.</item>
+/// token appeared, or would have while hidden) to the moment you answered, never the agent's work after
+/// it: a prompt you sent, a question or form you answered, or an approved call starting to run (Claude
+/// Code's <c>duration_ms</c>). Waits whose answer moment no event marks
+/// (<see cref="WaitEnd.Proceeded"/>: a Codex approval, a Claude Code denial, a turn ending under a
+/// prompt) are left out rather than timed to the agent's next event, as are done waits and waits
+/// nobody answered (session ended, host closed, app stopped, the turn failed). The median, not the
+/// mean, so one prompt left open overnight doesn't swamp a month of quick answers.</item>
 /// <item><b>Agents</b>: waits per agent that started in the last <see cref="RecentDays"/> days,
 /// in the agents' fixed order (<see cref="IconCatalog.Tools"/>, then any other tool by name).</item>
 /// </list>
@@ -60,8 +65,8 @@ public static class ActivityStats
         var recentFrom = today.AddDays(-(RecentDays - 1));
         var daily = new Dictionary<DateOnly, int>();
         var agents = new Dictionary<string, int>(StringComparer.Ordinal);
-        long responseTicks = 0;
-        int responses = 0, recentTotal = 0;
+        var responses = new List<long>();
+        int recentTotal = 0;
 
         foreach (var record in records)
         {
@@ -72,10 +77,7 @@ public static class ActivityStats
             recentTotal++;
             agents[record.Tool] = agents.GetValueOrDefault(record.Tool) + 1;
             if (record.Kind == WaitingState.Blocked && record.Outcome == WaitEnd.Answered)
-            {
-                responseTicks += record.Duration.Ticks;
-                responses++;
-            }
+                responses.Add(record.Duration.Ticks);
         }
 
         var active = daily.Keys.ToHashSet();
@@ -84,10 +86,20 @@ public static class ActivityStats
             daily,
             CurrentStreak(active, today),
             LongestStreak(active),
-            responses == 0 ? null : TimeSpan.FromTicks(responseTicks / responses),
-            responses,
+            Median(responses),
+            responses.Count,
             OrderAgents(agents),
             recentTotal);
+    }
+
+    /// <summary>The median of <paramref name="ticks"/> (the mean of the middle two for an even count),
+    /// or null for none.</summary>
+    static TimeSpan? Median(List<long> ticks)
+    {
+        if (ticks.Count == 0) return null;
+        ticks.Sort();
+        int mid = ticks.Count / 2;
+        return TimeSpan.FromTicks(ticks.Count % 2 == 1 ? ticks[mid] : ticks[mid - 1] + (ticks[mid] - ticks[mid - 1]) / 2);
     }
 
     public static Streak CurrentStreak(IReadOnlySet<DateOnly> active, DateOnly today)

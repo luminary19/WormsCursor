@@ -45,6 +45,15 @@ public sealed class AgentEventMessage
     /// finished (on <c>tool_use</c>): its tool-call id and/or a fingerprint of its tool name and input,
     /// whichever the tool's payload carries. See <see cref="AgentActivity"/>.</summary>
     public string[]? CallIds { get; set; }
+    /// <summary>On <c>tool_use</c> for a finished call: how long it ran after you answered its prompt, in
+    /// milliseconds. An approved call's run time, which leaves out the time its approval was open (Claude
+    /// Code's <c>duration_ms</c>); 0 for a question tool, whose run is the question, so it finished as you
+    /// answered. Absent when the agent doesn't say (Codex reports no run time).</summary>
+    public long? RanMs { get; set; }
+
+    /// <summary><see cref="RanMs"/> as the time span <see cref="AgentActivity.Report"/> takes, or null.</summary>
+    [JsonIgnore]
+    public TimeSpan? CallRan => RanMs is long ms and >= 0 ? TimeSpan.FromMilliseconds(ms) : null;
 
     static readonly JsonSerializerOptions Json = new()
     {

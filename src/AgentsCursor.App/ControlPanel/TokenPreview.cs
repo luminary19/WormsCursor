@@ -22,9 +22,12 @@ namespace AgentsCursor.App.ControlPanel;
 ///
 /// The renderer is this control's own and lives on the UI thread from Loaded to Unloaded, never
 /// shared with the overlay's animation thread (GDI+ objects are not thread-safe). Frames come from
-/// <see cref="CompositionTarget.Rendering"/> only while the control is visible, so a hidden panel
-/// draws nothing. With Windows' animation effects turned off it shows one still frame. A mascot plays
-/// its idle loop while <see cref="MascotLoops.Animate"/> allows.
+/// <see cref="CompositionTarget.Rendering"/> only while the control is visible and something in it
+/// moves, so a hidden panel draws nothing: in place under the Still motion (or with Windows' animation
+/// effects off, which makes every style Still) the token and its mascot stand still, so it shows one
+/// frame, redrawn only when the look changes. Roaming, the pointer keeps gliding (while animation
+/// effects are on) and the token follows it. A mascot plays its idle loop while
+/// <see cref="MascotLoops.Animate"/> allows.
 /// </summary>
 public sealed class TokenPreview : FrameworkElement
 {
@@ -76,7 +79,7 @@ public sealed class TokenPreview : FrameworkElement
     {
         _look = look;
         InvalidateMeasure();
-        RenderFrame();
+        UpdateAnimation(); // the motion may have changed
     }
 
     /// <summary>The width, in DIPs, a preview without <see cref="Roam"/> needs for a token of
@@ -110,7 +113,9 @@ public sealed class TokenPreview : FrameworkElement
 
     void UpdateAnimation()
     {
-        bool animate = IsVisible && _renderer is not null && SystemParameters.ClientAreaAnimation;
+        bool effects = SystemParameters.ClientAreaAnimation;
+        bool moves = Roam ? effects : MotionProfile.Effective(_look.Motion, effects) != MotionStyle.Still;
+        bool animate = IsVisible && _renderer is not null && moves;
         if (animate && !_animating)
         {
             CompositionTarget.Rendering += OnFrame;

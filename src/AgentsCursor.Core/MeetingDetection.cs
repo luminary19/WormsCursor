@@ -14,8 +14,6 @@ public enum MeetingSignal
     ScreenShared,
     /// <summary>An app is using the camera.</summary>
     Camera,
-    /// <summary>An app is using the microphone.</summary>
-    Microphone,
 }
 
 /// <summary>Why the token thinks you're in a meeting: the signal, and the app behind it when there is
@@ -29,24 +27,29 @@ public readonly record struct DeviceUse(MeetingSignal Signal, string App, DateTi
 
 /// <summary>
 /// The pure half of "hide the token during meetings and screen sharing": deciding from what Windows
-/// reports whether you're presenting, sharing your screen or in a call. No Win32 here, so it is
+/// reports whether you're presenting, sharing your screen or on camera. No Win32 here, so it is
 /// unit-tested directly; <see cref="MeetingSignals"/> reads the live signals.
 ///
-/// Windows records every app's use of the microphone, camera and screen capture (the privacy
-/// indicators' "recently used" list) with a start time and, once it lets go, a stop time. An entry with
-/// no stop time is in use, unless the app that wrote it is gone (killed mid-call, or the PC shut down
-/// during one): such an entry stays "in use" forever, so it only counts while a copy of the app runs
-/// that started before the use did. A use must also have lasted a moment: the microphone
-/// <see cref="MicrophoneSettle"/> (dictating a sentence isn't a call; a call lasts longer), the camera
-/// and screen capture <see cref="DeviceSettle"/> (a screenshot holds the capture for milliseconds).
+/// The microphone alone is deliberately not a signal: nobody sees your screen in a voice call, and the
+/// apps that hold it for long (dictation, voice chat, audio mixers such as VoiceMeeter) would hide the
+/// token for hours. Sharing the screen or turning the camera on during the call does count.
+///
+/// Windows records every app's use of the camera and screen capture (the privacy indicators' "recently
+/// used" list) with a start time and, once it lets go, a stop time. An entry with no stop time is in
+/// use, unless the app that wrote it is gone (killed mid-call, or the PC shut down during one): such an
+/// entry stays "in use" forever, so it only counts while a copy of the app runs that started before the
+/// use did (<see cref="IsLeftBehind"/>). A use must also have lasted <see cref="DeviceSettle"/> (a
+/// screenshot holds the capture for milliseconds).
 /// </summary>
 public static class MeetingDetection
 {
-    /// <summary>How long the microphone must be in use before it counts as a call.</summary>
-    public static readonly TimeSpan MicrophoneSettle = TimeSpan.FromSeconds(10);
-
     /// <summary>How long the camera or a screen capture must be in use before it counts.</summary>
     public static readonly TimeSpan DeviceSettle = TimeSpan.FromSeconds(1);
+
+    /// <summary>True when <paramref name="use"/> was left behind by a copy of its app that is gone: no
+    /// copy started before the use runs. That never changes again (a copy can't start in the past), so
+    /// a reader may remember it and stop looking that use's app up.</summary>
+    public static bool IsLeftBehind(DeviceUse use) => use.RunningSinceUtc is not { } since || since > use.StartUtc;
 
     /// <summary>The meeting these signals add up to, or null for none. <paramref name="inUse"/> lists
     /// the devices held right now (<see cref="DeviceUse"/>); the strongest signal wins.</summary>
@@ -57,9 +60,7 @@ public static class MeetingDetection
         DeviceUse? strongest = null;
         foreach (var use in inUse)
         {
-            if (use.RunningSinceUtc is not { } since || since > use.StartUtc) continue; // left behind by a copy that's gone
-            var settle = use.Signal == MeetingSignal.Microphone ? MicrophoneSettle : DeviceSettle;
-            if (nowUtc - use.StartUtc < settle) continue;
+            if (IsLeftBehind(use) || nowUtc - use.StartUtc < DeviceSettle) continue;
             if (strongest is not { } best || use.Signal < best.Signal) strongest = use;
         }
         return strongest is { } found ? new Meeting(found.Signal, found.App) : null;

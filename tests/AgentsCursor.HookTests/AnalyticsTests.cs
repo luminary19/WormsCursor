@@ -1,7 +1,7 @@
 using AgentsCursor.Core;
 
 /// <summary>The regression groups for the Analytics page: the waits the activity model reports, the
-/// history store (round trip, torn and corrupt lines, retention), and the metrics (streaks, average
+/// history store (round trip, torn and corrupt lines, retention), and the metrics (streaks, typical
 /// response time, per-agent counts, day bucketing across daylight saving).</summary>
 static class AnalyticsTests
 {
@@ -36,13 +36,21 @@ static class AnalyticsTests
         activity.WaitEnded += ended.Add;
         string Take() { var s = string.Join(',', ended.Select(Describe)); ended.Clear(); return s; }
 
-        // Blocked, then answered: one needs-you wait, timed from when it started blocking.
+        // Blocked, then answered: one needs-you wait, timed from when it started blocking to the last
+        // answer (two questions, each finishing as it is answered: no run time after the answer).
         activity.Report("claude-code", "a", null, AgentEventKind.AwaitingUser, T0, callIds: new[] { "c1" });
         activity.Report("claude-code", "a", null, AgentEventKind.AwaitingUser, T0.AddSeconds(5), callIds: new[] { "c2" });
-        activity.Report("claude-code", "a", null, AgentEventKind.ToolUse, T0.AddSeconds(8), callIds: new[] { "c1" });
+        activity.Report("claude-code", "a", null, AgentEventKind.ToolUse, T0.AddSeconds(8), callIds: new[] { "c1" }, callRan: TimeSpan.Zero);
         Equal("", Take(), "still blocked on the second call: no wait ends");
-        activity.Report("claude-code", "a", null, AgentEventKind.ToolUse, T0.AddSeconds(20), callIds: new[] { "c2" });
+        activity.Report("claude-code", "a", null, AgentEventKind.ToolUse, T0.AddSeconds(20), callIds: new[] { "c2" }, callRan: TimeSpan.Zero);
         Equal("claude-code:Blocked:20s:Answered", Take(), "both calls answered");
+        // You answering yourself (a prompt, an item) is the answer moment.
+        activity.Report("claude-code", "a", null, AgentEventKind.AwaitingUser, T0, callIds: new[] { "c1" });
+        activity.Report("claude-code", "a", null, AgentEventKind.ThinkingStarted, T0.AddSeconds(6));
+        Equal("claude-code:Blocked:6s:Answered", Take(), "a new prompt answers");
+        activity.Report("claude-code", "a", null, AgentEventKind.AwaitingUser, T0, new[] { "form" });
+        activity.Report("claude-code", "a", null, AgentEventKind.InputAnswered, T0.AddSeconds(9), new[] { "form" });
+        Equal("claude-code:Blocked:9s:Answered", Take(), "an item answered");
 
         // Done, then a new prompt: a done wait that resumed. Repeated finishes keep one wait.
         activity.Report("codex", "b", null, AgentEventKind.TurnComplete, T0);
@@ -55,10 +63,39 @@ static class AnalyticsTests
         activity.Sweep(T0.AddSeconds(31));
         Equal("codex:Finished:31s:Expired", Take(), "done, then swept");
 
+        // An approval answered at +5 s, then the approved call ran for 90 s: the wait ends when the
+        // call started (its reported run time back from when it finished), not when it was done.
+        activity.Report("claude-code", "h", null, AgentEventKind.AwaitingUser, T0, callIds: new[] { "c" });
+        activity.Report("claude-code", "h", null, AgentEventKind.ToolUse, T0.AddSeconds(95), callIds: new[] { "c" }, callRan: TimeSpan.FromSeconds(90));
+        Equal("claude-code:Blocked:5s:Answered", Take(), "answered when the approved call started");
+        // A run time longer than the wait (clock skew) never ends it before it began; none: now.
+        activity.Report("claude-code", "h", null, AgentEventKind.AwaitingUser, T0, callIds: new[] { "c" });
+        activity.Report("claude-code", "h", null, AgentEventKind.ToolUse, T0.AddSeconds(10), callIds: new[] { "c" }, callRan: TimeSpan.FromMinutes(5));
+        Equal("claude-code:Blocked:0s:Answered", Take(), "clamped to the wait's start");
+        activity.Report("claude-code", "h", null, AgentEventKind.AwaitingUser, T0, callIds: new[] { "c" });
+        activity.Report("claude-code", "h", null, AgentEventKind.ToolUse, T0.AddSeconds(10), callIds: new[] { "c" });
+        Equal("claude-code:Blocked:10s:Proceeded", Take(), "no run time: answered at an unknown moment, untimed");
+        // A prompt that named no call (Codex's approval) is answered by the agent's next tool event,
+        // which says nothing of when, even when that event carries a run time of its own.
+        activity.Report("codex", "h", null, AgentEventKind.AwaitingUser, T0);
+        activity.Report("codex", "h", null, AgentEventKind.ToolUse, T0.AddSeconds(50), callIds: new[] { "x" }, callRan: TimeSpan.Zero);
+        Equal("codex:Blocked:50s:Proceeded", Take(), "an unnamed prompt is never timed");
+        // A run time on an event that doesn't end the wait changes nothing.
+        activity.Report("claude-code", "h", null, AgentEventKind.AwaitingUser, T0, callIds: new[] { "c", "d" });
+        activity.Report("claude-code", "h", null, AgentEventKind.ToolUse, T0.AddSeconds(10), callIds: new[] { "c" }, callRan: TimeSpan.FromSeconds(9));
+        activity.Report("claude-code", "h", null, AgentEventKind.ToolsResolved, T0.AddSeconds(30));
+        Equal("claude-code:Blocked:30s:Proceeded", Take(), "the batch resolving (a denial) is untimed");
+        // The turn failing under a prompt is no answer.
+        activity.Report("claude-code", "h", null, AgentEventKind.AwaitingUser, T0, callIds: new[] { "c" });
+        activity.Report("claude-code", "h", null, AgentEventKind.Error, T0.AddSeconds(7));
+        Equal("claude-code:Blocked:7s:Ended", Take(), "an error ends the needs-you wait unanswered");
+        activity.Report("claude-code", "h", null, AgentEventKind.SessionEnded, T0.AddSeconds(8));
+        Equal("claude-code:Finished:1s:Ended", Take(), "then the error's done wait");
+
         // Blocked, then the turn ends: the blocked wait was answered and a done wait begins.
         activity.Report("claude-code", "d", null, AgentEventKind.AwaitingUser, T0);
         activity.Report("claude-code", "d", null, AgentEventKind.TurnComplete, T0.AddSeconds(4));
-        Equal("claude-code:Blocked:4s:Answered", Take(), "blocked -> finished ends the blocked wait");
+        Equal("claude-code:Blocked:4s:Proceeded", Take(), "blocked -> finished ends the blocked wait, untimed");
         // Done, then a question: the done wait ends (resumed) and a blocked one begins.
         activity.Report("claude-code", "d", null, AgentEventKind.InputRequested, T0.AddSeconds(10), new[] { "q" });
         Equal("claude-code:Finished:6s:Resumed", Take(), "finished -> blocked ends the done wait");
@@ -243,7 +280,7 @@ static class AnalyticsTests
         True(s.IsEmpty, "future records are ignored");
     }
 
-    public static void AverageResponse()
+    public static void TypicalResponse()
     {
         var now = Day(11, 9, 15);
         var records = new[]
@@ -257,9 +294,14 @@ static class AnalyticsTests
             Wait(Day(11, 5), kind: WaitingState.Finished, seconds: 5000, outcome: WaitEnd.Expired),
         };
         var s = ActivityStats.Summarize(records, now, Utc);
-        Equal(TimeSpan.FromSeconds(60), s.AverageResponse, "mean of the answered needs-you waits in the last 30 days");
+        Equal(TimeSpan.FromSeconds(60), s.TypicalResponse, "median of the answered needs-you waits in the last 30 days");
         Equal(3, s.Responses, "three answers counted");
-        Equal<TimeSpan?>(null, ActivityStats.Summarize(records.Skip(4), now, Utc).AverageResponse, "nothing answered: no average");
+        Equal<TimeSpan?>(null, ActivityStats.Summarize(records.Skip(4), now, Utc).TypicalResponse, "nothing answered: none");
+        Equal(TimeSpan.FromSeconds(60), ActivityStats.Summarize(records.Take(2), now, Utc).TypicalResponse, "an even count: the middle two's mean (30 s, 90 s)");
+        // One prompt left open overnight doesn't swamp a month of quick answers.
+        var quick = Enumerable.Range(0, 50).Select(i => Wait(Day(11, 9, 9), kind: WaitingState.Blocked, seconds: 20, outcome: WaitEnd.Answered))
+            .Append(Wait(Day(11, 8, 9), kind: WaitingState.Blocked, seconds: 36000, outcome: WaitEnd.Answered));
+        Equal(TimeSpan.FromSeconds(20), ActivityStats.Summarize(quick, now, Utc).TypicalResponse, "the outlier doesn't move it");
 
         Equal("<1 s", ActivityStats.FormatDuration(TimeSpan.FromMilliseconds(400)), "under a second");
         Equal("0 s", ActivityStats.FormatDuration(TimeSpan.Zero), "zero");
@@ -349,16 +391,60 @@ static class AnalyticsTests
             var activity = new AgentActivity(TimeSpan.FromSeconds(60));
             activity.WaitEnded += history.Record;
             activity.Report("codex", "s", "C:\\secret\\project", AgentEventKind.AwaitingUser, T0.AddMinutes(-10));
-            activity.Report("codex", "s", "C:\\secret\\project", AgentEventKind.ToolUse, T0.AddMinutes(-10).AddSeconds(12));
+            activity.Report("codex", "s", "C:\\secret\\project", AgentEventKind.ThinkingStarted, T0.AddMinutes(-10).AddSeconds(12));
             activity.Report("codex", "s", "C:\\secret\\project", AgentEventKind.TurnComplete, T0.AddMinutes(-9));
             activity.EndAll(T0.AddMinutes(-8));
             True(history.Flush(TimeSpan.FromSeconds(5)), "flushed");
             var s = ActivityStats.Summarize(history.Load(), T0, Utc);
             Equal(2, s.RecentTotal, "two waits");
-            Equal(TimeSpan.FromSeconds(12), s.AverageResponse, "the answered one");
+            Equal(TimeSpan.FromSeconds(12), s.TypicalResponse, "the answered one");
             string text = string.Concat(Directory.GetFiles(dir).Select(File.ReadAllText));
             True(!text.Contains("secret") && !text.Contains("\"s\"") && !text.Contains("codex:s"), "no project, path or session id on disk");
         }
         finally { Directory.Delete(dir, true); }
+    }
+
+    // Real payloads through the bridge. Claude Code: an approval answered after 5 s whose command then
+    // runs for 90 s counts as a 5 s answer (PostToolUse's duration_ms leaves the prompt out); a
+    // question's run is the question itself, so it is answered when it finishes. Codex: the same for a
+    // question; an approval reports no answer moment, so it is counted but untimed.
+    public static void ApprovalTiming()
+    {
+        var activity = new AgentActivity(TimeSpan.FromSeconds(60));
+        var ended = new List<WaitRecord>();
+        activity.WaitEnded += ended.Add;
+        void Feed(object payload, DateTime at, string tool = "claude-code")
+        {
+            var msg = AgentsCursor.App.AgentHookBridge.Parse(tool, System.Text.Json.JsonSerializer.Serialize(payload))!;
+            True(msg.TryGetKind(out var kind), "a known event: " + msg.Event);
+            // As the tray does (TrayApplicationContext.HandleAgentEvent), after a round trip on the pipe.
+            msg = AgentEventMessage.FromJson(msg.ToJsonLine())!;
+            activity.Report(msg.Tool, msg.SessionId, msg.Project, kind, at, msg.InputIds, msg.AgentId, msg.CallIds, null, msg.CallRan);
+        }
+        var input = new { command = "dotnet test" };
+        Feed(new { hook_event_name = "PreToolUse", session_id = "s", tool_name = "Bash", tool_input = input, tool_use_id = "t1" }, T0);
+        Feed(new { hook_event_name = "PermissionRequest", session_id = "s", tool_name = "Bash", tool_input = input }, T0.AddSeconds(2));
+        Feed(new { hook_event_name = "PostToolUse", session_id = "s", tool_name = "Bash", tool_input = input, tool_use_id = "t1", tool_response = new { }, duration_ms = 90_000 }, T0.AddSeconds(97));
+        Equal("claude-code:Blocked:5s:Answered", string.Join(',', ended.Select(Describe)), "answered when the command started");
+        ended.Clear();
+
+        var question = new { questions = new[] { new { question = "Which?" } } };
+        Feed(new { hook_event_name = "PreToolUse", session_id = "s", tool_name = "AskUserQuestion", tool_input = question, tool_use_id = "q1" }, T0);
+        Feed(new { hook_event_name = "PostToolUse", session_id = "s", tool_name = "AskUserQuestion", tool_input = question, tool_use_id = "q1", tool_response = new { }, duration_ms = 40_000 }, T0.AddSeconds(40));
+        Equal("claude-code:Blocked:40s:Answered", string.Join(',', ended.Select(Describe)), "a question is answered when it finishes");
+        Equal<long?>(null, AgentsCursor.App.AgentHookBridge.Parse("claude-code", "{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\"}")!.RanMs, "no duration_ms: no run time");
+        ended.Clear();
+
+        // Codex: a question finishes as it is answered; an approval says nothing of when you answered
+        // (no run time, and its prompt names no call), so it is counted but not timed.
+        var ask = new { questions = new[] { new { question = "Which?" } } };
+        Feed(new { hook_event_name = "PreToolUse", session_id = "x", tool_name = "request_user_input", tool_input = ask, tool_use_id = "u1" }, T0, "codex");
+        Feed(new { hook_event_name = "PostToolUse", session_id = "x", tool_name = "request_user_input", tool_input = ask, tool_use_id = "u1", tool_response = "{}" }, T0.AddSeconds(12), "codex");
+        var run = new { command = "dotnet test" };
+        Feed(new { hook_event_name = "PreToolUse", session_id = "x", tool_name = "Bash", tool_input = run, tool_use_id = "u2" }, T0.AddSeconds(20), "codex");
+        Feed(new { hook_event_name = "PermissionRequest", session_id = "x", tool_name = "Bash", tool_input = run }, T0.AddSeconds(21), "codex");
+        Feed(new { hook_event_name = "PostToolUse", session_id = "x", tool_name = "Bash", tool_input = run, tool_use_id = "u2", tool_response = "{}" }, T0.AddSeconds(120), "codex");
+        Equal("codex:Blocked:12s:Answered,codex:Blocked:99s:Proceeded", string.Join(',', ended.Select(Describe)), "Codex question timed, approval not");
+        Equal(false, AgentEventMessage.FromJson("{\"tool\":\"pi\",\"event\":\"tool_use\"}")!.ToJsonLine().Contains("callRan"), "the derived span isn't on the wire");
     }
 }

@@ -191,7 +191,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
     {
         if (msg.TryGetKind(out var kind))
             _agents.Report(msg.Tool, msg.SessionId, msg.Project, kind, DateTime.UtcNow, msg.InputIds, msg.AgentId,
-                msg.CallIds, lease is long id ? LeaseOwner(id) : null);
+                msg.CallIds, lease is long id ? LeaseOwner(id) : null,
+                msg.CallRan);
     }
 
     // Keeps the connections the user made pointing at this copy of AgentsCursor: a tool whose
