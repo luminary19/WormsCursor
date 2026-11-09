@@ -7,6 +7,14 @@ GitHub releases. The release workflow pulls the matching section into each relea
 ## Unreleased
 
 ### Added
+- **The project's name under the token.** A small label under the logo now says which project the
+  waiting agent is in: the last folder of its working directory, so an agent in
+  `C:\Users\you\Lumicity` shows **Lumicity**. It is black with white text when the control panel is
+  dark and white with black text when it is light (System follows Windows), long names end in "…", it
+  stays level while the token swings, and the token makes room for it at every screen edge and corner.
+  **Show project name** on the **Sound and Display** page turns it off (on by default, and part of
+  **Reset display**); the preview shows a sample. The name is only drawn: the Analytics history still
+  keeps no projects or paths.
 - **Mascots that move.** Every mascot now has a small idle loop every few seconds: Claude Code waves,
   shakes its party hat while the confetti twinkles, or blinks and sinks behind its ledge to peek;
   Codex's buddy blinks and rolls its googly eyes, Spin twirls and wobbles to a stop, Sleepy's z's drift

@@ -79,6 +79,10 @@ public sealed class CursorSettings
     /// (<see cref="MotionProfile.Effective"/>), whatever is saved here.</summary>
     public MotionStyle Motion { get; set; } = MotionStyle.Bouncy;
 
+    /// <summary>Show the name of the project the waiting session is in under the token
+    /// (<see cref="TokenLabel"/>). On by default.</summary>
+    public bool ShowProjectName { get; set; } = true;
+
     /// <summary>Let the built-in mascots play their idle loops (<see cref="MascotLoops"/>). On by
     /// default; they stand still anyway while the token does (<see cref="MascotLoops.Animate"/>).</summary>
     public bool AnimateMascots { get; set; } = true;
@@ -162,7 +166,8 @@ public sealed class CursorSettings
     }
 
     /// <summary>Puts the Display group of the Sound and Display page back to the defaults: the token's
-    /// size, where it shows (placement and corner) and how it moves (<see cref="Motion"/>). Each
+    /// size, where it shows (placement and corner), how it moves (<see cref="Motion"/>) and whether it
+    /// names the project (<see cref="ShowProjectName"/>). Each
     /// agent's icon has its own reset on the Customization page, and the notifier switch, the sounds,
     /// the linger timeout, the outline colour and the hidden-while-using list are left alone.</summary>
     public void ResetDisplay()
@@ -172,6 +177,7 @@ public sealed class CursorSettings
         Placement = defaults.Placement;
         Corner = defaults.Corner;
         Motion = defaults.Motion;
+        ShowProjectName = defaults.ShowProjectName;
     }
 
     /// <summary>True when what <see cref="ResetDisplay"/> resets is already the default. (A method, not
@@ -180,7 +186,7 @@ public sealed class CursorSettings
     {
         var defaults = new CursorSettings();
         return Size == defaults.Size && Placement == defaults.Placement && Corner == defaults.Corner
-            && Motion == defaults.Motion;
+            && Motion == defaults.Motion && ShowProjectName == defaults.ShowProjectName;
     }
 
     /// <summary>An independent copy. Every field is a value type, an immutable string, or a read-only

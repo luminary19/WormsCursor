@@ -9,7 +9,8 @@ namespace AgentsCursor.Core;
 /// knot, OpenCode's mark, Pi's Powerline pi — a mascot from <see cref="IconCatalog"/>, or an uploaded
 /// SVG) as a bare, free-floating glyph, with a <see cref="StatusBadge"/> cloud on its top-right (a
 /// green check when that session finished, a yellow "?" when it is blocked on you), and a small "+N"
-/// count pill beside it when other sessions wait too.
+/// count pill beside it when other sessions wait too. Under the icon, a <see cref="TokenLabel"/> can
+/// name the project the session is in.
 ///
 /// This is UI-agnostic GDI+ drawing only — the host (the tray app's overlay window) decides where the
 /// token lives and how it bounces, then calls <see cref="DrawToken"/> with the computed centre and
@@ -28,6 +29,7 @@ namespace AgentsCursor.Core;
 public sealed class NotifierRenderer : IDisposable
 {
     readonly TokenSprites _sprites = new();
+    readonly LabelSprites _labels = new();
 
     /// <summary>Draws <paramref name="face"/>'s logo in a box of side <paramref name="tokenSidePx"/>
     /// centred at (<paramref name="centerX"/>/<paramref name="centerY"/>) and tilted by
@@ -36,35 +38,68 @@ public sealed class NotifierRenderer : IDisposable
     /// is blocked on you. A thin contrast
     /// rim (<see cref="RimWidth"/>, at <paramref name="dpi"/>: 1 = 96 DPI) keeps the bare logo legible
     /// over any window behind it. A mascot shows the frame of its loop at <paramref name="mascotClock"/>
-    /// seconds (null: at rest). Leaves no transform behind.</summary>
+    /// seconds (null: at rest). <paramref name="label"/>, if any, hangs centred under the icon, upright
+    /// and steady however the token swings (<see cref="TokenFootprint"/> has room for it). Leaves no
+    /// transform behind.</summary>
     public void DrawToken(Graphics g, CursorSettings s, TokenFace face,
                           float centerX, float centerY, float tokenSidePx, float swingDeg, float dpi,
-                          double? mascotClock = null)
-        => DrawToken(g, s, face, s.IconFor(face.Tool), centerX, centerY, tokenSidePx, swingDeg, dpi, mascotClock);
+                          double? mascotClock = null, TokenLabel? label = null)
+        => DrawToken(g, s, face, s.IconFor(face.Tool), centerX, centerY, tokenSidePx, swingDeg, dpi, mascotClock, label);
 
     /// <summary>As the other overload, but with <paramref name="iconId"/> instead of the icon the
     /// settings choose for the agent (the panel's icon gallery draws every choice).</summary>
     public void DrawToken(Graphics g, CursorSettings s, TokenFace face, string iconId,
                           float centerX, float centerY, float tokenSidePx, float swingDeg, float dpi,
-                          double? mascotClock = null)
+                          double? mascotClock = null, TokenLabel? label = null)
     {
         float box = Math.Max(8f, tokenSidePx);
         float edge = RimWidth(box, dpi);
         var square = new RectangleF(-box / 2f, -box / 2f, box, box);
 
         var saved = g.Save();
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        g.TranslateTransform(centerX, centerY);
-        g.RotateTransform(swingDeg);
-
+        Swung(g, centerX, centerY, swingDeg);
         var icon = DrawIcon(g, face.Tool, iconId, square, edge, mascotClock);
+        g.Restore(saved);
+
+        // Under the icon's own bottom at rest (the same in every mascot frame), not where the swing
+        // carries it, so the name stays put and level; the badges are drawn after it, on top.
+        if (label is not null)
+            DrawLabel(g, label, centerX, centerY + icon.Bottom + edge + box * TokenLabel.GapRatio, box, dpi);
+
+        saved = g.Save();
+        Swung(g, centerX, centerY, swingDeg);
         var (corner, radius) = StatusBadge.Place(icon, box);
         if (face.Others > 0)
             DrawCount(g, face.Others, corner, radius, box, Parse(s.OutlineColor, Color.Black));
         StatusBadge.Draw(g, corner.X, corner.Y, radius, face.Blocked ? WaitingState.Blocked : WaitingState.Finished);
 
         g.Restore(saved);
+    }
+
+    // Draws from here on in the token's own frame: centred on it and tilted with its swing.
+    static void Swung(Graphics g, float centerX, float centerY, float swingDeg)
+    {
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        g.TranslateTransform(centerX, centerY);
+        g.RotateTransform(swingDeg);
+    }
+
+    /// <summary>The size, in whole px, of <paramref name="label"/> on a token of
+    /// <paramref name="tokenSidePx"/> px at <paramref name="dpi"/>: what <see cref="TokenFootprint"/>
+    /// makes room for.</summary>
+    public SizeF LabelSize(TokenLabel label, float tokenSidePx, float dpi)
+        => _labels.Get(label, Math.Max(8f, tokenSidePx), dpi).Size;
+
+    // The label's bitmap, its top centred at (x, top), blitted 1:1 at whole pixels so its text stays crisp.
+    void DrawLabel(Graphics g, TokenLabel label, float x, float top, float box, float dpi)
+    {
+        var bitmap = _labels.Get(label, box, dpi);
+        var state = g.Save();
+        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+        g.PixelOffsetMode = PixelOffsetMode.Half;
+        g.DrawImage(bitmap, new Rectangle((int)MathF.Round(x - bitmap.Width / 2f), (int)MathF.Round(top), bitmap.Width, bitmap.Height));
+        g.Restore(state);
     }
 
     /// <summary>Draws just <paramref name="iconId"/> of <paramref name="tool"/>, upright, with its contrast
@@ -84,7 +119,11 @@ public sealed class NotifierRenderer : IDisposable
         g.Restore(saved);
     }
 
-    public void Dispose() => _sprites.Dispose();
+    public void Dispose()
+    {
+        _sprites.Dispose();
+        _labels.Dispose();
+    }
 
     /// <summary>The width and height of what <paramref name="iconId"/> draws, as fractions of its box
     /// (the longer one is about 1: icons are fitted by their visible pixels); a square for a tool with

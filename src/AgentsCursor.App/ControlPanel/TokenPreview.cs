@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using AgentsCursor.Core;
+using Wpf.Ui.Appearance;
 using Gdi = System.Drawing;
 using GdiDrawing2D = System.Drawing.Drawing2D;
 using GdiImaging = System.Drawing.Imaging;
@@ -34,6 +35,7 @@ public sealed class TokenPreview : FrameworkElement
     const double Padding = 12;        // DIPs around the token's travel
     const float MaxDt = 0.05f;        // as the overlay: a hiccup can't blow up the spring
     const float LoopSeconds = 9f;     // one lap of the roaming pointer
+    const float CornerMargin = 8f;    // DIPs between a corner token and the preview's edges
 
     NotifierRenderer? _renderer;
     Gdi.Bitmap? _buffer;          // GDI+ back-buffer, premultiplied BGRA like the WPF bitmap
@@ -55,15 +57,25 @@ public sealed class TokenPreview : FrameworkElement
     /// <summary>How many other sessions the "+N" pill counts (0 = no pill).</summary>
     public int Others { get; set; }
 
+    /// <summary>The project the label names, while <see cref="CursorSettings.ShowProjectName"/> is on
+    /// (null: no label). In the panel's theme, as the overlay draws it.</summary>
+    public string? Project { get; set; }
+
     /// <summary>Draw a roaming pointer and follow it the way the placement does.</summary>
     public bool Roam { get; set; }
 
     public TokenPreview()
     {
         Focusable = false;
-        Loaded += (_, _) => { _renderer ??= new NotifierRenderer(); UpdateAnimation(); };
+        Loaded += (_, _) =>
+        {
+            _renderer ??= new NotifierRenderer();
+            ApplicationThemeManager.Changed += OnThemeChanged;
+            UpdateAnimation();
+        };
         Unloaded += (_, _) =>
         {
+            ApplicationThemeManager.Changed -= OnThemeChanged;
             StopAnimation();
             _renderer?.Dispose();
             _renderer = null;
@@ -73,6 +85,9 @@ public sealed class TokenPreview : FrameworkElement
         };
         IsVisibleChanged += (_, _) => UpdateAnimation();
     }
+
+    // The label follows the panel's theme: redraw it when that changes.
+    void OnThemeChanged(ApplicationTheme theme, Color accent) => RenderFrame();
 
     /// <summary>Draws the token with <paramref name="look"/>'s size, placement and icons.</summary>
     public void Show(CursorSettings look)
@@ -149,13 +164,16 @@ public sealed class TokenPreview : FrameworkElement
         float tokenPx = (float)(_look.Size * dpi.DpiScaleX), scale = (float)dpi.DpiScaleX;
         var motion = MotionProfile.For(_look.Motion, SystemParameters.ClientAreaAnimation);
 
+        var face = new TokenFace(Tool, Blocked, Others, Project);
+        var label = TokenLabel.For(_look, face, ApplicationThemeManager.GetAppTheme() == ApplicationTheme.Dark);
+        var token = new TokenFootprint(tokenPx, label is null ? Gdi.SizeF.Empty : _renderer.LabelSize(label, tokenPx, scale));
         using (var g = Gdi.Graphics.FromImage(_buffer!))
         {
             g.Clear(Gdi.Color.Transparent);
             g.SmoothingMode = GdiDrawing2D.SmoothingMode.AntiAlias;
-            var (cx, cy, swing, pointer) = Roam ? RoamPose(w, h, t, dt, tokenPx, scale, motion) : IdlePose(w, h, t, tokenPx, scale, motion);
+            var (cx, cy, swing, pointer) = Roam ? RoamPose(w, h, t, dt, token, scale, motion) : IdlePose(w, h, t, tokenPx, scale, motion);
             double? mascotClock = _animating && MascotLoops.Animate(_look, SystemParameters.ClientAreaAnimation) ? now : null;
-            _renderer.DrawToken(g, _look, new TokenFace(Tool, Blocked, Others), cx, cy, tokenPx, swing, scale, mascotClock);
+            _renderer.DrawToken(g, _look, face, cx, cy, tokenPx, swing, scale, mascotClock, label);
             if (pointer is { } p) DrawPointer(g, p, scale); // the real pointer is always on top too
         }
 
@@ -177,47 +195,44 @@ public sealed class TokenPreview : FrameworkElement
             float hop = tokenPx * motion.HopHeight;
             return (w / 2f + pose.OffsetX, h / 2f + (hop + badge) / 2f + pose.OffsetY, pose.SwingDeg, null);
         }
-        var rest = TokenMotion.RestFor(_look.Placement, tokenPx, scale, Flip.None);
+        var rest = TokenMotion.RestFor(_look.Placement, new TokenFootprint(tokenPx), scale, Flip.None);
         float bob = TokenMotion.IdleBob(t, tokenPx, motion), len = Math.Max(1e-3f, rest.Length);
         float travel = tokenPx * motion.BobHeight;
         return (w / 2f + rest.Dx / len * (bob + travel / 2f), h / 2f + badge / 2f + rest.Dy / len * (bob + travel / 2f), 0f, null);
     }
 
     // Following a pointer that glides along a slow loop through the preview.
-    (float X, float Y, float Swing, Gdi.PointF? Pointer) RoamPose(int w, int h, float t, float dt, float tokenPx, float scale, MotionProfile motion)
+    (float X, float Y, float Swing, Gdi.PointF? Pointer) RoamPose(int w, int h, float t, float dt, TokenFootprint token, float scale, MotionProfile motion)
     {
         var placement = _look.Placement;
+        float tokenPx = token.TokenPx;
         if (placement != _motionFor) { _tether = default; _flip = Flip.None; _motionFor = placement; }
 
         // The loop: wide and slow side to side, and a gentle rise and fall. Vertically it keeps the
         // pointer and the token resting by it centred in the preview, and rises and falls only as far
         // as leaves the token room to spare, so it doesn't flip above or below the pointer on its own
         // (as it would at a screen edge) unless the token is too big for the preview.
-        var plain = TokenMotion.RestFor(placement == NotifierPlacement.Corner ? NotifierPlacement.BelowPointer : placement, tokenPx, scale, Flip.None);
+        var plain = TokenMotion.RestFor(placement == NotifierPlacement.Corner ? NotifierPlacement.BelowPointer : placement, token, scale, Flip.None);
         float phase = t / LoopSeconds * 2f * MathF.PI;
         float spanX = Math.Max(0f, w / 2f - tokenPx * 0.9f - 24f * scale);
         float ax = w / 2f + spanX * MathF.Sin(phase) - plain.Dx / 2f;
-        float half = TokenMotion.RestHalfExtent(tokenPx);
-        float top = Math.Min(0f, plain.Dy - half), bottom = Math.Max(TokenMotion.PointerClearance * scale, plain.Dy + half);
+        float top = Math.Min(0f, plain.Dy - token.Top), bottom = Math.Max(TokenMotion.PointerClearance * scale, plain.Dy + token.Bottom);
         float slack = (h - (bottom - top)) / 2f;
         float rise = Math.Clamp(slack - 0.25f * tokenPx, 0f, tokenPx * 0.12f);
         float ay = slack - top + rise * MathF.Sin(phase * 2f);
         var pointer = new Gdi.PointF(ax, ay);
 
+        var area = new Gdi.RectangleF(0, 0, w, h);
         if (placement == NotifierPlacement.Corner)
         {
             var pose = TokenMotion.CornerBounce(t, tokenPx, motion);
-            float inset = tokenPx * (0.5f + StatusBadge.Overhang) + 8f * scale;
-            float x = _look.Corner is ScreenCorner.TopLeft or ScreenCorner.BottomLeft ? inset : w - inset;
-            float y = _look.Corner is ScreenCorner.TopLeft or ScreenCorner.TopRight
-                ? inset + tokenPx * TokenMotion.CornerHop : h - inset;
-            return (x + pose.OffsetX, y + pose.OffsetY, pose.SwingDeg, pointer);
+            var corner = TokenMotion.CornerAnchor(_look.Corner, area, token, CornerMargin * scale);
+            return (corner.X + pose.OffsetX, corner.Y + pose.OffsetY, pose.SwingDeg, pointer);
         }
 
-        var area = new Gdi.RectangleF(0, 0, w, h);
-        _flip = TokenMotion.Edges(_flip, pointer, plain, tokenPx, area);
-        var rest = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, tokenPx, scale, _flip), pointer, tokenPx, area);
-        var step = TokenMotion.Step(ref _tether, ax, ay, rest, tokenPx, dt, entrance: false, motion, motion.MaxSwingFor(placement), area);
+        _flip = TokenMotion.Edges(_flip, pointer, plain, token, area);
+        var rest = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, token, scale, _flip), pointer, token, area);
+        var step = TokenMotion.Step(ref _tether, ax, ay, rest, token, dt, entrance: false, motion, motion.MaxSwingFor(placement), area);
         return (ax + step.OffsetX, ay + step.OffsetY, step.SwingDeg, pointer);
     }
 

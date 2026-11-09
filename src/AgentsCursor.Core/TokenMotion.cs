@@ -67,6 +67,41 @@ public sealed record MotionProfile(float Stiffness, float Damping, float SwingSc
     public float MaxSwingFor(NotifierPlacement placement) => TokenMotion.MaxSwingFor(placement) * SwingScale;
 }
 
+/// <summary>
+/// The box a token takes up around its centre, in px, for a token of <see cref="TokenPx"/> px with an
+/// optional <see cref="TokenLabel"/> of <see cref="Label"/> px (as <see cref="NotifierRenderer.LabelSize"/>
+/// measures it; empty without one). The icon with its status cloud reaches <see cref="Half"/> on every
+/// side; the label hangs below it, centred, from <see cref="TokenLabel.Top"/>. It is what the pointer
+/// placements rest beside the pointer, what the screen's edges keep on screen, where a corner token
+/// sits, and what the canvas makes room for, so a label never clips or leaves the screen.
+/// </summary>
+public readonly record struct TokenFootprint(float TokenPx, SizeF Label = default)
+{
+    /// <summary>The icon and its status cloud with the cloud's shadow, either way from the centre.</summary>
+    public float Half => TokenPx * (0.5f + StatusBadge.RadiusRatio * 1.25f);
+
+    /// <summary>The reach left of the centre (and, the label being centred, right of it).</summary>
+    public float Left => HasLabel ? Math.Max(Half, Label.Width / 2f + LabelSnap) : Half;
+
+    /// <summary>The reach right of the centre.</summary>
+    public float Right => Left;
+
+    /// <summary>The reach above the centre (the label is below).</summary>
+    public float Top => Half;
+
+    /// <summary>The reach below the centre.</summary>
+    public float Bottom => Math.Max(Half, Below);
+
+    /// <summary>How far what is drawn hangs below the centre: the icon's box, or the label's bottom.
+    /// What a placement above the pointer keeps clear of its tip.</summary>
+    public float Below => HasLabel ? TokenLabel.Top(TokenPx) + Label.Height + LabelSnap : TokenPx / 2f;
+
+    bool HasLabel => Label.Width > 0f && Label.Height > 0f;
+
+    // The label is drawn at whole pixels, so up to half a pixel off its exact place.
+    const float LabelSnap = 0.5f;
+}
+
 /// <summary>Where a pointer-following token springs to, and how it is moving there. Owned by one
 /// animation (the overlay's thread, or one preview), never shared.</summary>
 public struct TetherState
@@ -125,21 +160,24 @@ public static class TokenMotion
     public static float MaxSwingFor(NotifierPlacement placement)
         => placement == NotifierPlacement.BesidePointer ? BesideMaxSwing : HangingMaxSwing;
 
-    /// <summary>The rest offset for <paramref name="placement"/> with a token of <paramref name="tokenPx"/>
-    /// px on a monitor at <paramref name="dpi"/> (1 = 96 DPI), mirrored per <paramref name="flip"/>.
-    /// Below hangs under the pointer's arrow with its top, badges included, clear of it; above floats
-    /// just over the pointer's tip; beside trails off the arrow's bottom-right like a tooltip. Below and
+    /// <summary>The rest offset for <paramref name="placement"/> with <paramref name="token"/> on a
+    /// monitor at <paramref name="dpi"/> (1 = 96 DPI), mirrored per <paramref name="flip"/>. Below hangs
+    /// under the pointer's arrow with its top, badges included, clear of it; above floats just over the
+    /// pointer's tip, its label too; beside trails off the arrow's bottom-right like a tooltip. Below and
     /// above are each other's mirror: flipped, each takes the other's place, so a flip never puts the
-    /// token under the arrow. (Corner has no pointer rest; it gets the below offset.)</summary>
-    public static Rest RestFor(NotifierPlacement placement, float tokenPx, float dpi, Flip flip)
+    /// token under the arrow; beside flipped up puts the bottom of what it draws where its top was.
+    /// (Corner has no pointer rest; it gets the below offset.)</summary>
+    public static Rest RestFor(NotifierPlacement placement, TokenFootprint token, float dpi, Flip flip)
     {
         bool flipY = flip.HasFlag(Flip.Y);
+        float tokenPx = token.TokenPx;
         float below = PointerClearance * dpi + tokenPx * (0.5f + StatusBadge.Overhang);
-        float above = -0.62f * tokenPx;
+        float above = -(token.Below + 0.12f * tokenPx);
+        float besideTop = 18f * dpi - 0.20f * tokenPx; // the token's top edge, below the pointer's tip
         var (dx, dy) = placement switch
         {
             NotifierPlacement.AbovePointer => (0f, flipY ? below : above),
-            NotifierPlacement.BesidePointer => (14f * dpi + 0.50f * tokenPx, (18f * dpi + 0.30f * tokenPx) * (flipY ? -1f : 1f)),
+            NotifierPlacement.BesidePointer => (14f * dpi + 0.50f * tokenPx, flipY ? -(besideTop + token.Below) : besideTop + tokenPx / 2f),
             _ => (0f, flipY ? above : below),
         };
         if (flip.HasFlag(Flip.X)) dx = -dx;
@@ -153,12 +191,13 @@ public static class TokenMotion
     /// out again. A rigid profile (<see cref="MotionProfile.Still"/>) keeps the token at its rest point,
     /// upright. <paramref name="maxSwing"/> limits the tilt either way
     /// (<see cref="MotionProfile.MaxSwingFor"/> the placement). With <paramref name="workArea"/>
-    /// the screen's edges are a wall: the token (with its badge, <see cref="RestHalfExtent"/>) stops at
-    /// them and loses its speed into them, so an overshoot never carries it off screen. Use the same
+    /// the screen's edges are a wall: the token (all of <paramref name="token"/>, badge and label) stops
+    /// at them and loses its speed into them, so an overshoot never carries it off screen. Use the same
     /// area as <see cref="KeepOnScreen"/>, so the rest point is always inside the wall.</summary>
-    public static Pose Step(ref TetherState s, float ax, float ay, Rest rest, float tokenPx, float dt,
+    public static Pose Step(ref TetherState s, float ax, float ay, Rest rest, TokenFootprint token, float dt,
                             bool entrance, MotionProfile motion, float maxSwing = 180f, RectangleF? workArea = null)
     {
+        float tokenPx = token.TokenPx;
         float restLength = Math.Max(1e-3f, rest.Length);
         float ux = rest.Dx / restLength, uy = rest.Dy / restLength; // the string's rest direction
         if (!s.Seeded)
@@ -174,7 +213,7 @@ public static class TokenMotion
             s.X = ax + rest.Dx;
             s.Y = ay + rest.Dy;
             s.Vx = s.Vy = 0f;
-            if (workArea is { } area) StopAtEdges(ref s, area, RestHalfExtent(tokenPx));
+            if (workArea is { } area) StopAtEdges(ref s, area, token);
             return new Pose(s.X - ax, s.Y - ay, 0f);
         }
 
@@ -199,7 +238,7 @@ public static class TokenMotion
             dy = s.Y - ay;
         }
 
-        if (workArea is { } wall) StopAtEdges(ref s, wall, RestHalfExtent(tokenPx));
+        if (workArea is { } wall) StopAtEdges(ref s, wall, token);
         dx = s.X - ax;
         dy = s.Y - ay;
 
@@ -213,10 +252,11 @@ public static class TokenMotion
         return new Pose(dx + ux * bob, dy + uy * bob, swing);
     }
 
-    // Keeps the token centre at least <half> inside <wall>; speed into an edge it has reached is dropped.
-    static void StopAtEdges(ref TetherState s, RectangleF wall, float half)
+    // Keeps the whole token inside <wall>; speed into an edge it has reached is dropped.
+    static void StopAtEdges(ref TetherState s, RectangleF wall, TokenFootprint token)
     {
-        float left = wall.Left + half, right = wall.Right - half, top = wall.Top + half, bottom = wall.Bottom - half;
+        float left = wall.Left + token.Left, right = wall.Right - token.Right;
+        float top = wall.Top + token.Top, bottom = wall.Bottom - token.Bottom;
         if (left > right) { left = right = (wall.Left + wall.Right) / 2f; }
         if (top > bottom) { top = bottom = (wall.Top + wall.Bottom) / 2f; }
         if (s.X < left) { s.X = left; s.Vx = Math.Max(0f, s.Vx); }
@@ -225,28 +265,29 @@ public static class TokenMotion
         else if (s.Y > bottom) { s.Y = bottom; s.Vy = Math.Min(0f, s.Vy); }
     }
 
-    /// <summary>The flips that keep a token resting at <paramref name="anchor"/> + <paramref name="rest"/>
-    /// (unflipped) inside <paramref name="workArea"/>, given the flips used so far. An axis flips as soon
-    /// as the token would leave the work area on its rest side, and flips back only once there is room
-    /// for it plus a quarter of its size, so a pointer parked on the threshold doesn't make it
-    /// flip-flop.</summary>
-    public static Flip Edges(Flip previous, PointF anchor, Rest rest, float tokenPx, RectangleF workArea)
+    /// <summary>The flips that keep <paramref name="token"/> resting at <paramref name="anchor"/> +
+    /// <paramref name="rest"/> (unflipped) inside <paramref name="workArea"/>, given the flips used so
+    /// far. An axis flips as soon as the token would leave the work area on its rest side, and flips back
+    /// only once there is room for it plus a quarter of its size, so a pointer parked on the threshold
+    /// doesn't make it flip-flop.</summary>
+    public static Flip Edges(Flip previous, PointF anchor, Rest rest, TokenFootprint token, RectangleF workArea)
     {
-        float half = RestHalfExtent(tokenPx), room = 0.25f * tokenPx;
+        float room = 0.25f * token.TokenPx;
         var flip = previous;
-        flip = Axis(flip, Flip.X, anchor.X, rest.Dx, half, room, workArea.Left, workArea.Right);
-        flip = Axis(flip, Flip.Y, anchor.Y, rest.Dy, half, room, workArea.Top, workArea.Bottom);
+        flip = Axis(flip, Flip.X, anchor.X, rest.Dx, token.Left, token.Right, room, workArea.Left, workArea.Right);
+        flip = Axis(flip, Flip.Y, anchor.Y, rest.Dy, token.Top, token.Bottom, room, workArea.Top, workArea.Bottom);
         return flip;
     }
 
-    // One axis of Edges: on its rest side, the token (centre +/- half) must fit between min and max.
-    static Flip Axis(Flip flip, Flip axis, float anchor, float offset, float half, float room, float min, float max)
+    // One axis of Edges: on its rest side, the token (reaching `back` before its centre and `on` past
+    // it) must fit between min and max.
+    static Flip Axis(Flip flip, Flip axis, float anchor, float offset, float back, float on, float room, float min, float max)
     {
         if (offset == 0f) return flip & ~axis; // straight above or below: nothing to mirror sideways
         bool flipped = flip.HasFlag(axis);
         float centre = anchor + offset;
-        bool fits = offset > 0f ? centre + half <= max : centre - half >= min;
-        bool roomy = offset > 0f ? centre + half + room <= max : centre - half - room >= min;
+        bool fits = offset > 0f ? centre + on <= max : centre - back >= min;
+        bool roomy = offset > 0f ? centre + on + room <= max : centre - back - room >= min;
         if (!flipped && !fits) return flip | axis;
         if (flipped && roomy) return flip & ~axis;
         return flip;
@@ -257,20 +298,27 @@ public static class TokenMotion
     /// doesn't offset (below the pointer at the right edge, say), and near a corner even a mirrored rest
     /// can overhang; this slides the rest point along the edge instead, like a tooltip. The token is still
     /// upright at rest, because <see cref="Step"/> measures its tilt from this rest direction.</summary>
-    public static Rest KeepOnScreen(Rest rest, PointF anchor, float tokenPx, RectangleF workArea)
+    public static Rest KeepOnScreen(Rest rest, PointF anchor, TokenFootprint token, RectangleF workArea)
     {
-        float half = RestHalfExtent(tokenPx);
-        float x = Clamp(anchor.X + rest.Dx, workArea.Left + half, workArea.Right - half);
-        float y = Clamp(anchor.Y + rest.Dy, workArea.Top + half, workArea.Bottom - half);
+        float x = Clamp(anchor.X + rest.Dx, workArea.Left + token.Left, workArea.Right - token.Right);
+        float y = Clamp(anchor.Y + rest.Dy, workArea.Top + token.Top, workArea.Bottom - token.Bottom);
         return new Rest(x - anchor.X, y - anchor.Y);
+    }
+
+    /// <summary>Where the centre of <paramref name="token"/> pinned to <paramref name="corner"/> of
+    /// <paramref name="area"/> sits: all of it <paramref name="margin"/> px inside the area's edges, with
+    /// room above it for the corner bounce's hop.</summary>
+    public static PointF CornerAnchor(ScreenCorner corner, RectangleF area, TokenFootprint token, float margin)
+    {
+        float x = corner is ScreenCorner.TopLeft or ScreenCorner.BottomLeft
+            ? area.Left + margin + token.Left : area.Right - margin - token.Right;
+        float y = corner is ScreenCorner.TopLeft or ScreenCorner.TopRight
+            ? area.Top + margin + token.Top + CornerHop * token.TokenPx : area.Bottom - margin - token.Bottom;
+        return new PointF(x, y);
     }
 
     // Math.Clamp, except that a work area narrower than the token centres it instead of throwing.
     static float Clamp(float value, float min, float max) => min > max ? (min + max) / 2f : Math.Clamp(value, min, max);
-
-    /// <summary>Half the side of the box a resting token needs: the icon plus the status cloud and its
-    /// shadow (the same reach <see cref="TokenCanvas"/> allows for).</summary>
-    public static float RestHalfExtent(float tokenPx) => tokenPx * (0.5f + StatusBadge.RadiusRatio * 1.25f);
 
     /// <summary>The corner token's continuous "ball" bounce at time <paramref name="t"/> seconds: |sin|
     /// hops it up from its anchor and back down, with a small sway and tilt so it reads as alive without
@@ -292,19 +340,26 @@ public static class TokenMotion
 
 /// <summary>
 /// The square canvas the token is drawn on, centred on the token's centre: big enough for the icon at
-/// any tilt, the status cloud with its shadow and the "+N" pill beside it, and the contrast rim, so
-/// nothing is ever clipped whatever the placement or swing.
+/// any tilt, the status cloud with its shadow and the "+N" pill beside it, the contrast rim, and the
+/// upright label below, so nothing is ever clipped whatever the placement or swing.
 /// </summary>
 public static class TokenCanvas
 {
-    /// <summary>Half the canvas side for a token of <paramref name="tokenPx"/> px: the box's corner at
-    /// any rotation (half its diagonal), plus the badge and its shadow, plus the rim.</summary>
-    public static float HalfExtent(float tokenPx)
-        => tokenPx * (0.5f * MathF.Sqrt(2f) + StatusBadge.RadiusRatio * 1.25f) + RimPad(tokenPx);
+    /// <summary>Half the canvas side for <paramref name="token"/>: the box's corner at any rotation
+    /// (half its diagonal), plus the badge and its shadow, plus the rim; or the label's reach, if
+    /// further.</summary>
+    public static float HalfExtent(TokenFootprint token)
+    {
+        float tokenPx = token.TokenPx;
+        float swung = tokenPx * (0.5f * MathF.Sqrt(2f) + StatusBadge.RadiusRatio * 1.25f) + RimPad(tokenPx);
+        return Math.Max(swung, Math.Max(token.Left, token.Bottom) + AntiAliasPad);
+    }
 
     /// <summary>The canvas side, in whole px (even, so the token centre is a pixel corner).</summary>
-    public static int Side(float tokenPx) => 2 * (int)MathF.Ceiling(HalfExtent(tokenPx));
+    public static int Side(TokenFootprint token) => 2 * (int)MathF.Ceiling(HalfExtent(token));
 
     // The contrast rim at its widest (see NotifierRenderer.RimWidth) plus anti-aliasing.
-    static float RimPad(float tokenPx) => tokenPx * NotifierRenderer.MaxRimRatio + 2f;
+    static float RimPad(float tokenPx) => tokenPx * NotifierRenderer.MaxRimRatio + AntiAliasPad;
+
+    const float AntiAliasPad = 2f;
 }

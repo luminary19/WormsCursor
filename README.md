@@ -35,6 +35,13 @@ overlay. It shows one tool logo, and a small **"+N"** pill when several sessions
   extension shows during a run, such as a permission or a question). If any waiting session is
   blocked, its logo is the one shown.
 
+Under the logo, a small label names the project that session is in: the last folder of the agent's
+working directory, so an agent working in `C:\Users\you\Lumicity` shows **Lumicity**. It is a black box
+with white text when the control panel is dark and a white one with black text when it is light
+(following its **Theme**, so Windows' own setting under *System*), long names end in "…", and it stays
+upright while the token swings. Turn it off with **Show project name** on the **Sound and Display**
+page. The name is only drawn, never saved.
+
 Where it shows (set on the **Sound and Display** page of **Preferences…**):
 
 - **Below the pointer** — the token hangs under the pointer on a springy string and follows it,
@@ -302,7 +309,9 @@ AgentsCursor.sln
 ├─ src/
 │  ├─ AgentsCursor.Core/      Engine — no UI dependencies
 │  │   ├─ NotifierRenderer.cs Draws the token (one tool logo, its status cloud, a "+N" pill) at a given centre/size/swing
-│  │   ├─ TokenFace.cs        Picks what the token shows: which logo, blocked or done, how many others
+│  │   ├─ TokenFace.cs        Picks what the token shows: which logo, blocked or done, how many others, which project
+│  │   ├─ TokenLabel.cs       The project label: a session's project name (its cwd's last folder), its theme and size;
+│  │   │                      LabelSprites.cs draws and caches it
 │  │   ├─ StatusBadge.cs      The status clouds: yellow "?" (blocked on you), green check (done)
 │  │   ├─ IconCatalog.cs      The built-in token icons (each agent's logo + 3 mascots), embedded from Icons/<tool>/*.svg;
 │  │   │                      IconChoices normalises the per-agent choice
@@ -325,6 +334,7 @@ AgentsCursor.sln
 │  │   ├─ CursorSettings.cs   Token size / placement / corner / icons / notifier settings / hidden-while-using programs (persisted as JSON)
 │  │   ├─ LiveSettings.cs     The one owner of the running settings: every edit is a small Change, saved at once
 │  │   ├─ TokenMotion.cs      The pointer tether (below / above / beside, edge flips), the corner bounce, the canvas size,
+│  │   │                      all for the token's footprint (its label included),
 │  │   │                      the Bouncy / Calm / Still profiles; shared by the overlay and the panel preview
 │  │   ├─ SettingsStore.cs    Load/save settings in %LocalAppData%\AgentsCursor\
 │  │   ├─ ProgramSuppression.cs Normalizes program names and matches them against the hidden-while-using list
@@ -339,6 +349,7 @@ AgentsCursor.sln
 │      ├─ AgentHookBridge.cs          The `hook` verb: normalises a tool's payload → one pipe line, fail-silent
 │      ├─ Services/AgentHookRegistrar.cs Connects each tool (backup + merge); HooksJson.cs (Claude, Codex),
 │      │                              OpenCodePlugins.cs + JsoncEdit.cs, PiExtensions.cs
+│      ├─ WindowsTheme.cs             Windows' app mode, which the project label follows under the System theme
 │      ├─ SingleInstance.cs           One instance only; a 2nd launch opens the control panel
 │      ├─ Autostart.cs                "Start with Windows" via HKCU\…\Run
 │      ├─ Services/UpdateService.cs   Velopack check / download / apply updates, release notes
@@ -379,8 +390,8 @@ make it. Its sidebar has six pages, opening on **Analytics**:
 - **Analytics** — streaks, typical response time, the activity calendar and the agents that needed
   you (see [Analytics](#analytics)).
 - **Sound and Display** — the master switch, the size, where it shows (below, above or beside the
-  pointer, or a screen corner), how it moves (Bouncy, Calm, Still), a live preview of a pointer
-  gliding over dark and light with the token following it, and the sounds.
+  pointer, or a screen corner), how it moves (Bouncy, Calm, Still), **Show project name**, a live
+  preview of a pointer gliding over dark and light with the token following it, and the sounds.
 - **Customization** — each agent's icon: its original logo, a mascot, or an SVG you add, with a preview of
   both looks (the green check for "done", and the yellow "?" with a "+N" for "needs you"), and
   **Animate mascots**.

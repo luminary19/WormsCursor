@@ -137,7 +137,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IControlPanelHo
     // Drives the live token for the panel's "Preview on screen": a non-null value fakes that many
     // waiting agents (one logo + "+N"); null ends the preview and restores the real set (so a real
     // agent event arriving mid-preview, or just hiding the panel, leaves the genuine token on screen).
-    static readonly WaitingAgent PreviewAgent = new("claude-code", WaitingState.Blocked);
+    static readonly WaitingAgent PreviewAgent = new("claude-code", WaitingState.Blocked, Project: TokenLabel.SampleProject);
     public void Preview(int? waitingAgents)
     {
         if (waitingAgents is not int n) { _overlay.SetWaitingAgents(_waiting); return; }

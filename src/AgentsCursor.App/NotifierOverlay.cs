@@ -23,7 +23,9 @@ namespace AgentsCursor.App;
 /// stays on screen.</item>
 /// <item><b>Corner</b> — the token pins to a screen corner and bounces in place.</item>
 /// </list>
-/// The layered window is re-centred on the token every frame, sized for any tilt plus the badges
+/// The project label under the token (<see cref="TokenLabel"/>, in the panel's theme) is part of its
+/// <see cref="TokenFootprint"/>, so every placement keeps it on screen too. The layered window is
+/// re-centred on the token every frame, sized for any tilt plus the badges and label
 /// (<see cref="TokenCanvas"/>), so no swing or offset can clip it.
 ///
 /// The window is painted with <c>UpdateLayeredWindow</c> (true per-pixel alpha). The animation runs on
@@ -67,6 +69,7 @@ public sealed class NotifierOverlay : IDisposable
     volatile bool _active;
     volatile TokenVisibility _visibility = TokenVisibility.Idle;
     volatile bool _animationEffects = true; // Windows' "Animation effects" (off = every style is Still)
+    volatile bool _windowsDark;      // Windows' app mode, for the label under ThemePreference.System
     volatile TokenFace? _face;       // what the token shows; null = nothing waiting
     volatile bool _entrancePending;  // pop-in bounce when the token first appears
     volatile bool _resetPhysics;     // re-seed the motion on (re)appearance
@@ -99,7 +102,8 @@ public sealed class NotifierOverlay : IDisposable
         _thread.Start();
         _foreground.Changed += Reevaluate;
         _meetings.Changed += Reevaluate;
-        // Windows' animation effects switched on or off, or the work area changed (WM_SETTINGCHANGE),
+        _windowsDark = WindowsTheme.AppsDark();
+        // Windows' animation effects or app mode switched, or the work area changed (WM_SETTINGCHANGE),
         // or the displays changed: re-read them, and redraw a parked token.
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
@@ -130,7 +134,11 @@ public sealed class NotifierOverlay : IDisposable
     /// changed.</summary>
     public void RefreshSettings() => Reevaluate();
 
-    void OnUserPreferenceChanged(object? sender, Microsoft.Win32.UserPreferenceChangedEventArgs e) => Reevaluate();
+    void OnUserPreferenceChanged(object? sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        _windowsDark = WindowsTheme.AppsDark();
+        Reevaluate();
+    }
 
     void OnDisplaySettingsChanged(object? sender, EventArgs e) => Reevaluate();
 
@@ -239,48 +247,47 @@ public sealed class NotifierOverlay : IDisposable
         _t += dt;
 
         // The token centre (screen px), its tilt, and the DPI of the monitor it's on, so the token keeps
-        // a consistent physical size across mixed-DPI monitors.
+        // a consistent physical size across mixed-DPI monitors. All of it, its project label included
+        // (the footprint), keeps on screen.
+        var label = TokenLabel.For(_settings, face, TokenLabel.IsDark(_settings.Theme, _windowsDark));
         float cx, cy, swing, tokenPx, dpi;
+        TokenFootprint token;
         if (placement == NotifierPlacement.Corner)
         {
             var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
             dpi = DpiScaleForPoint(wa.Left + wa.Width / 2, wa.Top + wa.Height / 2);
             tokenPx = _settings.Size * dpi;
-            // Room for the bounce (0.22) and the status cloud's reach past the logo, so the hopping
-            // token stays fully on screen in a top corner.
-            int margin = (int)(tokenPx * (0.25f + StatusBadge.Overhang)) + (int)(16 * dpi);
-            int half = (int)(tokenPx / 2f);
-            int anchorX = _settings.Corner is ScreenCorner.TopLeft or ScreenCorner.BottomLeft
-                ? wa.Left + margin + half : wa.Right - margin - half;
-            int anchorY = _settings.Corner is ScreenCorner.TopLeft or ScreenCorner.TopRight
-                ? wa.Top + margin + half : wa.Bottom - margin - half;
+            token = Footprint(label, tokenPx, dpi);
+            var anchor = TokenMotion.CornerAnchor(_settings.Corner, wa, token, CornerMargin * dpi + tokenPx * CornerMarginRatio);
             var pose = TokenMotion.CornerBounce(_t, tokenPx, motion);
-            (cx, cy, swing) = (anchorX + pose.OffsetX, anchorY + pose.OffsetY, pose.SwingDeg);
+            (cx, cy, swing) = (MathF.Round(anchor.X) + pose.OffsetX, MathF.Round(anchor.Y) + pose.OffsetY, pose.SwingDeg);
         }
         else
         {
             GetCursorPos(out POINT c);
             dpi = DpiScaleForPoint(c.x, c.y);
             tokenPx = _settings.Size * dpi;
+            token = Footprint(label, tokenPx, dpi);
             // Mirror the rest offset per axis near the edges of the monitor under the pointer
             // (physical px under PerMonitorV2), then slide it along an edge it would still overhang;
             // the spring carries the token across.
             var work = Screen.FromPoint(new Point(c.x, c.y)).WorkingArea;
-            _flip = TokenMotion.Edges(_flip, new PointF(c.x, c.y), TokenMotion.RestFor(placement, tokenPx, dpi, Flip.None), tokenPx, work);
-            var rest = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, tokenPx, dpi, _flip), new PointF(c.x, c.y), tokenPx, work);
-            var pose = TokenMotion.Step(ref _tether, c.x, c.y, rest, tokenPx, dt, _entrancePending, motion, motion.MaxSwingFor(placement), work);
+            var pointer = new PointF(c.x, c.y);
+            _flip = TokenMotion.Edges(_flip, pointer, TokenMotion.RestFor(placement, token, dpi, Flip.None), token, work);
+            var rest = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, token, dpi, _flip), pointer, token, work);
+            var pose = TokenMotion.Step(ref _tether, c.x, c.y, rest, token, dt, _entrancePending, motion, motion.MaxSwingFor(placement), work);
             _entrancePending = false;
             (cx, cy, swing) = (c.x + pose.OffsetX, c.y + pose.OffsetY, pose.SwingDeg);
         }
 
-        // The canvas is centred on the token, sized for any tilt plus the badges, so nothing clips.
-        int canvas = TokenCanvas.Side(tokenPx);
+        // The canvas is centred on the token, sized for any tilt plus the badges and label, so nothing clips.
+        int canvas = TokenCanvas.Side(token);
         int left = (int)MathF.Round(cx) - canvas / 2, top = (int)MathF.Round(cy) - canvas / 2;
         // A mascot plays its idle loop on the same clock (from its appearance, so it starts at rest).
         double? mascotClock = MascotLoops.Animate(_settings, _animationEffects) ? _t : null;
         bool still = placement == NotifierPlacement.Corner && motion.IsRigid && mascotClock is null;
 
-        var frame = new Frame(face, changes, left, top, cx - left, cy - top, tokenPx, swing, dpi, mascotClock);
+        var frame = new Frame(face, label, changes, left, top, cx - left, cy - top, tokenPx, swing, dpi, mascotClock);
         if (frame == _painted) return still;
 
         EnsureBuffer(canvas);
@@ -290,7 +297,7 @@ public sealed class NotifierOverlay : IDisposable
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             // The sub-pixel remainder keeps slow motion smooth while the window moves in whole pixels.
-            _renderer.DrawToken(g, _settings, face, frame.X, frame.Y, tokenPx, swing, dpi, mascotClock);
+            _renderer.DrawToken(g, _settings, face, frame.X, frame.Y, tokenPx, swing, dpi, mascotClock, label);
         }
 
         SetBitmap(_hwnd, _buffer!, left, top);
@@ -298,9 +305,16 @@ public sealed class NotifierOverlay : IDisposable
         return still;
     }
 
+    // The room the token takes, with its label measured as it will be drawn.
+    TokenFootprint Footprint(TokenLabel? label, float tokenPx, float dpi)
+        => new(tokenPx, label is null ? SizeF.Empty : _renderer.LabelSize(label, tokenPx, dpi));
+
+    // A corner token keeps this far inside the work area: 16 px at 96 DPI plus a fifth of the token.
+    const float CornerMargin = 16f, CornerMarginRatio = 0.2f;
+
     /// <summary>Everything a painted frame depends on: what it shows, the settings (as of the
     /// <see cref="_changes"/> count it was drawn at), where, and the pose. Equal frames draw the same.</summary>
-    readonly record struct Frame(TokenFace Face, int Changes, int Left, int Top, float X, float Y,
+    readonly record struct Frame(TokenFace Face, TokenLabel? Label, int Changes, int Left, int Top, float X, float Y,
         float TokenPx, float Swing, float Dpi, double? MascotClock);
 
     // A frame threw: log the first failure, park the token off-screen, and pause before retrying.

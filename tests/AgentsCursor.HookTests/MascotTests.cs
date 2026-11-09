@@ -174,7 +174,7 @@ static class MascotTests
 
             // Every frame, with its badge and +9, at any swing, inside the token canvas.
             const int size = 96;
-            int canvasSide = TokenCanvas.Side(size);
+            int canvasSide = TokenCanvas.Side(new TokenFootprint(size));
             using var canvas = new Bitmap(canvasSide, canvasSide, PixelFormat.Format32bppArgb);
             foreach (int frame in loop.Frames)
                 for (int swing = -180; swing < 180; swing += 45)

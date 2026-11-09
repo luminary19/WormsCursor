@@ -119,7 +119,8 @@ queues it; one background task appends `{"tool","kind","start","end","outcome"}`
 `%LocalAppData%\AgentsCursor\history\yyyy-MM.jsonl` (by UTC start month), ending a torn last line
 before appending; `Load` parses line by line (a bad line is skipped and logged once), keeps the current
 month + `RetainedMonths` (12) before it, and the writer deletes older month files. Nothing else is
-stored (no session id, project, path or prompt); previews never touch `AgentActivity`, so they aren't
+stored (no session id, project, path or prompt: the token's project label lives only in
+`WaitingAgent`/`TokenFace`, never in a `WaitRecord`); previews never touch `AgentActivity`, so they aren't
 recorded. `ActivityStats` (pure) turns the records into the page's numbers, by **local calendar day of
 the start** (`TimeZoneInfo` per instant, so DST never moves a wait): daily counts (all waits);
 current streak (consecutive active days up to today, or up to yesterday while today has none yet);
@@ -178,10 +179,22 @@ tests.
 - `NotifierRenderer.cs` — `DrawToken(g, settings, TokenFace, ...)`: draws one tool logo at a given
   centre/size/swing angle, with a `StatusBadge` cloud on its top-right (a yellow "?" when that session
   is blocked on you, a green check when it finished), and a "+N" pill (tucked beside the badge) when
-  other sessions wait. `DrawIcon(...)` draws just the icon, with no badge, for the panel's cards and
-  tiles. Pure GDI+; the host decides where it lives and how it bounces. One renderer per drawing thread.
+  other sessions wait, plus an optional `TokenLabel` hung centred under the icon's rest bottom, upright
+  and steady whatever the swing (drawn before the badges, so the cloud stays on top). `LabelSize` measures
+  a label for the `TokenFootprint`. `DrawIcon(...)` draws just the icon, with no badge, for the panel's
+  cards and tiles. Pure GDI+; the host decides where it lives and how it bounces. One renderer per
+  drawing thread.
+- `TokenLabel.cs` / `LabelSprites.cs` — the project label: `ProjectName.Of(cwd)` is the last folder of
+  the agent's working directory (trailing separators ignored; a root names itself, `C:\`; null for no
+  cwd); `TokenLabel(Text, Dark)` with `For(settings, face, dark)` (null while `ShowProjectName` is off
+  or the face has no project) and `IsDark(theme, windowsDark)` (the panel's Theme, System following
+  Windows' app mode). `LabelSprites` (internal, one per renderer) draws Segoe UI Semibold, grid-fitted,
+  on a rounded box (`TokenSprites.RimDark` with white text and a light hairline when dark, white with
+  dark text and a dark hairline when light), em `max(0.14t, 12px x dpi)`, long names ellipsised past
+  `max(1.5t, 8em)`, cached by text/theme/size and blitted 1:1 at whole pixels so it stays crisp.
 - `TokenFace.cs` — `TokenFace.For(Waiting)`: the pure selection of what the token shows: the first
-  blocked session's tool (else the first session's), `Blocked`, and `Others` (the "+N").
+  blocked session's tool (else the first session's), `Blocked`, `Others` (the "+N") and that session's
+  `Project` name (for the label).
 - `StatusBadge.cs` — the status badge (`Place` + `Draw(..., WaitingState)`): one fluffy cloud shape
   (overlapping puffs filled as a single winding path, wider than tall, scalloped all round), flat yellow
   with a "?" for blocked and flat green with a check for finished, inside the same two-tone edge the
@@ -241,7 +254,8 @@ tests.
   on every load. `IconSource.Custom` is the store (tests point it at a temp folder). The store lives
   in Core, not the App, because the renderer (Core) reads it.
 - `AgentActivity.cs` — tracks which agent sessions currently **need the user** (thread-safe), exposes
-  `Waiting` (one `WaitingAgent(Tool, State, Session)` per session, `State` = `WaitingState.Blocked` when an
+  `Waiting` (one `WaitingAgent(Tool, State, Session, Project)` per session, `Project` being
+  `ProjectName.Of` the latest cwd the session sent, `State` = `WaitingState.Blocked` when an
   approval/question/elicitation is pending, `Finished` when the turn just ended) and `WaitingCount`,
   raises `WaitingChanged`, and sweeps finished sessions after a TTL (blocked ones are never swept).
   A session reported over a plugin connection records it as its owner; `Release(owner)` drops them.
@@ -256,7 +270,8 @@ tests.
   their meaning), `Corner`, `Icons` (tool -> icon id, read-only and replaced on edit; `IconFor`), the
   notifier enable + linger timeout, `OutlineColor`, and
   `SuppressedPrograms`, `Motion` (`MotionStyle`), the sounds (`SoundsEnabled`, `NeedsYouSound`,
-  `DoneSound` as `Chime`, `SoundVolume` 0-100), `ShowDuringMeetings` and `AnimateMascots`, plus the control panel's
+  `DoneSound` as `Chime`, `SoundVolume` 0-100), `ShowDuringMeetings`, `AnimateMascots` and
+  `ShowProjectName` (on by default; part of `ResetDisplay`), plus the control panel's
   `Theme` (`ThemePreference` System/Light/Dark).
   (Name kept for continuity; it's now just the notifier's settings.)
   `SuppressedPrograms` is a read-only list normalized on every assignment and replaced (never mutated)
@@ -275,16 +290,21 @@ tests.
   animationEffects)` makes every style Still while Windows' animation effects
   (`SPI_GETCLIENTAREAANIMATION`) are off. Every pointer position is one tether: a spring (Bouncy: k 130,
   c 3, the old pendulum's) toward
-  pointer + `RestFor(placement)` (below `(0, 22dpi + (0.5 + badge overhang)t)`, so the token, badge
-  and "+N" hang clear of the arrow; above `(0, -.62t)`; beside `(14dpi + .5t, 18dpi + .3t)`; below and
-  above are each other's mirror, so a flip never lands under the arrow), a taut string at rest length
+  pointer + `RestFor(placement, footprint)` (below `(0, 22dpi + (0.5 + badge overhang)t)`, so the
+  token, badge and "+N" hang clear of the arrow; above `(0, -(Below + .12t))`, `Below` being .5t or the
+  label's bottom, so the label too clears the tip; beside `(14dpi + .5t, 18dpi + .3t)`, flipped up so
+  the bottom of what it draws sits where its top was; below and above are each other's mirror, so a flip
+  never lands under the arrow), a taut string at rest length
   + 0.30t, tilt measured from the rest direction (so upright at rest) and clamped by `MaxSwingFor`
   (±80° below and above, ±35° beside), idle bob along the string, entrance hop back along it. Near the
   edges of the pointer's monitor `Edges` mirrors the rest per axis (flips as soon as the token would
   leave, back only with 0.25t to spare), `KeepOnScreen` slides it along an edge it would still
   overhang (an axis with no offset, a corner), and the work area is a wall the token stops at.
-  `CornerBounce` for corners. `TokenCanvas` sizes the overlay's square canvas for any tilt plus badge,
-  pill and rim.
+  `CornerBounce` for corners, `CornerAnchor` for where a corner token sits. All the edge logic works on
+  a `TokenFootprint(tokenPx, labelSize)`: the icon with its cloud reaches `Half` (0.8125t) every way, and
+  a label widens `Left`/`Right` and deepens `Bottom`, so the label never leaves the screen.
+  `TokenCanvas.Side(footprint)` sizes the overlay's square canvas for any tilt plus badge, pill and rim,
+  or the label's reach if further.
 - `SettingsStore.cs` — tolerant JSON load / atomic save in `%LocalAppData%\AgentsCursor\settings.json`
   (survives app-folder updates); enums stored as readable names. `Load` never touches a file (a
   corrupt one is copied aside by the next `Save`). `Load` owns the carry-over from the rename: while
@@ -304,14 +324,17 @@ tests.
   then `VelopackApp.Build().Run()`, then a single-instance guard, then the tray context.
 - `NotifierOverlay.cs` — the layered overlay window + animation loop. Pointer positions run
   `TokenMotion.Step` with the rest flipped/slid for the work area of the monitor under the pointer;
-  corner mode is a fixed corner with a continuous "ball" bounce. The window is re-centred on the token
-  every frame (`TokenCanvas.Side`), so no swing or offset clips; a placement change re-seeds the
+  corner mode is a fixed corner (`TokenMotion.CornerAnchor`, 16 px x dpi + 0.2t in) with a continuous
+  "ball" bounce. Each frame builds the `TokenLabel` (the face's project, in `TokenLabel.IsDark(Theme,
+  WindowsTheme.AppsDark())`, re-read on `UserPreferenceChanged`) and its `TokenFootprint`, which every
+  placement keeps on screen. The window is re-centred on the token every frame
+  (`TokenCanvas.Side(footprint)`), so no swing, offset or label clips; a placement change re-seeds the
   motion. DPI-aware sizing; per-pixel alpha via `UpdateLayeredWindow`.
   Owns a `ForegroundWatcher` and a `MeetingWatcher`, decides with `TokenVisibility.Decide` and stays
   hidden + parked unless it says shown; publishes `Visibility`. Each frame moves with
   `MotionProfile.For(Motion, animation effects)`; the Windows setting is re-read on every re-evaluation
   and on `SystemEvents.UserPreferenceChanged`. A frame is painted only when it differs from the one on
-  screen (`Frame`: face, re-evaluation count, position, pose, size, DPI, mascot clock), so a token that
+  screen (`Frame`: face, label, re-evaluation count, position, pose, size, DPI, mascot clock), so a token that
   isn't moving costs no GDI+ or `UpdateLayeredWindow`; Still in a corner with no mascot playing can't
   change on its own, so the thread parks on `_wake` until a re-evaluation (agents, settings, focus,
   meetings, `UserPreferenceChanged`, `DisplaySettingsChanged`). Still beside the pointer only polls it.
@@ -366,7 +389,9 @@ tests.
     renderer); then the master switch, size, position (below / above / beside the pointer, a
     separator, the four corners; picking a pointer position keeps the last corner), Motion (Bouncy /
     Calm / Still; disabled showing Still, with a tooltip, while Windows' animation effects are off),
-    and "Reset display" (`ResetDisplay`: size, position and motion; icons keep their own reset). Then Sound:
+    "Show project name" (the preview names `TokenLabel.SampleProject` under its token, in the panel's
+    theme, while it is on), and "Reset display" (`ResetDisplay`: size, position, motion and the project
+    name; icons keep their own reset). Then Sound:
     "Play sounds", and only while it is on, "Needs you" and "Done" (a play button + the chime box,
     `IControlPanelHost.PlayChime`) and Volume.
   - `CustomizationPage` — a preview of the selected agent's icon ("Done", and "Needs you" with the "?" and a
@@ -387,7 +412,7 @@ tests.
     same anatomy: status Connected / Needs update / Not connected / Can't read its config, buttons
     Connect / Update (+ Disconnect) / Disconnect / Show file, and after a change made this run the
     tool's `AfterChange` step. Also the linger timeout and "Preview on screen" (fakes blocked agents
-    on the real overlay).
+    on the real overlay, named `TokenLabel.SampleProject`).
   - `AppsPage` — at the top, "Show during meetings and screen sharing" (its second line says what
     was detected while a meeting hides the token, from `IControlPanelHost.TokenVisibility`); then the
     hide-while-using list (Remove per row, empty state), an inline "Add an app"
@@ -420,6 +445,8 @@ tests.
 - `Services/UpdateService.cs` — Velopack `UpdateManager`: check, download, apply-and-restart, release
   notes; updating is unavailable (and says so) for dev builds run from `bin\`.
 - `Services/ChimePlayer.cs` — plays the embedded chimes, volume-scaled, off the UI thread (see "Sounds").
+- `WindowsTheme.cs` — `AppsDark()`: Windows' app mode (`AppsUseLightTheme`, read-only), which the
+  project label follows under the System theme.
 - `SingleInstance.cs` (a second launch opens the panel and hands it foreground rights),
   `Autostart.cs` (per-user `HKCU\…\Run` behind the `IStartupEntries` seam; `MigrateLegacy` moves
   WormsCursor's Run value to ours, only if it was on), `Assets/`.

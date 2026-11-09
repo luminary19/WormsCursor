@@ -57,10 +57,11 @@ public enum WaitingState
     Blocked,
 }
 
-/// <summary>One session that currently needs the user: which tool's logo to show, why, and which
+/// <summary>One session that currently needs the user: which tool's logo to show, why, which
 /// session it is (<see cref="AgentActivity"/>'s key for it; empty for a made-up one, such as a
-/// preview).</summary>
-public readonly record struct WaitingAgent(string Tool, WaitingState State, string Session = "");
+/// preview), and the name of the project it is in (<see cref="ProjectName.Of"/> its working
+/// directory; null when it never named one).</summary>
+public readonly record struct WaitingAgent(string Tool, WaitingState State, string Session = "", string? Project = null);
 
 /// <summary>
 /// Tracks which agent sessions currently <b>need the user's attention</b>, across every connected
@@ -107,6 +108,7 @@ public sealed class AgentActivity
         public DateTime LastUtc;
         public DateTime WaitSinceUtc;  // when the current wait (in State) began; meaningful while IsWaiting
         public string Tool = "";
+        public string? Project;        // the project's name, for the token's label; never in a WaitRecord
         public string? Owner;          // the plugin connection that reported it; null for hooks
         // (agent, call): agent "" is the main agent, call "" a prompt whose call the tool didn't name.
         public readonly HashSet<(string Agent, string Call)> BlockedCalls = new();
@@ -160,7 +162,9 @@ public sealed class AgentActivity
     public IReadOnlyList<WaitingAgent> Waiting { get { lock (_gate) return SnapshotLocked(); } }
 
     /// <summary>Apply one normalised event for a session. <paramref name="sessionId"/> may be null
-    /// (we then key by tool+project). <paramref name="agentId"/> names the subagent that raised the
+    /// (we then key by tool+project). <paramref name="project"/> is the agent's working directory; the
+    /// session goes by its name (<see cref="ProjectName.Of"/>) from then on, until an event names
+    /// another. <paramref name="agentId"/> names the subagent that raised the
     /// event (null = the main agent). <paramref name="itemIds"/> name the questions or item prompts the
     /// event opens or answers. <paramref name="callIds"/> name the tool call an agent prompt blocks
     /// (<see cref="AgentEventKind.AwaitingUser"/>), or the call that just finished
@@ -196,6 +200,7 @@ public sealed class AgentActivity
                 // A prompt that named no call is answered by any tool event, which says nothing of when.
                 bool unnamedPrompt = e.BlockedCalls.Contains((agentId ?? "", ""));
                 e.Tool = tool;
+                e.Project = ProjectName.Of(project) ?? e.Project; // an event without a cwd says nothing of it
                 e.Owner = owner;
                 e.LastUtc = nowUtc;
                 Apply(e, kind, itemIds ?? Array.Empty<string>(), agentId ?? "", callIds ?? Array.Empty<string>());
@@ -354,7 +359,7 @@ public sealed class AgentActivity
     {
         var list = new List<WaitingAgent>();
         foreach (var (key, e) in _sessions)
-            if (e.IsWaiting) list.Add(new WaitingAgent(e.Tool, e.State, key));
+            if (e.IsWaiting) list.Add(new WaitingAgent(e.Tool, e.State, key, e.Project));
         return list;
     }
 

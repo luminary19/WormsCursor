@@ -135,6 +135,12 @@
                 <ComboBoxItem Content="Still" />
             </ComboBox>
         </ui:CardControl>
+        <ui:CardControl Icon="{ui:SymbolIcon Folder24}">
+            <ui:CardControl.Header>
+                <local:SettingHeader Title="Show project name" />
+            </ui:CardControl.Header>
+            <ui:ToggleSwitch x:Name="ProjectNameSwitch" AutomationProperties.Name="Show project name" />
+        </ui:CardControl>
         <ui:Button
             x:Name="ResetButton"
             Margin="0,12,0,0"

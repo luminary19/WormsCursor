@@ -10,8 +10,9 @@ namespace AgentsCursor.App.ControlPanel;
 /// How the token shows and sounds: the master switch, the size (the slider, or double-click the "px"
 /// label to type an exact size), where it shows (below, above or beside the pointer, or one of the four
 /// screen corners, as one choice), how it moves (Bouncy, Calm or Still; Still, fixed, while Windows'
-/// animation effects are off), and a live preview of a pointer gliding over dark and light with the
-/// token following it the chosen way (the faces and icons are the Customization page's). Then the
+/// animation effects are off), whether it names the waiting session's project, and a live preview of a
+/// pointer gliding over dark and light with the token following it the chosen way, a sample project
+/// named under it (the faces and icons are the Customization page's). Then the
 /// sounds: on/off, the "Needs you" and "Done" chimes (each with a play button) and their volume, shown
 /// only while sounds are on. Every control writes its own fields through
 /// <see cref="LiveSettings.Change"/> and the page redraws from the settings on each change, so it also
@@ -52,6 +53,8 @@ public partial class SoundAndDisplayPage : Page
             else if (index > PointerPositions.Length)
                 _settings.Change(s => { s.Placement = NotifierPlacement.Corner; s.Corner = (ScreenCorner)(index - FirstCorner); });
         };
+        ProjectNameSwitch.Checked += (_, _) => SetProjectName(true);
+        ProjectNameSwitch.Unchecked += (_, _) => SetProjectName(false);
         ResetButton.Click += (_, _) => _settings.Change(s => s.ResetDisplay());
         MotionBox.SelectionChanged += (_, _) =>
         {
@@ -90,6 +93,11 @@ public partial class SoundAndDisplayPage : Page
 
         _settings.Changed += Refresh;
         Refresh();
+    }
+
+    void SetProjectName(bool on)
+    {
+        if (on != _settings.Live.ShowProjectName) _settings.Change(s => s.ShowProjectName = on);
     }
 
     void SetSounds(bool on)
@@ -147,6 +155,7 @@ public partial class SoundAndDisplayPage : Page
         SizeSlider.Value = s.Size;
         SizeText.Text = $"{s.Size} px";
         PositionBox.SelectedIndex = PositionIndex(s);
+        ProjectNameSwitch.IsChecked = s.ShowProjectName;
         ResetButton.IsEnabled = !s.HasDefaultDisplay();
 
         bool animations = SystemParameters.ClientAreaAnimation;
@@ -164,6 +173,7 @@ public partial class SoundAndDisplayPage : Page
         VolumeText.Text = $"{s.SoundVolume}%";
 
         Preview.Tool = IconCatalog.Tools[0];
+        Preview.Project = TokenLabel.SampleProject;
         Preview.Show(s);
     }
 

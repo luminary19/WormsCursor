@@ -463,7 +463,7 @@ static class AppearanceTests
         using var renderer = new NotifierRenderer();
         foreach (int size in new[] { 48, 96, 192 })
         {
-            int side = TokenCanvas.Side(size);
+            int side = TokenCanvas.Side(new TokenFootprint(size));
             using var canvas = new Bitmap(side, side, PixelFormat.Format32bppArgb);
             foreach (var icon in IconCatalog.BuiltIns)
                 foreach (bool blocked in new[] { true, false })
@@ -488,27 +488,28 @@ static class AppearanceTests
     public static void Tether()
     {
         const float t = 96f, dt = 1f / 120f;
+        var tok = new TokenFootprint(t);
         foreach (var placement in new[] { NotifierPlacement.BelowPointer, NotifierPlacement.AbovePointer, NotifierPlacement.BesidePointer })
         {
-            var rest = TokenMotion.RestFor(placement, t, 1f, Flip.None);
+            var rest = TokenMotion.RestFor(placement, tok, 1f, Flip.None);
             float len = rest.Length, ux = rest.Dx / len, uy = rest.Dy / len;
 
             // The entrance hops back along the string, then springs out and settles at rest.
             var s = new TetherState();
-            TokenMotion.Step(ref s, 500, 500, rest, t, dt, entrance: true, MotionProfile.Bouncy);
+            TokenMotion.Step(ref s, 500, 500, rest, tok, dt, entrance: true, MotionProfile.Bouncy);
             float along = (s.X - 500) * ux + (s.Y - 500) * uy, across = (s.X - 500) * -uy + (s.Y - 500) * ux;
             True(along < len - 1f && MathF.Abs(across) < 0.01f, $"{placement}: entrance along {along:0.0} (rest {len:0.0}), across {across:0.00}");
             True(s.Vx * ux + s.Vy * uy < 0, $"{placement}: the hop heads back toward the pointer");
             float settled = float.MaxValue;
             for (int i = 1; i < 6 * 120; i++)
             {
-                TokenMotion.Step(ref s, 500, 500, rest, t, dt, entrance: false, MotionProfile.Bouncy);
+                TokenMotion.Step(ref s, 500, 500, rest, tok, dt, entrance: false, MotionProfile.Bouncy);
                 float off = MathF.Max(MathF.Abs(s.X - 500 - rest.Dx), MathF.Abs(s.Y - 500 - rest.Dy));
                 if (off > 1f) settled = float.MaxValue;
                 else if (settled == float.MaxValue) settled = i * dt;
             }
             True(settled <= 2.5f, $"{placement}: within 1 px of rest from {settled:0.00} s");
-            var pose = TokenMotion.Step(ref s, 500, 500, rest, t, dt, false, MotionProfile.Bouncy);
+            var pose = TokenMotion.Step(ref s, 500, 500, rest, tok, dt, false, MotionProfile.Bouncy);
             True(MathF.Abs(pose.SwingDeg) < 0.5f, $"{placement}: upright at rest ({pose.SwingDeg:0.00})");
 
             // The string never stretches past its slack, however the pointer jerks.
@@ -517,7 +518,7 @@ static class AppearanceTests
             for (int i = 0; i < 2000; i++)
             {
                 if (i % 7 == 0) { ax = rng.Next(-3000, 3000); ay = rng.Next(-3000, 3000); }
-                var p = TokenMotion.Step(ref s, ax, ay, rest, t, 0.05f, false, MotionProfile.Bouncy, MotionProfile.Bouncy.MaxSwingFor(placement));
+                var p = TokenMotion.Step(ref s, ax, ay, rest, tok, 0.05f, false, MotionProfile.Bouncy, MotionProfile.Bouncy.MaxSwingFor(placement));
                 float d = MathF.Sqrt((s.X - ax) * (s.X - ax) + (s.Y - ay) * (s.Y - ay));
                 True(d <= maxLen, $"{placement}: string at {d:0.0} > {maxLen:0.0}");
                 True(MathF.Abs(p.SwingDeg) <= TokenMotion.MaxSwingFor(placement) + 0.001f, $"{placement}: tilt clamped, never upside down");
@@ -532,14 +533,14 @@ static class AppearanceTests
             var s = new TetherState();
             var moving = Flip.None;
             var rng = new Random(11);
-            float h = TokenMotion.RestHalfExtent(t), px = 500, py = 400;
+            float h = tok.Half, px = 500, py = 400;
             for (int i = 0; i < 4000; i++)
             {
                 if (i % 9 == 0) { px = rng.Next(2) == 0 ? rng.Next(0, 40) : rng.Next(960, 1000); py = rng.Next(0, 800); }
                 var at = new PointF(px, py);
-                moving = TokenMotion.Edges(moving, at, TokenMotion.RestFor(placement, t, 1f, Flip.None), t, screen);
-                var kept = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, t, 1f, moving), at, t, screen);
-                TokenMotion.Step(ref s, px, py, kept, t, 1f / 60f, i == 0, MotionProfile.Bouncy, 180f, screen);
+                moving = TokenMotion.Edges(moving, at, TokenMotion.RestFor(placement, tok, 1f, Flip.None), tok, screen);
+                var kept = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, tok, 1f, moving), at, tok, screen);
+                TokenMotion.Step(ref s, px, py, kept, tok, 1f / 60f, i == 0, MotionProfile.Bouncy, 180f, screen);
                 True(s.X - h >= -0.01f && s.X + h <= screen.Right + 0.01f && s.Y - h >= -0.01f && s.Y + h <= screen.Bottom + 0.01f,
                     $"{placement} frame {i}: token at {s.X:0},{s.Y:0} crosses the screen edge");
             }
@@ -547,45 +548,45 @@ static class AppearanceTests
 
         // Edges: flip as soon as the token would leave, back only with room to spare.
         var work = new RectangleF(0, 0, 1000, 800);
-        var beside = TokenMotion.RestFor(NotifierPlacement.BesidePointer, t, 1f, Flip.None);
-        Equal(Flip.None, TokenMotion.Edges(Flip.None, new PointF(500, 400), beside, t, work), "beside, mid-screen");
-        Equal(Flip.X, TokenMotion.Edges(Flip.None, new PointF(900, 400), beside, t, work), "beside, right edge");
-        Equal(Flip.Y, TokenMotion.Edges(Flip.None, new PointF(500, 780), beside, t, work), "beside, bottom edge");
-        Equal(Flip.X | Flip.Y, TokenMotion.Edges(Flip.None, new PointF(990, 790), beside, t, work), "beside, bottom-right corner");
-        var above = TokenMotion.RestFor(NotifierPlacement.AbovePointer, t, 1f, Flip.None);
-        Equal(Flip.Y, TokenMotion.Edges(Flip.None, new PointF(500, 40), above, t, work), "above, top edge");
-        Equal(Flip.None, TokenMotion.Edges(Flip.X, new PointF(990, 400), above, t, work), "above never flips sideways");
-        var below = TokenMotion.RestFor(NotifierPlacement.BelowPointer, t, 1f, Flip.None);
-        Equal(Flip.Y, TokenMotion.Edges(Flip.None, new PointF(500, 790), below, t, work), "below, bottom edge");
-        Equal(new TokenMotion.Rest(-beside.Dx, -beside.Dy), TokenMotion.RestFor(NotifierPlacement.BesidePointer, t, 1f, Flip.X | Flip.Y), "mirrored rest");
+        var beside = TokenMotion.RestFor(NotifierPlacement.BesidePointer, tok, 1f, Flip.None);
+        Equal(Flip.None, TokenMotion.Edges(Flip.None, new PointF(500, 400), beside, tok, work), "beside, mid-screen");
+        Equal(Flip.X, TokenMotion.Edges(Flip.None, new PointF(900, 400), beside, tok, work), "beside, right edge");
+        Equal(Flip.Y, TokenMotion.Edges(Flip.None, new PointF(500, 780), beside, tok, work), "beside, bottom edge");
+        Equal(Flip.X | Flip.Y, TokenMotion.Edges(Flip.None, new PointF(990, 790), beside, tok, work), "beside, bottom-right corner");
+        var above = TokenMotion.RestFor(NotifierPlacement.AbovePointer, tok, 1f, Flip.None);
+        Equal(Flip.Y, TokenMotion.Edges(Flip.None, new PointF(500, 40), above, tok, work), "above, top edge");
+        Equal(Flip.None, TokenMotion.Edges(Flip.X, new PointF(990, 400), above, tok, work), "above never flips sideways");
+        var below = TokenMotion.RestFor(NotifierPlacement.BelowPointer, tok, 1f, Flip.None);
+        Equal(Flip.Y, TokenMotion.Edges(Flip.None, new PointF(500, 790), below, tok, work), "below, bottom edge");
+        Equal(new TokenMotion.Rest(-beside.Dx, -beside.Dy), TokenMotion.RestFor(NotifierPlacement.BesidePointer, tok, 1f, Flip.X | Flip.Y), "mirrored rest");
 
         // Parked between "fits" and "room to spare", the choice never flip-flops.
-        float half = TokenMotion.RestHalfExtent(t);
+        float half = tok.Half;
         float fitsUpTo = work.Right - half - beside.Dx, roomyUpTo = fitsUpTo - 0.25f * t;
         float parked = (fitsUpTo + roomyUpTo) / 2f;
-        var flip = TokenMotion.Edges(Flip.None, new PointF(work.Right - 10, 400), beside, t, work);
-        for (int i = 0; i < 10; i++) flip = TokenMotion.Edges(flip, new PointF(parked, 400), beside, t, work);
+        var flip = TokenMotion.Edges(Flip.None, new PointF(work.Right - 10, 400), beside, tok, work);
+        for (int i = 0; i < 10; i++) flip = TokenMotion.Edges(flip, new PointF(parked, 400), beside, tok, work);
         Equal(Flip.X, flip, "stays flipped while parked");
         flip = Flip.None;
-        for (int i = 0; i < 10; i++) flip = TokenMotion.Edges(flip, new PointF(parked, 400), beside, t, work);
+        for (int i = 0; i < 10; i++) flip = TokenMotion.Edges(flip, new PointF(parked, 400), beside, tok, work);
         Equal(Flip.None, flip, "stays unflipped while parked");
-        Equal(Flip.None, TokenMotion.Edges(Flip.X, new PointF(roomyUpTo - 1, 400), beside, t, work), "flips back with room");
+        Equal(Flip.None, TokenMotion.Edges(Flip.X, new PointF(roomyUpTo - 1, 400), beside, tok, work), "flips back with room");
 
         // Where mirroring can't help (below the pointer at a side edge, any rest in a corner), the rest
         // slides along the edge so a token resting there stays on screen, and stays upright.
         foreach (var placement in new[] { NotifierPlacement.BelowPointer, NotifierPlacement.AbovePointer, NotifierPlacement.BesidePointer })
             foreach (var at in new[] { new PointF(0, 0), new PointF(999, 0), new PointF(0, 799), new PointF(999, 799), new PointF(500, 0), new PointF(999, 400) })
             {
-                var plain = TokenMotion.RestFor(placement, t, 1f, Flip.None);
-                var kept = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, t, 1f, TokenMotion.Edges(Flip.None, at, plain, t, work)), at, t, work);
-                float cx = at.X + kept.Dx, cy = at.Y + kept.Dy, h = TokenMotion.RestHalfExtent(t);
+                var plain = TokenMotion.RestFor(placement, tok, 1f, Flip.None);
+                var kept = TokenMotion.KeepOnScreen(TokenMotion.RestFor(placement, tok, 1f, TokenMotion.Edges(Flip.None, at, plain, tok, work)), at, tok, work);
+                float cx = at.X + kept.Dx, cy = at.Y + kept.Dy, h = tok.Half;
                 True(cx - h >= work.Left - 0.01f && cx + h <= work.Right + 0.01f && cy - h >= work.Top - 0.01f && cy + h <= work.Bottom + 0.01f,
                     $"{placement} at {at}: resting token at {cx:0},{cy:0} leaves the work area");
                 var s = new TetherState();
-                for (int i = 0; i < 600; i++) TokenMotion.Step(ref s, at.X, at.Y, kept, t, dt, false, MotionProfile.Bouncy);
-                True(MathF.Abs(TokenMotion.Step(ref s, at.X, at.Y, kept, t, dt, false, MotionProfile.Bouncy).SwingDeg) < 0.5f, $"{placement} at {at}: upright at rest");
+                for (int i = 0; i < 600; i++) TokenMotion.Step(ref s, at.X, at.Y, kept, tok, dt, false, MotionProfile.Bouncy);
+                True(MathF.Abs(TokenMotion.Step(ref s, at.X, at.Y, kept, tok, dt, false, MotionProfile.Bouncy).SwingDeg) < 0.5f, $"{placement} at {at}: upright at rest");
             }
-        var untouched = TokenMotion.KeepOnScreen(below, new PointF(500, 400), t, work);
+        var untouched = TokenMotion.KeepOnScreen(below, new PointF(500, 400), tok, work);
         True(MathF.Abs(untouched.Dx - below.Dx) < 1e-3f && MathF.Abs(untouched.Dy - below.Dy) < 1e-3f, "mid-screen rest untouched");
 
         // Bouncy's corner bounce is the original one.
@@ -601,13 +602,14 @@ static class AppearanceTests
     static (float Settled, float Overshoot, float Hop, float MaxTilt) Measure(MotionProfile motion, NotifierPlacement placement)
     {
         const float t = 96f, dt = 1f / 120f;
-        var rest = TokenMotion.RestFor(placement, t, 1f, Flip.None);
+        var tok = new TokenFootprint(t);
+        var rest = TokenMotion.RestFor(placement, tok, 1f, Flip.None);
         float len = rest.Length, ux = rest.Dx / len, uy = rest.Dy / len;
         var s = new TetherState();
         float settled = 0f, overshoot = 0f, hop = 0f;
         for (int i = 0; i < 6 * 120; i++)
         {
-            TokenMotion.Step(ref s, 500, 500, rest, t, dt, entrance: true, motion);
+            TokenMotion.Step(ref s, 500, 500, rest, tok, dt, entrance: true, motion);
             float along = (s.X - 500) * ux + (s.Y - 500) * uy;
             overshoot = MathF.Max(overshoot, along - len);
             hop = MathF.Max(hop, len - along);
@@ -619,7 +621,7 @@ static class AppearanceTests
         for (int i = 0; i < 2000; i++)
         {
             if (i % 7 == 0) { ax = rng.Next(-1500, 1500); ay = rng.Next(-1500, 1500); }
-            tilt = MathF.Max(tilt, MathF.Abs(TokenMotion.Step(ref s, ax, ay, rest, t, 0.05f, false, motion, motion.MaxSwingFor(placement)).SwingDeg));
+            tilt = MathF.Max(tilt, MathF.Abs(TokenMotion.Step(ref s, ax, ay, rest, tok, 0.05f, false, motion, motion.MaxSwingFor(placement)).SwingDeg));
         }
         return (settled, overshoot, hop, tilt);
     }
@@ -627,6 +629,7 @@ static class AppearanceTests
     public static void MotionPresets()
     {
         const float t = 96f;
+        var tok = new TokenFootprint(t);
         // Windows' animation effects off makes every style Still; on, each is itself.
         foreach (var style in Enum.GetValues<MotionStyle>())
         {
@@ -661,11 +664,11 @@ static class AppearanceTests
         }
 
         // Still follows the pointer exactly: every frame the token is at pointer + rest, upright.
-        var rest = TokenMotion.RestFor(NotifierPlacement.BesidePointer, t, 1f, Flip.None);
+        var rest = TokenMotion.RestFor(NotifierPlacement.BesidePointer, tok, 1f, Flip.None);
         var s = new TetherState();
         foreach (var (x, y) in new[] { (100f, 100f), (900f, 50f), (300f, 700f) })
         {
-            var pose = TokenMotion.Step(ref s, x, y, rest, t, 0.016f, entrance: true, MotionProfile.Still);
+            var pose = TokenMotion.Step(ref s, x, y, rest, tok, 0.016f, entrance: true, MotionProfile.Still);
             True(MathF.Abs(pose.OffsetX - rest.Dx) < 1e-3f && MathF.Abs(pose.OffsetY - rest.Dy) < 1e-3f && pose.SwingDeg == 0f,
                 $"Still at {x},{y}: {pose}, rest {rest}");
         }

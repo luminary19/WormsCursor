@@ -390,16 +390,22 @@ static class AnalyticsTests
             using var history = new WaitHistory(dir, () => T0);
             var activity = new AgentActivity(TimeSpan.FromSeconds(60));
             activity.WaitEnded += history.Record;
-            activity.Report("codex", "s", "C:\\secret\\project", AgentEventKind.AwaitingUser, T0.AddMinutes(-10));
-            activity.Report("codex", "s", "C:\\secret\\project", AgentEventKind.ThinkingStarted, T0.AddMinutes(-10).AddSeconds(12));
-            activity.Report("codex", "s", "C:\\secret\\project", AgentEventKind.TurnComplete, T0.AddMinutes(-9));
+            var records = new List<WaitRecord>();
+            activity.WaitEnded += records.Add;
+            activity.Report("codex", "s", "C:\\secret\\hushproject", AgentEventKind.AwaitingUser, T0.AddMinutes(-10));
+            Equal("hushproject", activity.Waiting.Single().Project, "the token's label knows the project");
+            activity.Report("codex", "s", "C:\\secret\\hushproject", AgentEventKind.ThinkingStarted, T0.AddMinutes(-10).AddSeconds(12));
+            activity.Report("codex", "s", "C:\\secret\\hushproject", AgentEventKind.TurnComplete, T0.AddMinutes(-9));
             activity.EndAll(T0.AddMinutes(-8));
+            // A record has no field that could hold it: the tool, the state, the times and the outcome only.
+            Equal("Tool,Kind,StartUtc,EndUtc,Outcome,Duration", string.Join(',', typeof(WaitRecord).GetProperties().Select(p => p.Name)), "record fields");
+            True(records.Count == 2 && records.All(r => !r.ToString().Contains("hush")), "no record names the project");
             True(history.Flush(TimeSpan.FromSeconds(5)), "flushed");
             var s = ActivityStats.Summarize(history.Load(), T0, Utc);
             Equal(2, s.RecentTotal, "two waits");
             Equal(TimeSpan.FromSeconds(12), s.TypicalResponse, "the answered one");
             string text = string.Concat(Directory.GetFiles(dir).Select(File.ReadAllText));
-            True(!text.Contains("secret") && !text.Contains("\"s\"") && !text.Contains("codex:s"), "no project, path or session id on disk");
+            True(!text.Contains("secret") && !text.Contains("hush") && !text.Contains("\"s\"") && !text.Contains("codex:s"), "no project, path or session id on disk");
         }
         finally { Directory.Delete(dir, true); }
     }
