@@ -4,7 +4,7 @@ Notable changes to AgentsCursor (called WormsCursor up to 0.8.2). Roughly follow
 [Keep a Changelog](https://keepachangelog.com/); version numbers match the git tags and
 GitHub releases. The release workflow pulls the matching section into each release's notes.
 
-## Unreleased
+## 0.9.0 - 2026-11-10
 
 ### Added
 - **The project's name under the token.** A small label under the logo now says which project the
@@ -44,8 +44,8 @@ GitHub releases. The release workflow pulls the matching section into each relea
 - **Sounds, if you want them.** **Play sounds** on the **Sound and Display** page plays a short, soft
   chime when an agent starts waiting on you: one for **Needs you**, another for **Done**, each picked
   from four built-in chimes (or none), with a play button to hear it and its own **Volume** (the system
-  volume is left alone). Off by default. A burst of agents finishing together is one chime, and no
-  chime plays while the token is hidden.
+  volume is left alone). Off by default. A burst of agents finishing together is one chime (a Needs
+  you right after a Done still plays), and no chime plays while the token is hidden.
 - **Calmer motion.** **Motion** on the **Sound and Display** page picks how the token moves:
   **Bouncy** (as before), **Calm** (a softer spring, half the swing and hop) or **Still** (it just
   follows the pointer, or sits in its corner). With Windows' animation effects off it is always Still.
